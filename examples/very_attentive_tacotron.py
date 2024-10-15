@@ -86,16 +86,19 @@ def SmallT5TTSDecoder() -> sl.SequenceLayer:
   decoder_block_hidden_dim = (
       decoder_block_num_heads * decoder_block_units_per_head
   )
-  return t5.T5Decoder(
-      source_name='text_encoder_top',
-      vocab_size=256,
-      num_layers=6,
-      dimension=decoder_block_hidden_dim,
-      num_heads=decoder_block_num_heads,
-      ffn_dimension=decoder_block_hidden_dim * 4,
-      ffn_activation=tf.nn.gelu,
-      dropout_rate=0.1,
-      max_past_horizon=128,
+  return T5TTSDecoder(
+      config=T5TTSDecoderConfig(
+          name='t5_tts_decoder',
+          source_name='text_encoder_top',
+          num_codebooks=8,
+          codebook_size=256,
+          num_decoder_blocks=6,
+          num_heads=decoder_block_num_heads,
+          units_per_head=decoder_block_units_per_head,
+          ffn_dimension=decoder_block_hidden_dim * 4,
+          dropout_rate=0.1,
+          max_past_horizon=128,
+      ),
   )
 
 
@@ -110,6 +113,10 @@ def SmallVATDecoder() -> sl.SequenceLayer:
           name='very_attentive_decoder',
           source_name='text_encoder_top',
           alignment_layer=AlignmentLayerConfig(alignment_rnn_units=96),
+          num_codebooks=8,
+          codebook_size=256,
+          num_decoder_blocks=6,
+          dropout_rate=0.1,
           decoder_block=DecoderBlockConfig(
               alignment_rnn_units=96,
               num_heads=decoder_block_num_heads,
@@ -127,16 +134,19 @@ def LargeT5TTSDecoder() -> sl.SequenceLayer:
   decoder_block_hidden_dim = (
       decoder_block_num_heads * decoder_block_units_per_head
   )
-  return t5.T5Decoder(
-      source_name='text_encoder_top',
-      vocab_size=256,
-      num_layers=6,
-      dimension=decoder_block_hidden_dim,
-      num_heads=decoder_block_num_heads,
-      ffn_dimension=decoder_block_hidden_dim * 4,
-      ffn_activation=tf.nn.gelu,
-      dropout_rate=0.1,
-      max_past_horizon=128,
+  return T5TTSDecoder(
+      config=T5TTSDecoderConfig(
+          name='t5_tts_decoder',
+          source_name='text_encoder_top',
+          num_codebooks=8,
+          codebook_size=256,
+          num_decoder_blocks=6,
+          num_heads=decoder_block_num_heads,
+          units_per_head=decoder_block_units_per_head,
+          ffn_dimension=decoder_block_hidden_dim * 4,
+          dropout_rate=0.1,
+          max_past_horizon=128,
+      ),
   )
 
 
@@ -151,6 +161,10 @@ def LargeVATDecoder() -> sl.SequenceLayer:
           name='very_attentive_decoder',
           source_name='text_encoder_top',
           alignment_layer=AlignmentLayerConfig(alignment_rnn_units=256),
+          num_codebooks=8,
+          codebook_size=256,
+          num_decoder_blocks=6,
+          dropout_rate=0.1,
           decoder_block=DecoderBlockConfig(
               alignment_rnn_units=96,
               num_heads=decoder_block_num_heads,
@@ -1454,13 +1468,13 @@ class VATDecoderConfig:
   # Configuration for the decoder block stack.
   decoder_block: DecoderBlockConfig
   # The number of VQ codebooks.
-  num_codebooks: int = 8
+  num_codebooks: int
   # The per-codebook vocabulary size.
-  codebook_size: int = 256
+  codebook_size: int
   # Number of decoder blocks in the decoder block stack.
-  num_decoder_blocks: int = 6
+  num_decoder_blocks: int
   # Dropout rate for the decoder.
-  dropout_rate: float = 0.1
+  dropout_rate: float
 
 
 # ------------------------------------------------------------------------------
@@ -1489,6 +1503,7 @@ class VATDecoder(sl.Emitting, PreprocessConstants):
 
   def _build(self, config):
     with tf.name_scope('prenet'):
+      # Embed each codebook with a unique embedding.
       self.prenet = sl.Serial([
           sl.OneHot(depth=config.codebook_size),
           sl.EinsumDense(
@@ -1663,4 +1678,87 @@ class VATDecoder(sl.Emitting, PreprocessConstants):
             ),
             tf.TensorSpec(tf.TensorShape([]), sl.MASK_DTYPE),
         )
+    )
+
+
+# ------------------------------------------------------------------------------
+# T5 TTS decoder.
+# ------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class T5TTSDecoderConfig:
+  """Configuration for T5TTSDecoder."""
+
+  name: str | None
+  # The name of the source sequence to use for cross-attention, e.g.
+  # 'text_encoder_top'.
+  source_name: str
+  # The number of VQ codebooks.
+  num_codebooks: int
+  # The per-codebook vocabulary size.
+  codebook_size: int
+  # Number of decoder blocks in the decoder block stack.
+  num_decoder_blocks: int
+  # Number of attention heads per self attention layer.
+  num_heads: int
+  # Number of units per attention head.
+  units_per_head: int
+  # The hidden dimension of the FFN layer.
+  ffn_dimension: int
+  # Maximum past horizon for self attention.
+  max_past_horizon: int
+  # Dropout rate for the decoder.
+  dropout_rate: float
+
+
+class T5TTSDecoder(sl.Serial):
+  """A T5-based TTS decoder."""
+
+  def __init__(self, config: T5TTSDecoderConfig):
+    """Construct T5TTSDecoder."""
+    hidden_dim = config.units_per_head * config.num_heads
+
+    layers = [
+        # Embed each codebook with a unique embedding.
+        sl.Serial([
+            sl.OneHot(depth=config.codebook_size),
+            sl.EinsumDense(
+                equation='...GC,GCE->...GE',
+                output_shape=[
+                    config.num_codebooks,
+                    int(hidden_dim / config.num_codebooks),
+                ],
+                kernel_initializer=tf.keras.initializers.RandomUniform(),
+                name='target_codebooks',
+            ),
+            sl.Flatten(),
+        ]),
+        *[
+            t5.T5DecoderBlock(
+                name=f'layer{i:02d}',
+                dimension=hidden_dim,
+                num_heads=config.num_heads,
+                units_per_head=config.units_per_head,
+                dropout_rate=config.dropout_rate,
+                source_name=config.source_name,
+                max_past_horizon=config.max_past_horizon,
+                ffn_dimension=config.ffn_dimension,
+                ffn_activation=tf.nn.gelu,
+                relative_position_embedding=sl.T5RelativePositionEmbedding(
+                    num_buckets=32,
+                    num_heads=config.num_heads,
+                    bidirectional=False,
+                    max_distance=config.max_past_horizon,
+                ),
+            )
+            for i in range(config.num_decoder_blocks)
+        ],
+        sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+        sl.Dropout(rate=config.dropout_rate, noise_shape=[None, 1, None]),
+    ]
+
+    super().__init__(
+        layers,
+        name=config.name or None,
     )

@@ -132,14 +132,52 @@ def T5Encoder(
   with tf.name_scope(name or 't5_encoder'):
     return sl.Serial([
         sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
-        sl.Serial(
-            [
-                EncoderBlock(name=f'layer{layer_i:02d}')
-                for layer_i in range(num_layers)
-            ]
-        ),
+        sl.Serial([
+            EncoderBlock(name=f'layer{layer_i:02d}')
+            for layer_i in range(num_layers)
+        ]),
         sl.RMSNormalization(epsilon=1e-6),
         sl.Dropout(dropout_rate),
+    ])
+
+
+def T5DecoderBlock(
+    name: str,
+    dimension: int,
+    num_heads: int,
+    units_per_head: int,
+    dropout_rate: float,
+    source_name: str,
+    max_past_horizon: int,
+    ffn_dimension: int,
+    ffn_activation: ...,
+    relative_position_embedding: sl.RelativePositionEmbedding,
+) -> sl.SequenceLayer:
+  """Construct a T5 decoder block (self attention, cross attention, FFN)."""
+  with tf.name_scope(name):
+    return sl.Serial([
+        SelfAttention(
+            dimension=dimension,
+            num_heads=num_heads,
+            units_per_head=units_per_head,
+            dropout_rate=dropout_rate,
+            relative_position_embedding=relative_position_embedding,
+            max_past_horizon=max_past_horizon,
+            max_future_horizon=0,
+        ),
+        CrossAttention(
+            source_name=source_name,
+            dimension=dimension,
+            num_heads=num_heads,
+            units_per_head=units_per_head,
+            dropout_rate=dropout_rate,
+        ),
+        FFN(
+            dimension=dimension,
+            hidden_dimension=ffn_dimension,
+            activation=ffn_activation,
+            dropout_rate=dropout_rate,
+        ),
     ])
 
 
@@ -163,42 +201,24 @@ def T5Decoder(
       num_buckets=32, num_heads=num_heads, bidirectional=False, max_distance=128
   )
 
-  def DecoderBlock(name):
-    with tf.name_scope(name):
-      return sl.Serial([
-          SelfAttention(
-              dimension=dimension,
-              num_heads=num_heads,
-              units_per_head=units_per_head,
-              dropout_rate=dropout_rate,
-              relative_position_embedding=shared_relative_position_embedding,
-              max_past_horizon=max_past_horizon,
-              max_future_horizon=0,
-          ),
-          CrossAttention(
-              source_name=source_name,
-              dimension=dimension,
-              num_heads=num_heads,
-              units_per_head=units_per_head,
-              dropout_rate=dropout_rate,
-          ),
-          FFN(
-              dimension=dimension,
-              hidden_dimension=ffn_dimension,
-              activation=ffn_activation,
-              dropout_rate=dropout_rate,
-          ),
-      ])
-
   with tf.name_scope(name or 'transformer_decoder'):
     return sl.Serial([
         sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
-        sl.Serial(
-            [
-                DecoderBlock(name=f'layer{layer_i:02d}')
-                for layer_i in range(num_layers)
-            ]
-        ),
+        sl.Serial([
+            T5DecoderBlock(
+                name=f'layer{layer_i:02d}',
+                dimension=dimension,
+                num_heads=num_heads,
+                units_per_head=units_per_head,
+                dropout_rate=dropout_rate,
+                source_name=source_name,
+                max_past_horizon=max_past_horizon,
+                ffn_dimension=ffn_dimension,
+                ffn_activation=ffn_activation,
+                relative_position_embedding=shared_relative_position_embedding,
+            )
+            for layer_i in range(num_layers)
+        ]),
         sl.RMSNormalization(epsilon=1e-6),
         sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
         sl.Dense(vocab_size, name='to_logits'),
