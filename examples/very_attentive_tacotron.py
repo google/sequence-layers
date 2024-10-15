@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 """Implements the decoder layer of Very Attentive Tacotron.
 
 Very Attentive Tacotron:
@@ -19,15 +20,14 @@ Robust Length Generalization in Transformer-based Text-to-Speech.
 """
 
 
-from collections import abc
+import abc
 import dataclasses
 import functools
 import math
-from typing import Sequence
 
 import numpy as np
 from sequence_layers import tensorflow as sl
-from sequence_layers.tensorflow import proto as slp
+from sequence_layers.examples import t5
 from sequence_layers.tensorflow import utils
 import tensorflow.compat.v2 as tf
 
@@ -40,6 +40,172 @@ LOG_EPS = 1e-16
 ALIGNMENT_POSITION = 'alignment_position'
 
 
+# ------------------------------------------------------------------------------
+# Text encoder configurations.
+# ------------------------------------------------------------------------------
+
+
+def SmallT5TTSTextEncoder() -> sl.SequenceLayer:
+  return TextEncoder(
+      dimension=192,
+      use_irpbs=False,
+      name='small_t5_tts_text_encoder',
+  )
+
+
+def SmallVATTextEncoder() -> sl.SequenceLayer:
+  return TextEncoder(
+      dimension=192,
+      use_irpbs=True,
+      name='small_vat_text_encoder',
+  )
+
+
+def LargeT5TTSTextEncoder() -> sl.SequenceLayer:
+  return TextEncoder(
+      dimension=512,
+      use_irpbs=False,
+      name='large_t5_tts_text_encoder',
+  )
+
+
+def LargeVATTextEncoder() -> sl.SequenceLayer:
+  return TextEncoder(
+      dimension=512,
+      use_irpbs=True,
+      name='large_vat_text_encoder',
+  )
+
+
+# ------------------------------------------------------------------------------
+# Decoder configurations.
+# ------------------------------------------------------------------------------
+def SmallT5TTSDecoder() -> sl.SequenceLayer:
+  decoder_block_num_heads = 8
+  decoder_block_units_per_head = 48
+  decoder_block_hidden_dim = (
+      decoder_block_num_heads * decoder_block_units_per_head
+  )
+  return t5.T5Decoder(
+      source_name='text_encoder_top',
+      vocab_size=256,
+      num_layers=6,
+      dimension=decoder_block_hidden_dim,
+      num_heads=decoder_block_num_heads,
+      ffn_dimension=decoder_block_hidden_dim * 4,
+      ffn_activation=tf.nn.gelu,
+      dropout_rate=0.1,
+      max_past_horizon=128,
+  )
+
+
+def SmallVATDecoder() -> sl.SequenceLayer:
+  decoder_block_num_heads = 8
+  decoder_block_units_per_head = 48
+  decoder_block_hidden_dim = (
+      decoder_block_num_heads * decoder_block_units_per_head
+  )
+  return VATDecoder(
+      config=VATDecoderConfig(
+          name='very_attentive_decoder',
+          source_name='text_encoder_top',
+          alignment_layer=AlignmentLayerConfig(alignment_rnn_units=96),
+          decoder_block=DecoderBlockConfig(
+              alignment_rnn_units=96,
+              num_heads=decoder_block_num_heads,
+              units_per_head=decoder_block_units_per_head,
+              hidden_dim=decoder_block_hidden_dim,
+              feedforward_hidden_dim=decoder_block_hidden_dim * 4,
+          ),
+      ),
+  )
+
+
+def LargeT5TTSDecoder() -> sl.SequenceLayer:
+  decoder_block_num_heads = 16
+  decoder_block_units_per_head = 64
+  decoder_block_hidden_dim = (
+      decoder_block_num_heads * decoder_block_units_per_head
+  )
+  return t5.T5Decoder(
+      source_name='text_encoder_top',
+      vocab_size=256,
+      num_layers=6,
+      dimension=decoder_block_hidden_dim,
+      num_heads=decoder_block_num_heads,
+      ffn_dimension=decoder_block_hidden_dim * 4,
+      ffn_activation=tf.nn.gelu,
+      dropout_rate=0.1,
+      max_past_horizon=128,
+  )
+
+
+def LargeVATDecoder() -> sl.SequenceLayer:
+  decoder_block_num_heads = 16
+  decoder_block_units_per_head = 64
+  decoder_block_hidden_dim = (
+      decoder_block_num_heads * decoder_block_units_per_head
+  )
+  return VATDecoder(
+      config=VATDecoderConfig(
+          name='very_attentive_decoder',
+          source_name='text_encoder_top',
+          alignment_layer=AlignmentLayerConfig(alignment_rnn_units=256),
+          decoder_block=DecoderBlockConfig(
+              alignment_rnn_units=96,
+              num_heads=decoder_block_num_heads,
+              units_per_head=decoder_block_units_per_head,
+              hidden_dim=decoder_block_hidden_dim,
+              feedforward_hidden_dim=decoder_block_hidden_dim * 4,
+          ),
+      ),
+  )
+
+
+class PreprocessConstants(abc.ABC):
+  """sl.SequenceLayer mix-in for preprocess_constants support."""
+
+  @abc.abstractmethod
+  def preprocess_constants(self, constants: sl.Constants) -> None:  # pylint: disable=invalid-name
+    """Preprocess constants and stash resulting Tensors internally.
+
+    This method allows a SequenceLayer to precompute and stash constant-derived
+    values so they don't need to be recomputed on each call to step.
+
+    Args:
+      constants: Constants to preprocess.
+    """
+
+  @abc.abstractmethod
+  def clear_preprocessed_constants(self) -> None:  # pylint: disable=invalid-name
+    """Clear preprocessed constants.
+
+    This method should remove any internally stashed preprocessed constants when
+    they are no longer needed in the current graph (or tf.function). This is to
+    prevent Tensors from crossing from one graph to another (which results in
+    an error.)
+    """
+
+
+def FeedForwardBlock(
+    hidden_dim: int,
+    output_dim: int,
+    activation: ...,
+    dropout_rate: float,
+) -> sl.SequenceLayer:
+  """T5-style feed-forward block."""
+  return sl.Residual([
+      sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+      sl.Dense(hidden_dim, use_bias=False, activation=activation),
+      sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
+      sl.Dense(output_dim, use_bias=False, name='dense'),
+      sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
+  ])
+
+
+# ------------------------------------------------------------------------------
+# Relative position embedding helper classes.
+# ------------------------------------------------------------------------------
 @dataclasses.dataclass
 class InterpolatedRelativePositionBiasesConfig:
   """Configuration for InterpolatedRelativePositionBiases."""
@@ -68,43 +234,15 @@ class InterpolatedRelativePositionBiasesConfig:
   init_scheme_value: float
 
 
-class PreprocessConstants(abc.ABC):
-  """sl.SequenceLayer mix-in for preprocess_constants support."""
+@dataclasses.dataclass
+class T5RelativePositionEmbeddingConfig:
+  """Configuration for sl.T5RelativePositionEmbedding."""
 
-  @abc.abstractmethod
-  def preprocess_constants(self, constants: sl.Constants) -> None:
-    """Preprocess constants and stash resulting Tensors internally.
-
-    This method allows a SequenceLayer to precompute and stash constant-derived
-    values so they don't need to be recomputed on each call to step.
-
-    Args:
-      constants: Constants to preprocess.
-    """
-
-  @abc.abstractmethod
-  def clear_preprocessed_constants(self) -> None:
-    """Clear preprocessed constants.
-
-    This method should remove any internally stashed preprocessed constants when
-    they are no longer needed in the current graph (or tf.function). This is to
-    prevent Tensors from crossing from one graph to another (which results in
-    an error.)
-    """
-
-
-class SequenceLayerBlock(sl.Serial):
-  """Small hack to allow underlying layers to share the common namescope."""
-
-  def __init__(self, name: str | None = None):
-    super().__init__(layers=[], name=name)
-
-  def _set_layers(self, layers: Sequence[sl.SequenceLayer]):
-    """Call this at the end of the child constructor."""
-    if self._layers:
-      raise ValueError('layers has already been set.')
-    # Copy the list.
-    self._layers = layers[:]
+  # Number of buckets to use for the relative position bias matrix.
+  num_buckets: int
+  # Maximum relative distance to support. All distances above this value are
+  # mapped to the same bucket.
+  max_distance: int
 
 
 class GaussianWindowBiasInitializer(tf.keras.initializers.Initializer):
@@ -445,26 +583,218 @@ class InterpolatedRelativePositionBiases(sl.RelativePositionEmbedding):
     return values
 
 
-def _inverse_softplus(x: tf.Tensor) -> tf.Tensor:
-  return np.log(np.exp(x) - 1.0)
+# ------------------------------------------------------------------------------
+# Text encoder helper classes.
+# ------------------------------------------------------------------------------
+def ConvStage(
+    num_blocks: int,
+    strides: int,
+    num_filters: int = 256,
+    kernel_size: int = 3,
+    output_dim: int = 256,
+    dropout_rate: float = 0.1,
+    name: str = 'conv_stage',
+) -> sl.SequenceLayer:
+  """A sequence of N Conv1D residual blocks plus a final rms_norm + dropout."""
+
+  def ConvBlock(block_ind):
+    return sl.Residual(
+        [
+            sl.RMSNormalization(epsilon=1e-6, name='rms_norm'),
+            sl.Conv1D(
+                filters=num_filters,
+                kernel_size=kernel_size,
+                dilation_rate=1,
+                padding='same',
+                activation=tf.nn.gelu,
+                name='conv_layer',
+            ),
+            sl.Dropout(dropout_rate, noise_shape=[-1, 1, -1]),
+            sl.Dense(units=output_dim, use_bias=False, name='output_layer'),
+            sl.Dropout(dropout_rate, noise_shape=[-1, 1, -1]),
+        ],
+        name=f'residual_block_{block_ind:02d}',
+    )
+
+  return sl.Serial(
+      [
+          sl.Conv1D(
+              filters=num_filters,
+              kernel_size=3,
+              strides=strides,
+              padding='same',
+              name='downsample_conv',
+          )
+      ]
+      + [ConvBlock(block_ind) for block_ind in range(num_blocks)]
+      + [
+          sl.RMSNormalization(epsilon=1e-6, name='rms_norm'),
+          sl.Dropout(dropout_rate, noise_shape=[-1, 1, -1]),
+      ],
+      name=name,
+  )
 
 
+def SelfAttentionBlock(
+    output_dim: int,
+    num_heads: int,
+    units_per_head: int,
+    max_horizon: int,
+    max_future_horizon: int,
+    relative_position_embedding: (
+        InterpolatedRelativePositionBiases | sl.T5RelativePositionEmbedding
+    ),
+    dropout_rate: float,
+) -> sl.SequenceLayer:
+  """Self-attention with relative position biases (interpolated or not)."""
+  return sl.Residual([
+      sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+      sl.DotProductSelfAttention(
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          max_horizon=max_horizon,
+          max_future_horizon=max_future_horizon,
+          use_relative_position_embedding=True,
+          relative_position_embedding=relative_position_embedding,
+          attention_probabilities_dropout_rate=dropout_rate,
+          broadcast_dropout_across_queries=True,
+          use_bias=False,
+          name='dot_product_self_attention',
+      ),
+      sl.Flatten(),
+      sl.Dense(output_dim, use_bias=False, name='dense'),
+      sl.Dropout(dropout_rate, noise_shape=[None, 1, None]),
+  ])
+
+
+def TransformerEncoderBlock(
+    dimension: int,
+    num_heads: int,
+    units_per_head: int,
+    position_embeddings_config: (
+        InterpolatedRelativePositionBiasesConfig
+        | T5RelativePositionEmbeddingConfig
+    ),
+    ffn_activation: ... = tf.nn.gelu,
+    dropout_rate: float = 0.1,
+) -> sl.SequenceLayer:
+  """Self-attention, cross-attention, feed-forward encoder block."""
+
+  if isinstance(
+      position_embeddings_config, InterpolatedRelativePositionBiasesConfig
+  ):
+    position_embeddings = InterpolatedRelativePositionBiases.from_config(
+        bidirectional=True,
+        num_heads=num_heads,
+        config=position_embeddings_config,
+    )
+  else:
+    position_embeddings = sl.T5RelativePositionEmbedding(
+        num_buckets=position_embeddings_config.num_buckets,
+        num_heads=num_heads,
+        bidirectional=True,
+        max_distance=position_embeddings_config.max_distance,
+    )
+  return sl.Serial([
+      SelfAttentionBlock(
+          output_dim=dimension,
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          relative_position_embedding=position_embeddings,
+          max_horizon=-1,
+          max_future_horizon=-1,
+          dropout_rate=dropout_rate,
+      ),
+      FeedForwardBlock(
+          output_dim=dimension,
+          hidden_dim=dimension * 4,
+          activation=ffn_activation,
+          dropout_rate=dropout_rate,
+      ),
+  ])
+
+
+# ------------------------------------------------------------------------------
+# Text encoder base class.
+# ------------------------------------------------------------------------------
+def TextEncoder(
+    dimension: int,
+    use_irpbs: bool,
+    num_layers: int = 3,
+    max_distance: int = 64,
+    num_heads: int = 8,
+    num_buckets: int = 32,
+    ffn_activation: ... = tf.nn.gelu,
+    dropout_rate: float = 0.1,
+    name: str | None = None,
+) -> sl.SequenceLayer:
+  """Builds a hybrid text encoder, with or without relative position biases."""
+  assert dimension % num_heads == 0
+  units_per_head = dimension // num_heads
+
+  if use_irpbs:
+    position_embeddings_config = InterpolatedRelativePositionBiasesConfig(
+        num_buckets=num_buckets,
+        max_distance=max_distance,
+        max_distance_penalty=0.0,
+        init_scheme='truncated_normal_stddev',
+        init_scheme_value=1.0,
+    )
+  else:
+    position_embeddings_config = T5RelativePositionEmbeddingConfig(
+        num_buckets=num_buckets,
+        max_distance=max_distance,
+    )
+
+  with tf.name_scope(name or 't5_encoder'):
+    return sl.Serial([
+        ConvStage(
+            num_blocks=3,
+            num_filters=int(dimension / 2),
+            strides=1,
+            output_dim=int(dimension / 2),
+        ),
+        ConvStage(
+            num_blocks=3,
+            num_filters=dimension,
+            strides=2,
+            output_dim=dimension,
+        ),
+        sl.Serial([
+            TransformerEncoderBlock(
+                dimension=dimension,
+                num_heads=num_heads,
+                units_per_head=units_per_head,
+                position_embeddings_config=position_embeddings_config,
+                ffn_activation=ffn_activation,
+                dropout_rate=dropout_rate,
+            )
+            for _ in range(num_layers)
+        ]),
+        sl.RMSNormalization(epsilon=1e-6),
+        sl.Dropout(dropout_rate),
+    ])
+
+
+# ------------------------------------------------------------------------------
+# VAT decoder helper classes.
+# ------------------------------------------------------------------------------
 @dataclasses.dataclass
 class AlignmentLayerConfig:
   """Configuration for AlignmentLayer."""
 
+  # Number of RNN units for the alignment LSTM sublayer.
+  alignment_rnn_units: int
+  # Number of heads used in location-based cross-attention.
+  num_heads: int = 4
+  # Number of units per head used in location-based cross-attention.
+  units_per_head: int = 32
   # Initial delta for the alignment position.
   initial_delta: float = 0.25
-  # Number of RNN units for the alignment LSTM sublayer.
-  alignment_rnn_units: int = 96
-  # Number of heads for the alignment sublayer.
-  num_heads: int = 4
-  # Number of units per head for the alignment sublayer.
-  head_dim: int = 32
   # Configuration for the cross-attention bias.
   cross_attention_bias: InterpolatedRelativePositionBiasesConfig = (
       dataclasses.field(
-          default_factory=InterpolatedRelativePositionBiasesConfig(
+          default_factory=lambda: InterpolatedRelativePositionBiasesConfig(
               num_buckets=32,
               max_distance=128,
               max_distance_penalty=0.0,
@@ -473,8 +803,6 @@ class AlignmentLayerConfig:
           )
       )
   )
-  # Scale factor for alignment position output.
-  output_scale: float = 1.0
 
 
 class AlignmentLayer(sl.Emitting, PreprocessConstants):
@@ -514,15 +842,18 @@ class AlignmentLayer(sl.Emitting, PreprocessConstants):
     self.config = config
     self.source_name = source_name
     self.num_heads = config.num_heads
-    self.head_dim = config.head_dim
+    self.units_per_head = config.units_per_head
 
     # This is set by preprocess_constants().
     self._source_head_values = None
 
+    def _inverse_softplus(x: tf.Tensor) -> tf.Tensor:  # pylint: disable=invalid-name
+      return np.log(np.exp(x) - 1.0)
+
     with self.name_scope:
       # Source value-projection for cross-attention.
       self.source_value_projection = tf.keras.layers.Dense(
-          units=config.num_heads * config.head_dim,
+          units=config.num_heads * config.units_per_head,
           use_bias=False,
           name='source_value_projection',
       )
@@ -533,8 +864,7 @@ class AlignmentLayer(sl.Emitting, PreprocessConstants):
           config=config.cross_attention_bias,
       )
       self.sublayer = sl.RNN(
-          tf.keras.layers.LSTMCell(config.alignment_rnn_units),
-          default_to_identity=True,
+          tf.keras.layers.LSTMCell(config.alignment_rnn_units)
       )
       # Compute initial bias from initial_delta using inverse softplus.
       if config.initial_delta <= 0.0:
@@ -558,7 +888,7 @@ class AlignmentLayer(sl.Emitting, PreprocessConstants):
     # Precompute self._source_head_values.
     source_head_values = tf.reshape(
         self.source_value_projection(source.values),
-        [batch_size, source_len, self.num_heads, self.head_dim],
+        [batch_size, source_len, self.num_heads, self.units_per_head],
     )
     self._source_head_values = sl.Sequence(
         source_head_values, source.mask
@@ -569,7 +899,7 @@ class AlignmentLayer(sl.Emitting, PreprocessConstants):
     self._source_head_values = None
 
   def _get_source_head_values(self) -> sl.Sequence:
-    """Get [bs, source_len, num_heads, head_dim] Sequence."""
+    """Get [bs, source_len, num_heads, units_per_head] Sequence."""
     if self._source_head_values is None:
       raise ValueError(
           'source_head_values must be precomputed using preprocess_constants().'
@@ -620,11 +950,11 @@ class AlignmentLayer(sl.Emitting, PreprocessConstants):
     weights = self.dropout(weights, training=training)
 
     # Compute context vectors.
-    # b=batch_size, s=source_len, n=num_heads, d=head_dim.
+    # b=batch_size, s=source_len, n=num_heads, d=units_per_head.
     context = tf.einsum('bns,bsnd->bnd', weights, source_head_values.values)
     # Add time dim, flatten heads.
     context = tf.reshape(
-        context, [batch_size, 1, self.num_heads * self.head_dim]
+        context, [batch_size, 1, self.num_heads * self.units_per_head]
     )
     context = sl.Sequence(context, x.mask).mask_invalid()
 
@@ -943,7 +1273,7 @@ class RelativeCrossAttention(sl.DotProductAttention):
     return position_biases
 
 
-class AlignmentBlock(SequenceLayerBlock, PreprocessConstants):
+class AlignmentBlock(sl.Residual, PreprocessConstants):
   """AlignmentBlock that wraps AlignmentLayer with a residual connection."""
 
   def __init__(
@@ -954,29 +1284,18 @@ class AlignmentBlock(SequenceLayerBlock, PreprocessConstants):
       dropout_rate: float,
       name: str | None = None,
   ):
-    super().__init__(name=name)
-    with self.name_scope:
-      self.alignment_layer = AlignmentLayer(
-          source_name, config, dropout_rate, name='alignment_layer'
-      )
-      if config.output_scale is not None:
-        maybe_scale = [sl.Scale(config.output_scale, name='output_scale')]
-      else:
-        maybe_scale = []
-      layer = sl.Residual(
-          sl.Serial(
-              [
-                  sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-                  self.alignment_layer,
-                  sl.Dense(units=output_dim, use_bias=False, name='dense'),
-                  sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-              ]
-              + maybe_scale,
-              name='serial',
-          ),
-          name='residual',
-      )
-    self._set_layers([layer])
+    self.alignment_layer = AlignmentLayer(
+        source_name, config, dropout_rate, name='alignment_layer'
+    )
+    super().__init__(
+        [
+            sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+            self.alignment_layer,
+            sl.Dense(units=output_dim, use_bias=False, name='dense'),
+            sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
+        ],
+        name='residual',
+    )
 
   def get_alignment_position(self, emits: sl.Emits) -> sl.Sequence:
     return emits['residual']['serial']['alignment_layer']
@@ -990,202 +1309,51 @@ class AlignmentBlock(SequenceLayerBlock, PreprocessConstants):
     self.alignment_layer.clear_preprocessed_constants()
 
 
-class SelfAttentionBlock(SequenceLayerBlock):
-  """Causal T5-style self-attention."""
+def CrossAttentionBlock(
+    source_name: str,
+    output_dim: int,
+    num_heads: int,
+    units_per_head: int,
+    position_bias_config: InterpolatedRelativePositionBiasesConfig,
+    dropout_rate: float,
+) -> sl.SequenceLayer:
+  """See RelativeCrossAttention for required constants."""
 
-  def __init__(
-      self,
-      output_dim: int,
-      num_heads: int,
-      head_dim: int,
-      max_horizon: int,
-      position_bias_config: InterpolatedRelativePositionBiasesConfig,
-      dropout_rate: float,
-      name: str | None = None,
-  ):
-    super().__init__(name=name)
+  relative_position_embedding = InterpolatedRelativePositionBiases.from_config(
+      num_heads=num_heads,
+      bidirectional=True,  # Non-causal cross-attention.
+      config=position_bias_config,
+  )
 
-    with self.name_scope:
-      layer = sl.Residual(
-          sl.Serial([
-              sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-              sl.DotProductSelfAttention(
-                  num_heads=num_heads,
-                  units_per_head=head_dim,
-                  max_horizon=max_horizon,
-                  use_relative_position_embedding=True,
-                  relative_position_embedding=InterpolatedRelativePositionBiases.from_config(
-                      num_heads=num_heads,
-                      bidirectional=False,  # Causal self-attention.
-                      config=position_bias_config,
-                  ),
-                  attention_probabilities_dropout_rate=dropout_rate,
-                  broadcast_dropout_across_queries=True,
-                  use_bias=False,
-                  name='dot_product_self_attention',
-              ),
-              sl.Flatten(),
-              sl.Dense(units=output_dim, use_bias=False, name='dense'),
-              sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-          ])
-      )
-    self._set_layers([layer])
-
-
-class CrossAttentionBlock(SequenceLayerBlock):
-  """Relative cross-attention block.
-
-  This SequenceLayer is stateless.
-
-  See RelativeCrossAttention for required constants.
-  """
-
-  def __init__(
-      self,
-      source_name: str,
-      output_dim: int,
-      num_heads: int,
-      head_dim: int,
-      position_bias_config: InterpolatedRelativePositionBiasesConfig,
-      dropout_rate: float,
-      output_scale: float | None = None,
-      attention_logits_soft_cap: float | None = None,
-      name: str | None = None,
-  ):
-    super().__init__(name=name)
-    with self.name_scope:
-      relative_position_embedding = (
-          InterpolatedRelativePositionBiases.from_config(
-              num_heads=num_heads,
-              bidirectional=True,  # Non-causal cross-attention.
-              config=position_bias_config,
-          )
-      )
-
-      if output_scale is not None:
-        maybe_scale = [sl.Scale(scale=output_scale, name='output_scale')]
-      else:
-        maybe_scale = []
-      layer = sl.Residual(
-          sl.Serial(
-              [
-                  sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-                  RelativeCrossAttention(
-                      source_name=source_name,
-                      num_heads=num_heads,
-                      units_per_head=head_dim,
-                      relative_position_biases=relative_position_embedding,
-                      attention_probabilities_dropout_rate=dropout_rate,
-                      broadcast_dropout_across_queries=True,
-                      use_bias=False,
-                      name='relative_cross_attention',
-                  ),
-                  sl.Flatten(),
-                  sl.Dense(units=output_dim, use_bias=False, name='dense'),
-                  sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-              ]
-              + maybe_scale
-          )
-      )
-    self._set_layers([layer])
-
-
-class ProductOfDense(sl.Stateless):
-  """T5-style product-of-dense feed-forward SequenceLayer."""
-
-  def __init__(
-      self,
-      units: int,
-      activations: Sequence[str] | None = None,
-      use_bias: bool = False,
-      name: str | None = None,
-  ):
-    """Construct ProductOfDense.
-
-    Args:
-      units: Number of output units.
-      activations: List of activations to use for each underlying Dense layer.
-        The point-wise product of the output of all the Dense layers is returned
-        as the output.
-      use_bias: Whether the underlying Dense layers use a bias.
-      name: Name for this layer.
-    """
-    super().__init__(name=name)
-    if not activations:
-      activations = ['relu']
-    self.units = units
-    self.layers = []
-    with self.name_scope:
-      for i, activation in enumerate(activations):
-        self.layers.append(
-            tf.keras.layers.Dense(
-                units,
-                activation=activation,
-                use_bias=use_bias,
-                name=f'Dense_{i}',
-            )
-        )
-      self.multiply = tf.keras.layers.Multiply()
-
-  @tf.Module.with_name_scope
-  def layer(
-      self,
-      x: sl.Sequence,
-      training: bool,
-      initial_state: sl.State | None = None,
-      constants: sl.Constants | None = None,
-  ) -> sl.Sequence:
-    x.channel_shape.with_rank_at_least(1)
-    output = self.multiply([layer(x.values) for layer in self.layers])
-    return sl.Sequence(output, x.mask).mask_invalid()
-
-  def get_output_shape(
-      self,
-      input_shape: tf.TensorShape,
-      constants: sl.Constants | None = None,
-  ) -> tf.TensorShape:
-    input_shape.with_rank_at_least(1)
-    return input_shape[:-1].concatenate(self.units)
-
-
-class FeedForwardBlock(SequenceLayerBlock):
-  """T5-style feed-forward block."""
-
-  def __init__(
-      self,
-      hidden_dim: int,
-      output_dim: int,
-      activations: Sequence[str],
-      dropout_rate: float,
-      name: str | None = None,
-  ):
-    super().__init__(name=name)
-    with self.name_scope:
-      layer = sl.Residual(
-          sl.Serial([
-              sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-              ProductOfDense(
-                  units=hidden_dim,
-                  activations=activations,
-                  use_bias=False,
-                  name='product_of_dense',
-              ),
-              sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-              sl.Dense(units=output_dim, use_bias=False, name='dense'),
-              sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-          ])
-      )
-    self._set_layers([layer])
+  return sl.Residual([
+      sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+      RelativeCrossAttention(
+          source_name=source_name,
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          relative_position_biases=relative_position_embedding,
+          attention_probabilities_dropout_rate=dropout_rate,
+          broadcast_dropout_across_queries=True,
+          use_bias=False,
+          name='relative_cross_attention',
+      ),
+      sl.Flatten(),
+      sl.Dense(units=output_dim, use_bias=False, name='dense'),
+      sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
+  ])
 
 
 @dataclasses.dataclass
 class DecoderBlockConfig:
   """Configuration for DecoderBlock."""
 
-  num_heads: int = 8
-  head_dim: int = 48
-  hidden_dim: int = head_dim * num_heads
-  alignment_rnn_units: int = 96
+  alignment_rnn_units: int
+  num_heads: int
+  units_per_head: int
+  hidden_dim: int
+  feedforward_hidden_dim: int
+  max_future_horizon: int = 0
+  feedforward_activation: str = 'gelu'
   max_past_horizon: int = 128
 
   self_attention_bias: InterpolatedRelativePositionBiasesConfig = (
@@ -1211,118 +1379,105 @@ class DecoderBlockConfig:
           )
       )
   )
-  cross_attention_output_scale: float = 1.0
-  feedforward_hidden_dim: int = hidden_dim * 4
-  feedforward_activations: Sequence[str] = ['gelu']
 
 
-class DecoderBlock(SequenceLayerBlock):
+def DecoderBlock(
+    source_name: str,
+    config: DecoderBlockConfig,
+    dropout_rate: float,
+) -> sl.SequenceLayer:
   """Self-attention, cross-attention, feed-forward block."""
-
-  def __init__(
-      self,
-      source_name: str,
-      config: DecoderBlockConfig,
-      dropout_rate: float,
-      name: str | None = None,
-  ):
-    super().__init__(name=name)
-    with self.name_scope:
-      layers = [
-          SelfAttentionBlock(
-              output_dim=config.hidden_dim,
+  return sl.Serial([
+      SelfAttentionBlock(
+          output_dim=config.hidden_dim,
+          num_heads=config.num_heads,
+          units_per_head=config.units_per_head,
+          max_horizon=config.max_past_horizon,
+          max_future_horizon=0,
+          relative_position_embedding=InterpolatedRelativePositionBiases.from_config(
+              config=config.self_attention_bias,
+              bidirectional=False,  # Causal self-attention.
               num_heads=config.num_heads,
-              head_dim=config.head_dim,
-              max_horizon=config.max_past_horizon,
-              position_bias_config=config.self_attention_bias,
-              dropout_rate=dropout_rate,
-              name='self_attention_block',
           ),
-          CrossAttentionBlock(
-              source_name=source_name,
-              output_dim=config.hidden_dim,
-              num_heads=config.num_heads,
-              head_dim=config.head_dim,
-              position_bias_config=config.cross_attention_bias,
-              dropout_rate=dropout_rate,
-              output_scale=config.cross_attention_output_scale,
-              name='cross_attention_block',
-          ),
-          FeedForwardBlock(
-              hidden_dim=config.feedforward_hidden_dim,
-              output_dim=config.hidden_dim,
-              activations=config.feedforward_activations,
-              dropout_rate=dropout_rate,
-              name='feed_forward_block',
-          ),
-      ]
-    self._set_layers(layers)
+          dropout_rate=dropout_rate,
+      ),
+      CrossAttentionBlock(
+          source_name=source_name,
+          output_dim=config.hidden_dim,
+          num_heads=config.num_heads,
+          units_per_head=config.units_per_head,
+          position_bias_config=config.cross_attention_bias,
+          dropout_rate=dropout_rate,
+      ),
+      FeedForwardBlock(
+          output_dim=config.hidden_dim,
+          hidden_dim=config.feedforward_hidden_dim,
+          activation=config.feedforward_activation,
+          dropout_rate=dropout_rate,
+      ),
+  ])
 
 
-class DecoderBlockStack(SequenceLayerBlock):
+def VATDecoderBlockStack(
+    source_name: str,
+    decoder_block_config: DecoderBlockConfig,
+    num_decoder_blocks: int,
+    dropout_rate: float,
+) -> sl.SequenceLayer:
   """Stack of DecoderBlocks with RMSNorm and Dropout."""
 
-  def __init__(
-      self,
-      source_name: str,
-      decoder_block_config: DecoderBlockConfig,
-      num_decoder_blocks: int,
-      dropout_rate: float,
-      name: str | None = None,
-  ):
-    super().__init__(name=name)
-    with self.name_scope:
-      decoder_blocks = sl.Serial([
-          DecoderBlock(
-              source_name,
-              decoder_block_config,
-              dropout_rate,
-              name=f'decoder_block_{i}',
-          )
-          for i in range(num_decoder_blocks)
-      ])
-      layers = [
-          decoder_blocks,
-          sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-          sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-      ]
-    self._set_layers(layers)
+  decoder_blocks = sl.Serial([
+      DecoderBlock(
+          source_name,
+          decoder_block_config,
+          dropout_rate,
+      )
+      for _ in range(num_decoder_blocks)
+  ])
+  return sl.Serial([
+      decoder_blocks,
+      sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+      sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
+  ])
 
 
 @dataclasses.dataclass
-class VeryAttentiveDecoderConfig:
-  """Configuration for VeryAttentiveDecoder."""
+class VATDecoderConfig:
+  """Configuration for VATDecoder."""
 
   name: str | None
-  # The name of the source sequence to use for cross-attention.
-  source_name: str = 'text_encoder_top'
+  # The name of the source sequence to use for cross-attention, e.g.
+  # 'text_encoder_top'.
+  source_name: str
   # Configuration for the alignment layer.
   alignment_layer: AlignmentLayerConfig
   # Configuration for the decoder block stack.
   decoder_block: DecoderBlockConfig
+  # The number of VQ codebooks.
+  num_codebooks: int = 8
+  # The per-codebook vocabulary size.
+  codebook_size: int = 256
   # Number of decoder blocks in the decoder block stack.
   num_decoder_blocks: int = 6
   # Dropout rate for the decoder.
   dropout_rate: float = 0.1
 
 
-class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
-  """VeryAttentiveDecoder.
+# ------------------------------------------------------------------------------
+# VeryAttentiveTacotron decoder.
+# ------------------------------------------------------------------------------
+class VATDecoder(sl.Emitting, PreprocessConstants):
+  """VeryAttentiveTacotron decoder.
 
   This SequenceLayer composes the following operations:
   * Optional SequenceLayer prenet.
   * AlignmentBlock (which contains an AlignmentLayer that runs step-wise during
     training).
-  * DecoderBlockStack (consisting of N DecoderBlocks).
-  * Optional SequenceLayer postnet.
+  * VATDecoderBlockStack (consisting of N DecoderBlocks).
   """
 
-  def __init__(self, config: VeryAttentiveDecoderConfig):
-    """Construct VeryAttentiveDecoder.
-
-    Args:
-      config: VeryAttentiveDecoder config.
-    """
+  def __init__(self, config: VATDecoderConfig):
+    """Construct VATDecoder."""
     super().__init__(name=config.name or None)
     if not config.source_name:
       raise ValueError('source_name not defined.')
@@ -1334,9 +1489,20 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
 
   def _build(self, config):
     with tf.name_scope('prenet'):
-      self.prenet = sl.Conv1D(
-          hidden_dim=config.decoder_block.hidden_dim, kernel_size=3
-      )
+      self.prenet = sl.Serial([
+          sl.OneHot(depth=config.codebook_size),
+          sl.EinsumDense(
+              equation='...GC,GCE->...GE',
+              output_shape=[
+                  config.num_codebooks,
+                  int(config.decoder_block.hidden_dim / config.num_codebooks),
+              ],
+              kernel_initializer=tf.keras.initializers.RandomUniform(),
+              name='target_codebooks',
+          ),
+          sl.Flatten(),
+          sl.Conv1D(filters=1024, kernel_size=3),
+      ])
     self.alignment_block = AlignmentBlock(
         source_name=config.source_name,
         config=config.alignment_layer,
@@ -1344,17 +1510,12 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
         dropout_rate=config.dropout_rate,
         name='alignment_block',
     )
-    self.decoder_block_stack = DecoderBlockStack(
+    self.decoder_block_stack = VATDecoderBlockStack(
         source_name=config.source_name,
         decoder_block_config=config.decoder_block,
         num_decoder_blocks=config.num_decoder_blocks,
         dropout_rate=config.dropout_rate,
-        name='decoder_block_stack',
     )
-    with tf.name_scope('postnet'):
-      self.postnet = slp.build_sequence_layer(
-          config.postnet, default_to_identity=True
-      )
 
     # Wrap layers in an sl.Serial to use its initial state and output shape
     # helpers.
@@ -1362,7 +1523,6 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
         self.prenet,
         self.alignment_block,
         self.decoder_block_stack,
-        self.postnet,
     ])
 
   @tf.Module.with_name_scope
@@ -1388,7 +1548,6 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
         prenet_state,
         alignment_block_state,
         decoder_block_stack_state,
-        postnet_state,
     ) = initial_state
 
     x = self.prenet.layer(x, training, prenet_state, constants)
@@ -1400,10 +1559,9 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
     post_alignment_constants = constants | {
         ALIGNMENT_POSITION: alignment_position.values
     }
-    x = self.decoder_block_stack.layer(
+    outputs = self.decoder_block_stack.layer(
         x, training, decoder_block_stack_state, post_alignment_constants
     )
-    outputs = self.postnet.layer(x, training, postnet_state, constants)
     emits = self._compute_emits(alignment_position, constants)
 
     return outputs, emits
@@ -1421,7 +1579,6 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
         prenet_state,
         alignment_block_state,
         decoder_block_stack_state,
-        postnet_state,
     ) = state
 
     x, prenet_state = self.prenet.step(x, prenet_state, training, constants)
@@ -1433,11 +1590,8 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
     post_alignment_constants = constants | {
         ALIGNMENT_POSITION: alignment_position.values
     }
-    x, decoder_block_stack_state = self.decoder_block_stack.step(
+    outputs, decoder_block_stack_state = self.decoder_block_stack.step(
         x, decoder_block_stack_state, training, post_alignment_constants
-    )
-    outputs, postnet_state = self.postnet.step(
-        x, postnet_state, training, constants
     )
     emits = self._compute_emits(alignment_position, constants)
 
@@ -1445,7 +1599,6 @@ class VeryAttentiveDecoder(sl.Emitting, PreprocessConstants):
         prenet_state,
         alignment_block_state,
         decoder_block_stack_state,
-        postnet_state,
     )
 
     return outputs, state, emits
