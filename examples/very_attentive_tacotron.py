@@ -201,7 +201,7 @@ class PreprocessConstants(abc.ABC):
     """
 
 
-def FeedForwardBlock(
+def FeedforwardBlock(
     hidden_dim: int,
     output_dim: int,
     activation: ...,
@@ -637,7 +637,7 @@ def ConvStage(
               kernel_size=3,
               strides=strides,
               padding='same',
-              name='downsample_conv',
+              name='resample_conv1d',
           )
       ]
       + [ConvBlock(block_ind) for block_ind in range(num_blocks)]
@@ -719,7 +719,7 @@ def TransformerEncoderBlock(
           max_future_horizon=-1,
           dropout_rate=dropout_rate,
       ),
-      FeedForwardBlock(
+      FeedforwardBlock(
           output_dim=dimension,
           hidden_dim=dimension * 4,
           activation=ffn_activation,
@@ -1323,7 +1323,7 @@ class AlignmentBlock(sl.Residual, PreprocessConstants):
     self.alignment_layer.clear_preprocessed_constants()
 
 
-def CrossAttentionBlock(
+def RelativeCrossAttentionBlock(
     source_name: str,
     output_dim: int,
     num_heads: int,
@@ -1415,7 +1415,7 @@ def DecoderBlock(
           ),
           dropout_rate=dropout_rate,
       ),
-      CrossAttentionBlock(
+      RelativeCrossAttentionBlock(
           source_name=source_name,
           output_dim=config.hidden_dim,
           num_heads=config.num_heads,
@@ -1423,7 +1423,7 @@ def DecoderBlock(
           position_bias_config=config.cross_attention_bias,
           dropout_rate=dropout_rate,
       ),
-      FeedForwardBlock(
+      FeedforwardBlock(
           output_dim=config.hidden_dim,
           hidden_dim=config.feedforward_hidden_dim,
           activation=config.feedforward_activation,
@@ -1440,19 +1440,20 @@ def VATDecoderBlockStack(
 ) -> sl.SequenceLayer:
   """Stack of DecoderBlocks with RMSNorm and Dropout."""
 
-  decoder_blocks = sl.Serial([
-      DecoderBlock(
-          source_name,
-          decoder_block_config,
-          dropout_rate,
-      )
-      for _ in range(num_decoder_blocks)
-  ])
-  return sl.Serial([
-      decoder_blocks,
-      sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
-      sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
-  ])
+  return sl.Serial(
+      [
+          DecoderBlock(
+              source_name,
+              decoder_block_config,
+              dropout_rate,
+          )
+          for _ in range(num_decoder_blocks)
+      ]
+      + [
+          sl.RMSNormalization(epsilon=1e-6, name='rms_normalization'),
+          sl.Dropout(rate=dropout_rate, noise_shape=[None, 1, None]),
+      ]
+  )
 
 
 @dataclasses.dataclass

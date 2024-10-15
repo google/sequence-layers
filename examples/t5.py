@@ -26,7 +26,7 @@ from sequence_layers import tensorflow as sl
 import tensorflow.compat.v2 as tf
 
 
-def FFN(
+def FeedforwardBlock(
     dimension: int, hidden_dimension: int, activation: ..., dropout_rate: float
 ) -> sl.SequenceLayer:
   with tf.name_scope('ffn'):
@@ -39,7 +39,7 @@ def FFN(
     ])
 
 
-def SelfAttention(
+def SelfAttentionBlock(
     dimension: int,
     num_heads: int,
     units_per_head: int,
@@ -68,7 +68,7 @@ def SelfAttention(
     ])
 
 
-def CrossAttention(
+def CrossAttentionBlock(
     source_name: str,
     dimension: int,
     num_heads: int,
@@ -112,7 +112,7 @@ def T5Encoder(
   def EncoderBlock(name):
     with tf.name_scope(name):
       return sl.Serial([
-          SelfAttention(
+          SelfAttentionBlock(
               dimension=dimension,
               num_heads=num_heads,
               units_per_head=units_per_head,
@@ -121,7 +121,7 @@ def T5Encoder(
               max_past_horizon=-1,
               max_future_horizon=-1,
           ),
-          FFN(
+          FeedforwardBlock(
               dimension=dimension,
               hidden_dimension=ffn_dimension,
               activation=ffn_activation,
@@ -156,7 +156,7 @@ def T5DecoderBlock(
   """Construct a T5 decoder block (self attention, cross attention, FFN)."""
   with tf.name_scope(name):
     return sl.Serial([
-        SelfAttention(
+        SelfAttentionBlock(
             dimension=dimension,
             num_heads=num_heads,
             units_per_head=units_per_head,
@@ -165,14 +165,14 @@ def T5DecoderBlock(
             max_past_horizon=max_past_horizon,
             max_future_horizon=0,
         ),
-        CrossAttention(
+        CrossAttentionBlock(
             source_name=source_name,
             dimension=dimension,
             num_heads=num_heads,
             units_per_head=units_per_head,
             dropout_rate=dropout_rate,
         ),
-        FFN(
+        FeedforwardBlock(
             dimension=dimension,
             hidden_dimension=ffn_dimension,
             activation=ffn_activation,
