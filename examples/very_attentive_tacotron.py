@@ -13,10 +13,15 @@
 # limitations under the License.
 
 
-"""Implements the decoder layer of Very Attentive Tacotron.
+# TODO(ebattenberg): Add arXiv link.
+"""Reference implementations for Very Attentive Tacotron and T5-TTS.
 
-Very Attentive Tacotron:
-Robust Length Generalization in Transformer-based Text-to-Speech.
+From the paper: "Very Attentive Tacotron: Robust and Unbounded Length
+Generalization in Transformer-based Text-to-Speech."
+
+Includes text encoder and autoregressive decoder configurations for the
+large and small (3/8 width) variants of the T5-TTS baseline model and the
+proposed Very Attentive Tacotron (VAT) model.
 """
 
 
