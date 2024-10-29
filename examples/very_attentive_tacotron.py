@@ -697,7 +697,7 @@ def TransformerEncoderBlock(
     ffn_activation: ... = tf.nn.gelu,
     dropout_rate: float = 0.1,
 ) -> sl.SequenceLayer:
-  """Self-attention, cross-attention, feed-forward encoder block."""
+  """Self-attention + feed-forward encoder block."""
 
   if isinstance(
       position_embeddings_config, InterpolatedRelativePositionBiasesConfig
@@ -755,7 +755,7 @@ def TextEncoder(
     position_embeddings_config = InterpolatedRelativePositionBiasesConfig(
         num_buckets=num_buckets,
         max_distance=max_distance,
-        max_distance_penalty=0.0,
+        max_distance_penalty=1.0,
         init_scheme='truncated_normal_stddev',
         init_scheme_value=1.0,
     )
@@ -815,10 +815,10 @@ class AlignmentLayerConfig:
       dataclasses.field(
           default_factory=lambda: InterpolatedRelativePositionBiasesConfig(
               num_buckets=32,
-              max_distance=128,
-              max_distance_penalty=0.0,
+              max_distance=64,
+              max_distance_penalty=1.0,
               init_scheme='gaussian_window_stddev',
-              init_scheme_value=5.0,
+              init_scheme_value=15.0,
           )
       )
   )
@@ -1379,7 +1379,7 @@ class DecoderBlockConfig:
       dataclasses.field(
           default_factory=lambda: InterpolatedRelativePositionBiasesConfig(
               num_buckets=32,
-              max_distance=64,
+              max_distance=128,
               max_distance_penalty=1.0,
               init_scheme='truncated_normal_stddev',
               init_scheme_value=1.0,
@@ -1394,7 +1394,7 @@ class DecoderBlockConfig:
               max_distance=64,
               max_distance_penalty=1.0,
               init_scheme='gaussian_window_stddev',
-              init_scheme_value=5.0,
+              init_scheme_value=15.0,
           )
       )
   )
@@ -1522,7 +1522,7 @@ class VATDecoder(sl.Emitting, PreprocessConstants):
               name='target_codebooks',
           ),
           sl.Flatten(),
-          sl.Conv1D(filters=1024, kernel_size=3),
+          sl.Conv1D(filters=config.decoder_block.hidden_dim, kernel_size=3),
       ])
     self.alignment_block = AlignmentBlock(
         source_name=config.source_name,
