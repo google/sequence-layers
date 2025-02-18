@@ -21,7 +21,7 @@ import tensorflow.compat.v2 as tf
 
 # TODO(dthkao): Since this is only needed for tf1 tpu context checking,
 # consider removing TF1 support?
-from google3.third_party.tensorflow.python.tpu.tpu_function import get_tpu_context  # pylint: disable=g-direct-tensorflow-import,g-importing-member
+from tensorflow.python.tpu.tpu_function import get_tpu_context
 
 
 def _is_tf1_tpu():

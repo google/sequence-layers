@@ -673,7 +673,7 @@ class DotProductSelfAttentionTest(
             [
                 'test/dot_product_self_attention/query_key_value_projection/kernel:0'
             ]
-            + (  # pylint: disable=g-long-ternary  # It's pyformat's fault.
+            + (
                 [
                     'test/dot_product_self_attention/shaw_relative_position_embedding/embedding:0'
                 ]
