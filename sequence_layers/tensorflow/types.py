@@ -23,7 +23,7 @@ from sequence_layers.internal import types as internal
 import tensorflow.compat.v1 as tf1
 import tensorflow.compat.v2 as tf
 
-from google3.third_party.tensorflow.python.framework import type_spec  # pylint: disable=g-direct-tensorflow-import
+from tensorflow.python.framework import type_spec
 
 
 TensorLike = Union[tf.Tensor, np.ndarray]

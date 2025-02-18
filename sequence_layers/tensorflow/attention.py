@@ -171,7 +171,7 @@ class AdditiveAttention(types.StatelessEmitting):
     num_units = num_heads * units_per_head
     with self.name_scope as name_scope:
       self._attn_v = tf.Variable(
-          lambda: tf.initializers.GlorotUniform()(  # pylint: disable=g-long-lambda
+          lambda: tf.initializers.GlorotUniform()(
               [num_heads, units_per_head], dtype=utils.variable_dtype()
           ),
           name='v',
@@ -337,14 +337,14 @@ class GmmAttention(types.Emitting):
       # TODO(rryan): Pull this pattern into a "DenseShaped" layer?
       with tf.name_scope('gmm_mlp_output'):
         self._mlp_output_w = tf.Variable(
-            lambda: tf.initializers.GlorotUniform()(  # pylint: disable=g-long-lambda
+            lambda: tf.initializers.GlorotUniform()(
                 [num_heads, units_per_head, num_components * 3],
                 dtype=utils.variable_dtype(),
             ),
             name='kernel',
         )
         self._mlp_output_b = tf.Variable(
-            lambda: tf.initializers.Zeros()(  # pylint: disable=g-long-lambda
+            lambda: tf.initializers.Zeros()(
                 [1, 1, num_heads, num_components * 3],
                 dtype=utils.variable_dtype(),
             ),
@@ -740,7 +740,7 @@ class ShawRelativePositionEmbedding(RelativePositionEmbedding):
       # the current timestep.
       # TODO(rryan): Support the ability to share embeddings across heads.
       self._relative_position_embedding = tf.Variable(
-          lambda: tf.keras.initializers.VarianceScaling()(  # pylint: disable=g-long-lambda
+          lambda: tf.keras.initializers.VarianceScaling()(
               [max_backward + 1, num_heads, units_per_head],
               dtype=utils.variable_dtype(),
           ),
@@ -2857,7 +2857,7 @@ class LocationSensitiveAttention(types.Emitting):
     with self.name_scope as name_scope:
       # GlorotNormal() scaled independently for each head.
       self._attn_v = tf.Variable(
-          lambda: tf.initializers.VarianceScaling(  # pylint: disable=g-long-lambda
+          lambda: tf.initializers.VarianceScaling(
               mode='fan_out', distribution='truncated_normal'
           )([num_heads, units_per_head], dtype=utils.variable_dtype()),
           name='v',
@@ -2900,7 +2900,7 @@ class LocationSensitiveAttention(types.Emitting):
           + [tf.keras.layers.Reshape((-1, num_heads, location_num_filters))]
       )
       self._location_projection_kernel = tf.Variable(
-          lambda: tf.initializers.VarianceScaling(  # pylint: disable=g-long-lambda
+          lambda: tf.initializers.VarianceScaling(
               mode='fan_out', distribution='truncated_normal'
           )(
               [num_heads, location_num_filters, units_per_head],

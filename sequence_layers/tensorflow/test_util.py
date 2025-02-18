@@ -258,7 +258,7 @@ class SequenceLayerTest(tf.test.TestCase):
       # Replace all masked values with NaN and pad with one block of invalid
       # NaNs.
       x_nan = x.apply_values(
-          lambda v: tf.where(  # pylint: disable=g-long-lambda
+          lambda v: tf.where(
               x.expanded_mask() > 0.0, v, tf.ones_like(v) * pad_value
           )
       )
@@ -280,7 +280,7 @@ class SequenceLayerTest(tf.test.TestCase):
       )
       # Replace NaNs in the padding with zeros.
       y_layer_nan = y_layer_nan.apply_values(
-          lambda v: tf.where(  # pylint: disable=g-long-lambda
+          lambda v: tf.where(
               y_layer_nan.expanded_mask() > 0.0, v, tf.zeros_like(v)
           )
       )
@@ -291,7 +291,7 @@ class SequenceLayerTest(tf.test.TestCase):
       )
       # Replace NaNs in the padding with zeros.
       y_step_nan = y_step_nan.apply_values(
-          lambda v: tf.where(  # pylint: disable=g-long-lambda
+          lambda v: tf.where(
               y_step_nan.expanded_mask() > 0.0, v, tf.zeros_like(v)
           )
       )
