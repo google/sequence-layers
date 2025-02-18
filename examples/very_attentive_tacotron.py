@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-"""Reference implementations for Very Attentive Tacotron and T5-TTS.
+"""Reference implementations for Very Attentive Tacotron.
 
 From the paper:
 "Very Attentive Tacotron: Robust and Unbounded Length Generalization in
@@ -21,7 +21,7 @@ Transformer-based Text-to-Speech."
 https://arxiv.org/abs/2410.22179
 
 Includes text encoder and autoregressive decoder configurations for the
-large and small (3/8 width) variants of the T5-TTS baseline model and the
+large and small (3/8 width) variants of the T5 baseline model and the
 proposed Very Attentive Tacotron (VAT) model.
 """
 
@@ -51,7 +51,7 @@ ALIGNMENT_POSITION = 'alignment_position'
 # ------------------------------------------------------------------------------
 
 
-def SmallT5TTSTextEncoder() -> sl.SequenceLayer:
+def SmallT5BaselineTextEncoder() -> sl.SequenceLayer:
   return TextEncoder(
       dimension=192,
       use_irpbs=False,
@@ -67,7 +67,7 @@ def SmallVATTextEncoder() -> sl.SequenceLayer:
   )
 
 
-def LargeT5TTSTextEncoder() -> sl.SequenceLayer:
+def LargeT5BaselineTextEncoder() -> sl.SequenceLayer:
   return TextEncoder(
       dimension=512,
       use_irpbs=False,
@@ -86,14 +86,14 @@ def LargeVATTextEncoder() -> sl.SequenceLayer:
 # ------------------------------------------------------------------------------
 # Decoder configurations.
 # ------------------------------------------------------------------------------
-def SmallT5TTSDecoder() -> sl.SequenceLayer:
+def SmallT5BaselineDecoder() -> sl.SequenceLayer:
   decoder_block_num_heads = 8
   decoder_block_units_per_head = 48
   decoder_block_hidden_dim = (
       decoder_block_num_heads * decoder_block_units_per_head
   )
-  return T5TTSDecoder(
-      config=T5TTSDecoderConfig(
+  return T5BaselineDecoder(
+      config=T5BaselineDecoderConfig(
           name='t5_tts_decoder',
           source_name='text_encoder_top',
           num_codebooks=8,
@@ -134,14 +134,14 @@ def SmallVATDecoder() -> sl.SequenceLayer:
   )
 
 
-def LargeT5TTSDecoder() -> sl.SequenceLayer:
+def LargeT5BaselineDecoder() -> sl.SequenceLayer:
   decoder_block_num_heads = 16
   decoder_block_units_per_head = 64
   decoder_block_hidden_dim = (
       decoder_block_num_heads * decoder_block_units_per_head
   )
-  return T5TTSDecoder(
-      config=T5TTSDecoderConfig(
+  return T5BaselineDecoder(
+      config=T5BaselineDecoderConfig(
           name='t5_tts_decoder',
           source_name='text_encoder_top',
           num_codebooks=8,
@@ -1689,13 +1689,13 @@ class VATDecoder(sl.Emitting, PreprocessConstants):
 
 
 # ------------------------------------------------------------------------------
-# T5 TTS decoder.
+# T5 Baseline decoder.
 # ------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass
-class T5TTSDecoderConfig:
-  """Configuration for T5TTSDecoder."""
+class T5BaselineDecoderConfig:
+  """Configuration for T5BaselineDecoder."""
 
   name: str | None
   # The name of the source sequence to use for cross-attention, e.g.
@@ -1719,11 +1719,11 @@ class T5TTSDecoderConfig:
   dropout_rate: float
 
 
-class T5TTSDecoder(sl.Serial):
+class T5BaselineDecoder(sl.Serial):
   """A T5-based TTS decoder."""
 
-  def __init__(self, config: T5TTSDecoderConfig):
-    """Construct T5TTSDecoder."""
+  def __init__(self, config: T5BaselineDecoderConfig):
+    """Construct T5BaselineDecoder."""
     hidden_dim = config.units_per_head * config.num_heads
 
     layers = [

@@ -29,11 +29,11 @@ class VeryAttentiveTacotronTest(test_util.SequenceLayerTest):
     logging.info(encoder)
 
   def test_small_t5tts_text_encoder(self):
-    encoder = very_attentive_tacotron.SmallT5TTSTextEncoder()
+    encoder = very_attentive_tacotron.SmallT5BaselineTextEncoder()
     logging.info(encoder)
 
   def test_large_t5tts_text_encoder(self):
-    encoder = very_attentive_tacotron.LargeT5TTSTextEncoder()
+    encoder = very_attentive_tacotron.LargeT5BaselineTextEncoder()
     logging.info(encoder)
 
   def test_small_very_attentive_decoder(self):
@@ -45,11 +45,11 @@ class VeryAttentiveTacotronTest(test_util.SequenceLayerTest):
     logging.info(decoder)
 
   def test_small_t5_tts_decoder(self):
-    decoder = very_attentive_tacotron.SmallT5TTSDecoder()
+    decoder = very_attentive_tacotron.SmallT5BaselineDecoder()
     logging.info(decoder)
 
   def test_large_t5_tts_decoder(self):
-    decoder = very_attentive_tacotron.LargeT5TTSDecoder()
+    decoder = very_attentive_tacotron.LargeT5BaselineDecoder()
     logging.info(decoder)
 
 
