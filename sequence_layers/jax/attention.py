@@ -3160,7 +3160,12 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
 
     time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
 
-    return (keys, values, query_state, time_step)
+    # Mask before storing in state:
+    keys = keys.mask_invalid()
+    values = values.mask_invalid()
+    mask = utils.combine_mask(keys.mask, values.mask)
+
+    return (keys.values, values.values, mask, query_state, time_step)
 
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
@@ -3208,7 +3213,7 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.State, types.Emits]:
-    keys, values, query_state, time_step = state
+    keys, values, mask, query_state, time_step = state
 
     x_num_timesteps = x.shape[1]
 
@@ -3222,14 +3227,15 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
 
     y, emits = self._attention(
         queries,
-        keys,
-        values,
+        # get_initial_state masks before storing in state.
+        types.MaskedSequence(keys, mask),
+        types.MaskedSequence(values, mask),
         training=training,
         constants=constants,
         time_step=time_step,
     )
     time_step += x_num_timesteps
-    state = (keys, values, query_state, time_step)
+    state = (keys, values, mask, query_state, time_step)
     return y, state, emits
 
   @types.check_layer_with_emits
