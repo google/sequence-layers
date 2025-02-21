@@ -1569,3 +1569,90 @@ def batched_time_slice(
 
   # Preserve MaskedSequence type if x is MaskedSequence.
   return type(x)(values, mask)
+
+
+def _get_constant(
+    layer: types.SequenceLayer,
+    constants: types.Constants | None,
+    name: str,
+    expected_shape: types.ShapeLike | None,
+    expected_dtype: types.DType | None,
+    allow_broadcastable: bool,
+) -> jax.Array | types.Sequence:
+  """Returns the constant with the given name from the constants dictionary."""
+  value = (constants or {}).get(name)
+  if value is None:
+    raise ValueError(
+        f'{layer} requires the constant {name} to be provided via '
+        f'constants, got: {constants}'
+    )
+
+  wrong_shape = False
+  if expected_shape is not None:
+    if allow_broadcastable:
+      try:
+        jnp.broadcast_shapes(value.shape, expected_shape)
+      except ValueError:
+        wrong_shape = True
+    else:
+      wrong_shape = value.shape != expected_shape
+  wrong_dtype = expected_dtype is not None and value.dtype != expected_dtype
+  if wrong_shape or wrong_dtype:
+    raise ValueError(
+        f'{layer} requires the constant {name} to have shape'
+        f' {expected_shape} dtype {expected_dtype}, got:'
+        f' {value.shape=} {value.dtype=}'
+    )
+
+  return value
+
+
+def get_constant_array(
+    layer: types.SequenceLayer,
+    constants: types.Constants | None,
+    name: str,
+    expected_shape: types.ShapeLike | None = None,
+    expected_dtype: types.DType | None = None,
+    unpack_sequence: bool = False,
+    allow_broadcastable: bool = False,
+) -> jax.Array:
+  """Returns the constant with the given name from the constants dictionary."""
+  value = _get_constant(
+      layer,
+      constants,
+      name,
+      expected_shape,
+      expected_dtype,
+      allow_broadcastable,
+  )
+  if isinstance(value, types.Sequence) and unpack_sequence:
+    value = value.values
+  if not isinstance(value, jax.Array):
+    raise ValueError(
+        f'{layer} requires the constant {name} to be an array, got: {value}'
+    )
+  return value
+
+
+def get_constant_sequence(
+    layer: types.SequenceLayer,
+    constants: types.Constants | None,
+    name: str,
+    expected_shape: types.ShapeLike | None = None,
+    expected_dtype: types.DType | None = None,
+    allow_broadcastable: bool = False,
+) -> types.Sequence:
+  """Returns the constant with the given name from the constants dictionary."""
+  value = _get_constant(
+      layer,
+      constants,
+      name,
+      expected_shape,
+      expected_dtype,
+      allow_broadcastable,
+  )
+  if not isinstance(value, types.Sequence):
+    raise ValueError(
+        f'{layer} requires the constant {name} to be a sequence, got: {value}'
+    )
+  return value

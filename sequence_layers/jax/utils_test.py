@@ -1122,5 +1122,87 @@ class BatchedTimeSliceTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(y[2:3], x[2:3, 9:])
 
 
+class GetConstantTest(test_utils.SequenceLayerTest):
+
+  def test_get_constant_array(self):
+    layer = test_utils.AssertConstantsLayer.Config().make()
+    foo = jnp.zeros((2, 3, 5))
+    constants = {'foo': foo}
+    self.assertAllEqual(
+        utils.get_constant_array(
+            layer, constants, 'foo', (2, 3, 5), jnp.float32
+        ),
+        foo,
+    )
+
+  def test_get_constant_array_unpack(self):
+    layer = test_utils.AssertConstantsLayer.Config().make()
+    foo_seq = types.Sequence.from_values(jnp.zeros((2, 3, 5)))
+    constants = {'foo_seq': foo_seq}
+    self.assertAllEqual(
+        utils.get_constant_array(
+            layer,
+            constants,
+            'foo_seq',
+            (2, 3, 5),
+            jnp.float32,
+            unpack_sequence=True,
+        ),
+        foo_seq.values,
+    )
+
+  def test_get_constant_sequence(self):
+    layer = test_utils.AssertConstantsLayer.Config().make()
+    foo_seq = types.Sequence.from_values(jnp.zeros((2, 3, 5)))
+    constants = {'foo_seq': foo_seq}
+    self.assertSequencesEqual(
+        utils.get_constant_sequence(
+            layer, constants, 'foo_seq', (2, 3, 5), jnp.float32
+        ),
+        foo_seq,
+    )
+
+  def test_errors(self):
+    layer = test_utils.AssertConstantsLayer.Config().make()
+    foo = jnp.zeros((2, 3, 5))
+    foo_seq = types.Sequence.from_values(foo)
+
+    constants = {'foo': foo, 'foo_seq': foo_seq}
+    self.assertIsInstance(
+        utils.get_constant_array(
+            layer, constants, 'foo', (2, 3, 5), jnp.float32
+        ),
+        jax.Array,
+    )
+    self.assertIsInstance(
+        utils.get_constant_sequence(
+            layer, constants, 'foo_seq', (2, 3, 5), jnp.float32
+        ),
+        types.Sequence,
+    )
+
+    with self.assertRaises(ValueError):
+      utils.get_constant_sequence(layer, None, 'foo', None, None)
+    with self.assertRaises(ValueError):
+      utils.get_constant_array(layer, None, 'foo', None, None)
+
+    with self.assertRaises(ValueError):
+      utils.get_constant_array(layer, {}, 'foo', None, None)
+    with self.assertRaises(ValueError):
+      utils.get_constant_sequence(layer, {}, 'foo_seq', None, None)
+
+    with self.assertRaises(ValueError):
+      utils.get_constant_array(layer, constants, 'foo', (2, 3, 6), None)
+    with self.assertRaises(ValueError):
+      utils.get_constant_sequence(layer, constants, 'foo_seq', (2, 3, 6), None)
+
+    with self.assertRaises(ValueError):
+      utils.get_constant_array(layer, constants, 'foo', (2, 3, 5), jnp.int32)
+    with self.assertRaises(ValueError):
+      utils.get_constant_sequence(
+          layer, constants, 'foo_seq', (2, 3, 5), jnp.int32
+      )
+
+
 if __name__ == '__main__':
   test_utils.main()
