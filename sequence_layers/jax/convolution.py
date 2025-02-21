@@ -1353,6 +1353,7 @@ class Conv1DTranspose(types.SequenceLayer):
     # The padding mode for the time dimension. Only 'valid', 'causal', or 'same'
     # is supported. Only streamable when using 'causal'.
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
+    groups: int = 1
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
@@ -1440,6 +1441,12 @@ class Conv1DTranspose(types.SequenceLayer):
       raise ValueError(f'Expected 3 dimension input. Got: {x.shape}')
     input_channels = x.shape[2]
 
+    if input_channels % self.config.groups != 0:
+      raise ValueError(
+          f'Input features ({input_channels}) must be divisible by groups'
+          f' ({self.config.groups}).'
+      )
+
     kernel_init = utils.shard_initializer(
         self.config.kernel_init,
         self.config.kernel_sharding,
@@ -1449,7 +1456,7 @@ class Conv1DTranspose(types.SequenceLayer):
 
     kernel_shape = (
         self.config.kernel_size,
-        input_channels,
+        input_channels // self.config.groups,
         self.config.filters,
     )
     kernel = self.param(
@@ -1483,7 +1490,7 @@ class Conv1DTranspose(types.SequenceLayer):
         lhs_dilation=(self.config.strides,),
         rhs_dilation=(self.config.dilation_rate,),
         dimension_numbers=('NHC', 'HIO', 'NHC'),
-        feature_group_count=1,
+        feature_group_count=self.config.groups,
         batch_group_count=1,
         precision=self.config.precision,
     )
@@ -1617,6 +1624,7 @@ class Conv2DTranspose(types.SequenceLayer):
     spatial_padding: types.PaddingModeString | tuple[int, int] = (
         types.PaddingMode.SAME.value
     )
+    groups: int = 1
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
@@ -1746,6 +1754,12 @@ class Conv2DTranspose(types.SequenceLayer):
       raise ValueError(f'Expected 4 dimension input. Got: {x.shape}')
     input_channels = x.shape[3]
 
+    if input_channels % self.config.groups != 0:
+      raise ValueError(
+          f'Input features ({input_channels}) must be divisible by groups'
+          f' ({self.config.groups}).'
+      )
+
     kernel_init = utils.shard_initializer(
         self.config.kernel_init,
         self.config.kernel_sharding,
@@ -1759,7 +1773,7 @@ class Conv2DTranspose(types.SequenceLayer):
     )
 
     kernel_shape = tuple(self.config.kernel_size) + (
-        input_channels,
+        input_channels // self.config.groups,
         self.config.filters,
     )
     kernel = self.param(
@@ -1793,7 +1807,7 @@ class Conv2DTranspose(types.SequenceLayer):
         lhs_dilation=self.config.strides,
         rhs_dilation=self.config.dilation_rate,
         dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-        feature_group_count=1,
+        feature_group_count=self.config.groups,
         batch_group_count=1,
         precision=self.config.precision,
     )

@@ -419,6 +419,23 @@ class Conv2DTransposeTest(test_utils.SequenceLayerTest):
     )
     self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
 
+  def test_conv2d_transpose_groups_invalid(self):
+    key = jax.random.PRNGKey(1234)
+    l = convolution.Conv2DTranspose.Config(
+        filters=2,
+        kernel_size=(3, 2),
+        groups=2,
+        name='transpose_conv2d',
+    ).make()
+
+    # 3 channels is not divisible into 2 groups.
+    batch_size, time, space, channels = 2, 20, 10, 3
+    x = test_utils.random_sequence(
+        batch_size, time, space, channels, dtype=jnp.float32
+    )
+    with self.assertRaises(ValueError):
+      self.init_and_bind_layer(key, l, x)
+
 
 if __name__ == '__main__':
   test_utils.main()
