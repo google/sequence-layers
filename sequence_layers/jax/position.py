@@ -193,6 +193,12 @@ class ApplyRotaryPositionalEncoding(
     # Whether RoPE should be applied with positions in at least float32. This
     # option is for backwards compatibility. True is the recommended value.
     positions_in_at_least_fp32: bool = True
+    # If specified, the [batch_size, time] jnp.int32 position used for computing
+    # RoPE will be read from the constants dictionary with this name. Otherwise,
+    # the physical position in the array is used. If specified,
+    # only_advance_position_for_valid_timesteps has no effect.
+    positions_name: str | None = None
+    # An optional name for the layer.
     name: str | None = None
 
     def make(self) -> 'ApplyRotaryPositionalEncoding':
@@ -239,8 +245,11 @@ class ApplyRotaryPositionalEncoding(
   ) -> types.State:
     self._check_inputs(input_spec)
 
-    # State holds the current timestep (batched).
-    if self.config.only_advance_position_for_valid_timesteps:
+    # State holds the current timestep (batched). If step_positions_name is
+    # specified, the layer does not track position internally.
+    if self.config.positions_name:
+      return ()
+    elif self.config.only_advance_position_for_valid_timesteps:
       return jnp.full((batch_size, 1), -1, dtype=jnp.int32)
     else:
       return jnp.zeros((batch_size, 1), dtype=jnp.int32)
@@ -289,7 +298,16 @@ class ApplyRotaryPositionalEncoding(
     x_time = x.shape[1]
 
     # Get positions for the batch.
-    if self.config.only_advance_position_for_valid_timesteps:
+    if self.config.positions_name:
+      positions = utils.get_constant_array(
+          self,
+          constants,
+          self.config.positions_name,
+          expected_shape=(x.shape[0], x_time),
+          unpack_sequence=True,
+          allow_broadcastable=True,
+      )
+    elif self.config.only_advance_position_for_valid_timesteps:
       positions = state + jnp.cumsum(x.mask.astype(jnp.int32), axis=1)
       state = positions[:, -1:]
     else:
@@ -309,7 +327,16 @@ class ApplyRotaryPositionalEncoding(
       constants: types.Constants | None = None,
   ) -> types.Sequence:
     self._check_inputs(x.channel_spec)
-    if self.config.only_advance_position_for_valid_timesteps:
+    if self.config.positions_name:
+      positions = utils.get_constant_array(
+          self,
+          constants,
+          self.config.positions_name,
+          expected_shape=x.shape[:2],
+          unpack_sequence=True,
+          allow_broadcastable=True,
+      )
+    elif self.config.only_advance_position_for_valid_timesteps:
       positions = jnp.maximum(
           0, jnp.cumsum(x.mask.astype(jnp.int32), axis=1) - 1
       )
