@@ -810,6 +810,7 @@ class T5RelativePositionEmbedding(RelativePositionEmbedding):
   @dataclasses.dataclass(frozen=True)
   class Config(RelativePositionEmbedding.Config):
     """Config for T5RelativePositionEmbedding."""
+
     num_buckets: int
     num_heads: int
     bidirectional: bool
@@ -4703,6 +4704,15 @@ class StreamingLocalDotProductAttention(
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # Whether to use an experimental ring buffer implementation for the KV cache
+    # updates. This implementation is more compute and memory efficient than the
+    # default implementation on TPU.
+    #
+    # Limitations:
+    # * Incompatible with attention sinks.
+    # * Incompatible with relative_position_embedding.
+    # * Requires streaming step sizes of 1.
+    use_kv_cache_ringbuffer: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -4782,6 +4792,17 @@ class StreamingLocalDotProductAttention(
           ),
           self.config.param_dtype,
       )
+
+    if self.config.use_kv_cache_ringbuffer:
+      if self.config.num_sink_embeddings > 0:
+        raise NotImplementedError(
+            'Sink embeddings are not supported with use_kv_cache_ringbuffer.'
+        )
+      if self.config.relative_position_embedding:
+        raise NotImplementedError(
+            'Relative position embeddings are not supported with'
+            ' use_kv_cache_ringbuffer.'
+        )
 
     self.query_network = (
         self.config.query_network.make() if self.config.query_network else None
@@ -4976,6 +4997,12 @@ class StreamingLocalDotProductAttention(
     else:
       value_network_state = ()
 
+    if self.config.use_kv_cache_ringbuffer:
+      # We only need timestep tracking for KV cache insertions.
+      time_step = jnp.zeros([batch_size], dtype=jnp.int32)
+    else:
+      time_step = ()
+
     return (
         kv_buffer_keys,
         kv_buffer_values,
@@ -4984,6 +5011,7 @@ class StreamingLocalDotProductAttention(
         key_network_state,
         value_network_state,
         query_delay_buffer,
+        time_step,
     )
 
   @nn.nowrap
@@ -5045,6 +5073,7 @@ class StreamingLocalDotProductAttention(
         key_network_state,
         value_network_state,
         query_delay_buffer,
+        time_step,
     ) = state
     kv_buffer_size = kv_buffer_keys.shape[1]
 
@@ -5089,18 +5118,24 @@ class StreamingLocalDotProductAttention(
     # computing context vectors.
     values = values.mask_invalid()
 
-    # To process a step, concatenate our kv_buffer_size KV buffer with the input
-    # x_values_time timesteps.
-    kv_buffer_keys = jnp.concatenate([kv_buffer_keys, keys.values], axis=1)
-    kv_buffer_values = jnp.concatenate(
-        [kv_buffer_values, values.values], axis=1
-    )
-    # The mask could differ based on key_network / value_network.
-    kv_buffer_mask = jnp.concatenate(
-        [kv_buffer_mask, utils.combine_mask(keys.mask, values.mask)], axis=1
-    )
+    # The key and value network could have changed the mask, so we combine the
+    # keys and values mask. This is inexpensive but would be nice to skip.
+    combined_mask = utils.combine_mask(keys.mask, values.mask)
 
-    kv_buffer_time = x_values_time + kv_buffer_size
+    if self.config.use_kv_cache_ringbuffer:
+      # Leave the input key/values and KV cache separate for multi key/value dot
+      # product attention.
+      kv_buffer_time = kv_buffer_size
+    else:
+      # To process a step, concatenate our kv_buffer_size KV buffer with the
+      # input x_values_time timesteps.
+      kv_buffer_keys = jnp.concatenate([kv_buffer_keys, keys.values], axis=1)
+      kv_buffer_values = jnp.concatenate(
+          [kv_buffer_values, values.values], axis=1
+      )
+      # The mask could differ based on key_network / value_network.
+      kv_buffer_mask = jnp.concatenate([kv_buffer_mask, combined_mask], axis=1)
+      kv_buffer_time = x_values_time + kv_buffer_size
 
     # If we have a query delay buffer, we need to insert the current block of
     # queries into it, and pop the oldest x_values_time queries off. If no query
@@ -5157,32 +5192,76 @@ class StreamingLocalDotProductAttention(
     ):
       get_logits_fn = self.relative_position_embedding.get_logits_streaming
 
-    context_vectors, probabilities = _dot_product_attention(
-        queries=queries.values,
-        keys=kv_buffer_keys,
-        values=kv_buffer_values,
-        logit_visibility_mask=valid_mask,
-        logit_bias=None,
-        training=training,
-        attention_logits_soft_cap=self.config.attention_logits_soft_cap,
-        attention_probabilities_dropout=self._attention_probabilities_dropout,
-        per_dim_scale=self._per_dim_scale,
-        query_scale=self.config.query_scale,
-        precision=self.config.precision,
-        get_logits_fn=get_logits_fn,
-        zero_fully_masked=self.config.zero_fully_masked,
-        compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
-        sink_key_logits=sink_key_logits,
-        sink_value_embeddings=self._sink_value_embeddings
-        if self.config.num_sink_embeddings > 0
-        else None,
-    )
+    # Compute context vectors:
+    if self.config.use_kv_cache_ringbuffer:
+      assert not self.relative_position_embedding
+      assert not self.config.num_sink_embeddings
+      assert not get_logits_fn
 
-    # Preserve last max_past_horizon as state for next step.
-    kv_buffer_keys = kv_buffer_keys[:, -kv_buffer_size:]
-    kv_buffer_values = kv_buffer_values[:, -kv_buffer_size:]
-    kv_buffer_mask = kv_buffer_mask[:, -kv_buffer_size:]
+      context_vectors, probabilities = _multi_key_value_dot_product_attention(
+          queries=queries.values,
+          kv_buffers=(
+              (kv_buffer_keys, kv_buffer_values, valid_mask),
+              (
+                  keys.values,
+                  values.values,
+                  combined_mask[:, jnp.newaxis, jnp.newaxis, :],
+              ),
+          ),
+          logit_bias=None,
+          training=training,
+          attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+          attention_probabilities_dropout=self._attention_probabilities_dropout,
+          per_dim_scale=self._per_dim_scale,
+          query_scale=self.config.query_scale,
+          precision=self.config.precision,
+          get_logits_fn=None,
+          zero_fully_masked=self.config.zero_fully_masked,
+          compute_dtype=compute_dtype,
+      )
+      probabilities = jnp.concatenate(probabilities, axis=-1)
+    else:
+      context_vectors, probabilities = _dot_product_attention(
+          queries=queries.values,
+          keys=kv_buffer_keys,
+          values=kv_buffer_values,
+          logit_visibility_mask=valid_mask,
+          logit_bias=None,
+          training=training,
+          attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+          attention_probabilities_dropout=self._attention_probabilities_dropout,
+          per_dim_scale=self._per_dim_scale,
+          query_scale=self.config.query_scale,
+          precision=self.config.precision,
+          get_logits_fn=get_logits_fn,
+          zero_fully_masked=self.config.zero_fully_masked,
+          compute_dtype=compute_dtype,
+          num_sink_embeddings=self.config.num_sink_embeddings,
+          sink_key_logits=sink_key_logits,
+          sink_value_embeddings=self._sink_value_embeddings
+          if self.config.num_sink_embeddings > 0
+          else None,
+      )
+
+    # Update KV caches and state.
+    if self.config.use_kv_cache_ringbuffer:
+      # Write latest keys, values and masks to the appropriate position in the
+      # KV cache ring buffers.
+      i = time_step % kv_buffer_size
+      assert combined_mask.shape[1] == keys.shape[1]
+      assert values.shape[1] == keys.shape[1]
+
+      time_step += x_values_time
+
+      update_fn = jax.vmap(lambda x, u, i: x.at[i].set(u.squeeze(0)))
+      kv_buffer_keys = update_fn(kv_buffer_keys, keys.values, i)
+      kv_buffer_values = update_fn(kv_buffer_values, values.values, i)
+      kv_buffer_mask = update_fn(kv_buffer_mask, combined_mask, i)
+    else:
+      # Preserve last max_past_horizon as state for next step.
+      kv_buffer_keys = kv_buffer_keys[:, -kv_buffer_size:]
+      kv_buffer_values = kv_buffer_values[:, -kv_buffer_size:]
+      kv_buffer_mask = kv_buffer_mask[:, -kv_buffer_size:]
 
     state = (
         kv_buffer_keys,
@@ -5192,6 +5271,7 @@ class StreamingLocalDotProductAttention(
         key_network_state,
         value_network_state,
         query_delay_buffer,
+        time_step,
     )
 
     emits = CrossAttentionEmits(

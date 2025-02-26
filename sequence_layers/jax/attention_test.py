@@ -3537,6 +3537,89 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
         grad_rtol=1e-5,
     )
 
+  @parameterized.parameters(
+      # max_past_horizon > 0, max_future_horizon == 0
+      (1, 2, 3, 0),
+      (3, 5, 3, 0),
+      # max_past_horizon > 0, max_future_horizon > 0
+      (3, 5, 3, 2),
+      (3, 5, 3, 5),
+  )
+  def test_use_kv_cache_ringbuffer(
+      self,
+      num_heads,
+      units_per_head,
+      max_past_horizon,
+      max_future_horizon,
+  ):
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_channels = 2, 2
+    source_name = 'source'
+    block_size = max(1, max_future_horizon, max_past_horizon - 1)
+
+    l = attention.StreamingLocalDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        block_size=block_size,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        per_dim_scale=True,
+        precision=jax.lax.Precision.HIGHEST,
+        name='streaming_local_dot_product_attention',
+        use_kv_cache_ringbuffer=True,
+    ).make()
+
+    source = test_utils.random_sequence(batch_size, 1, source_channels)
+    constants = {source_name: source}
+    channels = 3
+    x = test_utils.random_sequence(batch_size, 1, channels)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'streaming_local_dot_product_attention')
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.input_latency, max_future_horizon)
+
+    assert_param_dtypes_inits_shapes(
+        l,
+        x,
+        constants=constants,
+        num_sink_embeddings=0,
+        input_projection=l.config.input_projection,
+    )
+
+    channels = 3
+    for time in range(21, 23):
+      # Source and x must be the same length.
+      x = test_utils.random_sequence(
+          batch_size, time, channels, low_length=time // 2
+      )
+      # Re-use x's random mask.
+      source = types.Sequence(
+          test_utils.random_sequence(
+              batch_size, time, source_channels, random_lengths=False
+          ).values,
+          x.mask,
+      ).mask_invalid()
+      constants = {source_name: source}
+      self.assertEqual(
+          l.get_output_shape_for_sequence(x, constants=constants),
+          (num_heads, units_per_head),
+      )
+      self.verify_contract(
+          l,
+          x,
+          training=False,
+          constants=constants,
+          stream_constants=True,
+          pad_constants=True,
+          test_2x_step=False,
+          grad_atol=1e-5,
+          grad_rtol=1e-5,
+      )
+
 
 if __name__ == '__main__':
   test_utils.main()
