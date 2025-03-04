@@ -1,4 +1,4 @@
-# Copyright 2024 Google LLC
+# Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,18 +14,26 @@
 """Recurrent layers."""
 
 import dataclasses
-from typing import Callable
+from typing import Callable, Literal
 
+import einops
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from recurrentgemma._src import common
+from recurrentgemma._src.jax import complex_lib
+from recurrentgemma._src.jax import layers
+from recurrentgemma._src.jax import scan
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+
+from google3.learning.deepmind.jax.typing import typing as jt
 
 
 __all__ = (
     # go/keep-sorted start
     'LSTM',
+    'RGLRU',
     # go/keep-sorted end
 )
 
@@ -233,3 +241,414 @@ class LSTM(types.SequenceLayer):
     c = jnp.zeros((batch_size, 1, self.config.units), dtype=compute_dtype)
     h = jnp.zeros((batch_size, 1, self.config.units), dtype=compute_dtype)
     return (c, h)
+
+
+def _rnn_real_param_init(
+    min_rad: float,
+    max_rad: float,
+    transform: str = 'softplus',
+    eps: float = 1e-8,
+) -> nn.initializers.Initializer:
+  """Initializes the `A` real parameter of the RG-LRU uniformly on a ring."""
+
+  def init(
+      key: jax.Array,
+      shape: types.Shape,
+      dtype: types.DType = jnp.float32,
+  ) -> jt.Float[jt.ArrayT, 'e']:
+    unif = jax.random.uniform(key, shape=shape)
+    # Proportional to area in a ring.
+    a_real = 0.5 * jnp.log(unif * (max_rad**2 - min_rad**2) + min_rad**2 + eps)
+
+    if transform == 'softplus':
+      # Inverse transform.
+      return jnp.log(jnp.exp(-a_real) - 1.0).astype(dtype)
+    else:
+      raise NotImplementedError()
+
+  return init
+
+
+def _rnn_imag_param_init(
+    max_rad: float,
+) -> nn.initializers.Initializer:
+  """Initializes the `A` imag parameter of the RG-LRU uniformly on a ring."""
+
+  def init(
+      key: jax.Array,
+      shape: types.ShapeLike,
+      dtype: types.DType = jnp.float32,
+  ) -> jt.Float[jt.ArrayT, 'e']:
+    unif = jax.random.uniform(key, shape=shape)
+    return (jnp.pi * max_rad * unif).astype(dtype)
+
+  return init
+
+
+class RGLRU(types.SequenceLayer):
+  """A Real-Gated Linear Recurrent Unit (RG-LRU) layer.
+
+  From the Griffin architecture: https://arxiv.org/abs/2402.19427
+
+  Implementation follows https://github.com/google-deepmind/recurrentgemma.
+
+  WARNING: The current implementation is not able to work with anything but
+    left-aligned ragged masks. Non-contiguous masks will incorrectly compute
+    results on the mask=False timesteps.
+  """
+
+  ScanType = Literal[  # pylint: disable=invalid-name
+      'auto', 'linear_native', 'associative_native', 'linear_pallas'
+  ]
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config for RG-LRU."""
+
+    units: int
+    num_heads: int
+    scan_type: 'RGLRU.ScanType' = 'auto'
+    scan_sharding: types.Sharding | None = None
+    only_real: bool = True
+    min_rad: float = 0.9
+    # Sharding for the `A` real and imaginary parameters.
+    # Shape is [units] if only_real or [units // 2] if complex.
+    a_sharding: types.Sharding | None = None
+    gate_kernel_variance_scale: float = 1.0
+    # Sharding for the kernel matrices in the gate operations. Shape is
+    # [num_heads, units // units_per_head, units // units_per_head] if only_real
+    # or [num_heads, units // units_per_head, units // (2 * units_per_head)] if
+    # complex.
+    gate_kernel_sharding: types.Sharding | None = None
+    # Sharding for the bias matrices in the gate operations. Shape is
+    # [num_heads, units // units_per_head] if only_real or [num_heads, units //
+    # (2 * units_per_head)] if complex.
+    gate_bias_sharding: types.Sharding | None = None
+    dtype: types.DType | None = None
+    param_dtype: types.DType | None = jnp.float32
+    # An optional name for the layer.
+    name: str | None = None
+
+    def __post_init__(self):
+      if not self.only_real:
+        if self.units % 2 != 0:
+          raise ValueError(
+              'If `only_real=False`, `units` must be even, but got'
+              f' {self.units=}.'
+          )
+        if self.min_rad >= 0.999:
+          raise ValueError(
+              'If `only_real=False`, `min_rad` must be less than 0.999, but got'
+              f' {self.min_rad=}.'
+          )
+
+      complex_units = self.units if self.only_real else self.units // 2
+      if complex_units % self.num_heads != 0:
+        raise ValueError(
+            'The number of heads must divide the number of complex units, but'
+            f' got {self.num_heads=} and {complex_units=}.'
+        )
+
+    def make(self) -> 'RGLRU':
+      return RGLRU(self, name=self.name)
+
+  config: Config
+
+  @property
+  def _scan_type(self) -> common.ScanType:
+    match self.config.scan_type:
+      case 'auto':
+        return common.ScanType.AUTO
+      case 'linear_native':
+        return common.ScanType.LINEAR_NATIVE
+      case 'associative_native':
+        return common.ScanType.ASSOCIATIVE_NATIVE
+      case 'linear_pallas':
+        return common.ScanType.LINEAR_PALLAS
+      case _:
+        raise ValueError(f'Unknown scan type: {self.config.scan_type}')
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    return (self.config.units,)
+
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+  ) -> types.DType:
+    return utils.get_promoted_dtype(
+        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+    )
+
+  @jt.typed
+  def merged_to_complex(
+      self,
+      x: jt.Float[jt.ArrayT, '*b'],
+  ) -> complex_lib.RealOrComplex:
+    """Returns a (complex) array from a merged array.
+
+    A merged array is one where the first half over the last axis represents the
+    real part of a complex array, while the second part represents the
+    imaginary.
+
+    Args:
+      x: The merged array.
+
+    Returns:
+      A (complex) array represented by `x`.
+    """
+    if self.config.only_real:
+      return x
+
+    assert x.shape[-1] % 2 == 0
+    return self.real_imag_complex(*jnp.split(x, 2, axis=-1))
+
+  @jt.typed
+  def real_imag_complex(
+      self,
+      real: jt.Float[jt.ArrayT, '*b'],
+      imag: jt.Float[jt.ArrayT, '*b'] | None,
+  ) -> complex_lib.RealOrComplex:
+    """Based on the settings, creates a (complex) number in the correct format.
+
+    Args:
+      real: The real part of the complex number.
+      imag: The imaginary part of the complex number.
+
+    Returns:
+      The correct representation for a complex number. If `only_real=True`
+      the function expects that `imag` is None and will directly return `real`.
+      When using `bfloat16` or Pallas a `complex_lib.Complex` is returned,
+      otherwise a native jax array with a complex type.
+    """
+    if self.config.only_real:
+      assert imag is None
+      return real
+
+    if self.use_custom_complex(real.dtype):
+      return complex_lib.Complex(real, imag)
+    else:
+      return real + 1j * imag
+
+  def use_custom_complex(self, real_dtype: jnp.dtype) -> bool:
+    return (
+        real_dtype in (jnp.bfloat16, jnp.float16)
+        or self._scan_type == common.ScanType.LINEAR_PALLAS
+    )
+
+  @jt.typed
+  def complex_to_merged(
+      self,
+      x: complex_lib.RealOrComplex,
+  ) -> jt.Float[jt.ArrayT, '*b']:
+    """Returns a merged array from a (complex) array.
+
+    A merged array is one where the first half over the last axis represents the
+    real part of a complex array, while the second part represents the
+    imaginary.
+
+    Args:
+      x: The (complex) array.
+
+    Returns:
+      A merged array represented by `x`.
+    """
+    if self.config.only_real:
+      assert not isinstance(x, complex_lib.Complex) and not jnp.iscomplexobj(x)
+      return x
+    else:
+      return jnp.concatenate([x.real, x.imag], axis=-1)
+
+  @nn.compact
+  def _cell(
+      self,
+      x: types.Sequence,
+      h: jax.Array,
+      segment_pos: jax.Array,
+  ) -> tuple[types.Sequence, jax.Array]:
+    mask = x.mask
+    x = x.values
+
+    width_output = (
+        self.config.units if self.config.only_real else self.config.units // 2
+    )
+    a_real_param = self.param(
+        'a_param',
+        utils.shard_initializer(
+            _rnn_real_param_init(min_rad=self.config.min_rad, max_rad=0.999),
+            self.config.a_sharding,
+        ),
+        [width_output],
+        self.config.param_dtype,
+    )
+
+    a_imag_param = None
+    if not self.config.only_real:
+      a_imag_param = self.param(
+          'a_imag_param',
+          utils.shard_initializer(
+              _rnn_imag_param_init(max_rad=0.1), self.config.a_sharding
+          ),
+          [width_output],
+          self.config.param_dtype,
+      )
+
+    if width_output % self.config.num_heads != 0:
+      raise ValueError(
+          'The number of heads must divide the width of the output, but got'
+          f' {self.config.num_heads=} and {width_output=}.'
+      )
+    units_per_head = width_output // self.config.num_heads
+
+    input_gate = utils.FlaxEinsumDense(
+        '...hi,hij->...hj',
+        output_shape=(self.config.num_heads, units_per_head),
+        bias_axes='hj',
+        kernel_init=nn.initializers.variance_scaling(
+            scale=self.config.gate_kernel_variance_scale,
+            mode='fan_in',
+            distribution='normal',
+        ),
+        kernel_sharding=self.config.gate_kernel_sharding,
+        bias_sharding=self.config.gate_bias_sharding,
+        dtype=self.config.dtype,
+        param_dtype=self.config.param_dtype,
+        name='input_gate',
+    )
+    a_gate = utils.FlaxEinsumDense(
+        '...hi,hij->...hj',
+        output_shape=(self.config.num_heads, units_per_head),
+        bias_axes='hj',
+        kernel_init=nn.initializers.variance_scaling(
+            scale=self.config.gate_kernel_variance_scale,
+            mode='fan_in',
+            distribution='normal',
+        ),
+        kernel_sharding=self.config.gate_kernel_sharding,
+        bias_sharding=self.config.gate_bias_sharding,
+        dtype=self.config.dtype,
+        param_dtype=self.config.param_dtype,
+        name='a_gate',
+    )
+
+    x, a_real_param, a_imag_param = nn.dtypes.promote_dtype(
+        x,
+        a_real_param,
+        a_imag_param,
+        dtype=self.config.dtype,
+    )
+
+    # Group x into heads.
+    x_heads = einops.rearrange(
+        x, '... (h i) -> ... h i', h=self.config.num_heads
+    )
+
+    # Compute input and `A` gates.
+    gate_x = complex_lib.sigmoid(input_gate(x_heads))
+    gate_x = einops.rearrange(
+        gate_x, '... h j -> ... (h j)', h=self.config.num_heads
+    )
+
+    gate_a = complex_lib.sigmoid(a_gate(x_heads))
+    gate_a = einops.rearrange(
+        gate_a, '... h j -> ... (h j)', h=self.config.num_heads
+    )
+
+    # Compute the parameter `A` of the recurrence.
+    log_a_real = -8.0 * gate_a * complex_lib.softplus(a_real_param)
+
+    if self.config.only_real:
+      a = complex_lib.exp(log_a_real)
+    else:
+      log_a_imag = a_imag_param * gate_a
+      log_a_complex = self.real_imag_complex(log_a_real, log_a_imag)
+      a = complex_lib.exp(log_a_complex)
+
+    # Since A = |A| e^(i*θ), log A = log |A| + i*θ.
+    # Real(log A) = log |A| therefore |A|^2 = e^(2*Real(log A))
+    mag_a_squared = complex_lib.exp(2 * log_a_real)
+
+    x = self.merged_to_complex(x)
+
+    assert h.dtype == jnp.float32, h.dtype
+    h = self.merged_to_complex(h)
+
+    # Gate the input.
+    gated_x = x * gate_x
+
+    # Apply gamma normalization to the input. We need to clip the derivatives of
+    # `sqrt` in order to prevent NaNs during training in bfloat16.
+    reset = (segment_pos == 0).astype(a)
+    multiplier = layers.sqrt_bound_derivative(
+        1 - mag_a_squared, max_gradient=1000
+    )
+    multiplier = (
+        reset[..., jnp.newaxis] + (1 - reset)[..., jnp.newaxis] * multiplier
+    )
+    normalized_x = gated_x * multiplier.astype(gated_x.dtype)
+
+    # TODO(b/398200724): Add masking support to the scan and skip state updates
+    # on invalid timesteps.
+    y, h = scan.linear_scan(
+        x=normalized_x,
+        a=a * (1 - reset[..., jnp.newaxis]),
+        h0=h,
+        scan_type=self._scan_type,
+        sharding_spec=self.config.scan_sharding,
+        unroll=128,
+    )
+
+    y = self.complex_to_merged(y)
+    h = self.complex_to_merged(h)
+    assert h.dtype == jnp.float32, h.dtype
+    return types.Sequence(y, mask), h
+
+  @types.check_step
+  def step(
+      self,
+      x: types.Sequence,
+      state: types.State,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.State]:
+    h, start_index = state
+    segment_pos = (
+        start_index[:, jnp.newaxis] + jnp.arange(x.shape[1])[jnp.newaxis, :]
+    )
+    y, h = self._cell(x, h, segment_pos)
+    return y, (h, start_index + x.shape[1])
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    segment_pos = jnp.arange(x.shape[1])[jnp.newaxis, :]
+    h, _ = self.get_initial_state(
+        x.shape[0], x.channel_spec, training=training, constants=constants
+    )
+    y, _ = self._cell(x, h, segment_pos)
+    return y
+
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: types.ShapeDType,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.State:
+    # Always use float32 for the state, regardless of the input dtype.
+    h = jnp.zeros((batch_size, self.config.units), dtype=jnp.float32)
+    start_index = jnp.zeros([batch_size], jnp.int32)
+    return h, start_index
