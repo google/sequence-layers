@@ -607,15 +607,25 @@ def _sequence_checker_fn(value, origin_type, args, memo):
 
   values_dtype, mask_dtype = args
 
-  typeguard.check_type(
-      value=value.values,
-      expected_type=values_dtype,
-      argname='values',
-      memo=memo,
-  )
-  typeguard.check_type(
-      value=value.mask, expected_type=mask_dtype, argname='mask', memo=memo
-  )
+  try:
+    typeguard.check_type_internal(
+        value.values,
+        values_dtype,
+        memo=memo,
+    )
+  except typeguard.TypeCheckError as exc:
+    exc.append_path_element('values')
+    raise
+
+  try:
+    typeguard.check_type_internal(
+        value.mask,
+        mask_dtype,
+        memo=memo,
+    )
+  except typeguard.TypeCheckError as exc:
+    exc.append_path_element('mask')
+    raise
 
 
 def _sequence_checker_lookup_fn(
