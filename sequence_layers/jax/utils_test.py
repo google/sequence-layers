@@ -58,6 +58,40 @@ class FlaxEinsumDenseTest(test_utils.SequenceLayerTest):
     y_expected += l.variables['params']['bias']
     chex.assert_trees_all_close(y, y_expected)
 
+  def test_basic_dense_with_einsum_factory(self):
+    def einsum_factory() -> types.JnpEinsumT:
+      def custom_einsum(equation, *args, **kwargs):
+        return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+      return custom_einsum
+
+    key = jax.random.PRNGKey(1234)
+    l = utils.FlaxEinsumDense(
+        equation='abc,cd->abd',
+        output_shape=(3, 7),
+        bias_axes='d',
+        bias_init=nn.initializers.zeros_init(),
+        einsum_factory=einsum_factory,
+    )
+
+    x = jax.random.normal(key, (2, 3, 5))
+    l = l.bind(l.init(key, x))
+
+    chex.assert_trees_all_equal_shapes_and_dtypes(
+        l.variables,
+        {
+            'params': {
+                'kernel': jnp.zeros((5, 7)),
+                'bias': jnp.zeros((7,)),
+            }
+        },
+    )
+
+    y = l(x)
+    self.assertEqual(y.shape, (2, 3, 7))
+    y_expected = jnp.einsum('abc,cd->abd', x, l.variables['params']['kernel'])
+    y_expected *= 3
+    chex.assert_trees_all_close(y, y_expected)
+
 
 class AddCountLayer(types.PreservesShape, types.PreservesType, types.Emitting):
   """A test layer that just adds a counter to the input."""

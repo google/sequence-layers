@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 from sequence_layers.jax import dense
 from sequence_layers.jax import test_utils
+from sequence_layers.jax import types
 
 from google3.testing.pybase import parameterized
 
@@ -71,6 +72,28 @@ class DenseTest(test_utils.SequenceLayerTest):
     self.assertCountEqual(
         l.variables['params'], ['kernel', 'bias'] if use_bias else ['kernel']
     )
+
+  def test_use_einsum_factory(self):
+    """Check that einsum_factory produces is used for dense einsum."""
+    def einsum_factory() -> types.JnpEinsumT:
+      def custom_einsum(equation, *args, **kwargs):
+        return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+      return custom_einsum
+    key = jax.random.PRNGKey(1234)
+    l = dense.Dense.Config(3, einsum_factory=einsum_factory).make()
+    x = test_utils.random_sequence(2, 3, 5)
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertCountEqual(
+        l.variables['params'], ['kernel', 'bias']
+    )
+
+    y = l(x, training=False)
+    self.assertEqual(y.shape, (2, 3, 3))
+    kernel = flax.core.meta.unbox(l.variables)['params']['kernel']
+    y_expected = x.apply_values(
+        lambda v: jnp.einsum('abc,cd->abd', v, kernel) * 3
+    ).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
 
   @parameterized.product(
       test_utils.standard_dtype_configs(),

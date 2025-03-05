@@ -108,6 +108,9 @@ ApplyValuesMaskedParams = ParamSpec('ApplyValuesMaskedParams')
 ApplyParams = ParamSpec('ApplyParams')
 ApplyMaskedParams = ParamSpec('ApplyMaskedParams')
 
+# Einsum factory types.
+JnpEinsumT = Callable[[str, Any, Any], Any]
+EinsumFactoryT = Callable[..., JnpEinsumT]
 
 # SequenceLayer type aliases:
 State = jt.AnyPyTree
