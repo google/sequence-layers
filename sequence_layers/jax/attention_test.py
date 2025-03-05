@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for attention layers."""
+import dataclasses
 import functools
 import itertools
 
@@ -2090,6 +2091,63 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         grad_atol=1e-5,
         grad_rtol=1e-5,
     )
+
+  @parameterized.parameters(
+      (attention.CombinedQueryKeyValueProjection(),),
+      (attention.SeparateQueryKeyValueProjection(),),
+      (attention.QueryAndKeyValueProjection(),),
+      (attention.QueryAndSharedKeyValueProjection(),),
+  )
+  def test_einsum_factory(
+      self,
+      input_projection: attention.QueryKeyValueProjectionConfig,
+  ):
+    def einsum_factory() -> types.JnpEinsumT:
+      def custom_einsum(equation, *args, **kwargs):
+        return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+
+      return custom_einsum
+
+    key = jax.random.PRNGKey(1234)
+    batch_size, units_per_head = 2, 5
+    max_past_horizon = 7
+    max_future_horizon = 11
+    num_sink_embeddings = 0
+    num_heads = 3
+    num_kv_heads = None
+    l_default = attention.DotProductSelfAttention.Config(
+        num_heads=num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=units_per_head,
+        input_projection=input_projection,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        precision=jax.lax.Precision.HIGHEST,
+        num_sink_embeddings=num_sink_embeddings,
+        name='dot_product_self_attention',
+    ).make()
+    l_einsum = attention.DotProductSelfAttention.Config(
+        num_heads=num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=units_per_head,
+        input_projection=dataclasses.replace(
+            input_projection, einsum_factory=einsum_factory
+        ),
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        precision=jax.lax.Precision.HIGHEST,
+        num_sink_embeddings=num_sink_embeddings,
+        name='dot_product_self_attention',
+    ).make()
+
+    # Input length is unlikely to affect this test so no need to sweep it.
+    x = test_utils.random_sequence(batch_size, 16, 2)
+    l_einsum = self.init_and_bind_layer(key, l_einsum, x)
+    l_default = self.init_and_bind_layer(key, l_default, x)
+
+    y_einsum = l_einsum.layer(x, training=False).mask_invalid()
+    y_default = l_default.layer(x, training=False).mask_invalid()
+    self.assertSequencesNotClose(y_einsum, y_default)
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0. Steppable.

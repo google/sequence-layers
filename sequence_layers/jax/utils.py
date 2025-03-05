@@ -615,6 +615,7 @@ class EinsumCommon(Protocol):
       kernel_sharding: types.Sharding | None = None,
       bias_init: nn.initializers.Initializer = nn.initializers.zeros_init(),
       bias_sharding: types.Sharding | None = None,
+      einsum_factory: types.EinsumFactoryT | None = None,
       **kernel_init_kwargs,
   ) -> jax.Array:
     """Compute einsum with the given shapes. Call from an @nn.compact method."""
@@ -632,7 +633,12 @@ class EinsumCommon(Protocol):
         inputs, kernel, bias, dtype=dtype
     )
 
-    ret = jnp.einsum(equation, inputs, kernel, precision=precision)
+    if einsum_factory is None:
+      ret = jnp.einsum(equation, inputs, kernel, precision=precision)
+    else:
+      einsum_func = einsum_factory()
+      ret = einsum_func(equation, inputs, kernel)
+
     if bias is not None:
       ret = bias_add(ret, bias)
     if activation is not None:
@@ -667,6 +673,8 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
   kernel_sharding: types.Sharding | None = None
   bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
   bias_sharding: types.Sharding | None = None
+  # Optional einsum factory to replace the default jnp.einsum callable.
+  einsum_factory: types.EinsumFactoryT | None = None
 
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     """Returns the layer's output dtype for the specified input dtype."""
@@ -706,6 +714,7 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
         kernel_sharding=self.kernel_sharding,
         bias_init=self.bias_init,
         bias_sharding=self.bias_sharding,
+        einsum_factory=self.einsum_factory,
     )
 
 

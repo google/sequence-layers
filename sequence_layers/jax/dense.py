@@ -62,6 +62,9 @@ class Dense(types.Stateless, utils.EinsumCommon):
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     # Optional sharding for the bias.
     bias_sharding: types.Sharding | None = None
+    # Optional callable that returns a jnp.einsum-compatible function to use
+    # instead of jnp.einsum. For example, to enable quantization aware training.
+    einsum_factory: types.EinsumFactoryT | None = None
     # Optional name for the layer.
     name: str | None = None
 
@@ -124,6 +127,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
         bias_sharding=self.config.bias_sharding,
         projectable=True,
         axes_types=(meta.AxisType.FANIN, None),
+        einsum_factory=self.config.einsum_factory,
     )
 
 

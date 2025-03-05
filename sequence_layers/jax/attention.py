@@ -181,7 +181,10 @@ def _get_source(
 
 @dataclasses.dataclass(frozen=True)
 class QueryKeyValueProjectionConfig:
-  pass
+  # Optional callable that returns a jnp.einsum-compatible function to use
+  # instead of jnp.einsum for the query, key and value projections.
+  # For example, to enable quantization aware training.
+  einsum_factory: types.EinsumFactoryT | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -359,6 +362,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='query_key_value_projection',
         )
       case SeparateQueryKeyValueProjection():
@@ -378,6 +382,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='query_projection',
         )
         self._k = utils.FlaxEinsumDense(
@@ -396,6 +401,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='key_projection',
         )
         self._v = utils.FlaxEinsumDense(
@@ -414,6 +420,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='value_projection',
         )
       case QueryAndKeyValueProjection():
@@ -433,6 +440,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='query_projection',
         )
         self._kv = utils.FlaxEinsumDense(
@@ -456,6 +464,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='key_value_projection',
         )
       case QueryAndSharedKeyValueProjection():
@@ -475,6 +484,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='query_projection',
         )
         self._shared_kv = utils.FlaxEinsumDense(
@@ -497,6 +507,7 @@ class AttentionInputProjectionHelper:
             precision=precision,
             dtype=dtype,
             param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
             name='shared_key_value_projection',
         )
 
@@ -978,6 +989,7 @@ class TransformerXLRelativePositionEmbedding(RelativePositionEmbedding):
     v_sharding: types.Sharding | None = None
     pos_proj_sharding: types.Sharding | None = None
     param_dtype: types.DType = jnp.float32
+    einsum_factory: types.EinsumFactoryT | None = None
 
     def make(self) -> 'TransformerXLRelativePositionEmbedding':
       return TransformerXLRelativePositionEmbedding(self)
@@ -995,6 +1007,7 @@ class TransformerXLRelativePositionEmbedding(RelativePositionEmbedding):
             axes_types=(meta.AxisType.FANIN, None, None),
         ),
         param_dtype=self.config.param_dtype,
+        einsum_factory=self.config.einsum_factory,
         name='pos_proj',
     )
     if self.config.use_bias:
