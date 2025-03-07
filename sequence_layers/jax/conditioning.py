@@ -90,6 +90,8 @@ class BaseConditioning(
     CONCAT = 2
     # Affine conditioning. Requires LINEAR_AFFINE projection.
     AFFINE = 3
+    # Broadcast-multiply conditioning. Requires LINEAR or IDENTITY projection.
+    MUL = 4
 
   def _projected_condition_shape(
       self, input_shape: types.Shape, condition_shape: types.Shape
@@ -148,12 +150,37 @@ class BaseConditioning(
   def _param_dtype(self) -> types.DType:
     pass
 
+  @property
+  @abc.abstractmethod
+  def _kernel_init(self) -> nn.initializers.Initializer:
+    pass
+
+  @property
+  @abc.abstractmethod
+  def _kernel_sharding(self) -> types.Sharding | None:
+    pass
+
+  @property
+  @abc.abstractmethod
+  def _bias_init(self) -> nn.initializers.Initializer:
+    pass
+
+  @property
+  @abc.abstractmethod
+  def _bias_sharding(self) -> types.Sharding | None:
+    pass
+
   def _validate(self):
     if (
         self._combination == self.Combination.AFFINE
         and self._projection != self.Projection.LINEAR_AFFINE
     ):
       raise ValueError('AFFINE combination requires LINEAR_AFFINE projection.')
+    if (
+        self._combination != self.Combination.AFFINE
+        and self._projection == self.Projection.LINEAR_AFFINE
+    ):
+      raise ValueError('LINEAR_AFFINE projection requires AFFINE combination.')
 
   def get_output_shape(
       self,
@@ -167,7 +194,7 @@ class BaseConditioning(
         input_shape, conditioning_channel_shape
     )
     match self._combination:
-      case self.Combination.ADD:
+      case self.Combination.ADD | self.Combination.MUL:
         return jnp.broadcast_shapes(input_shape, projected_conditioning_shape)
       case self.Combination.CONCAT:
         input_inner_dim = input_shape[-1] if input_shape else 1
@@ -209,6 +236,10 @@ class BaseConditioning(
                 projection_channel_shape,
                 param_dtype=self._param_dtype,
                 dtype=self._dtype,
+                kernel_init=self._kernel_init,
+                kernel_sharding=self._kernel_sharding,
+                bias_init=self._bias_init,
+                bias_sharding=self._bias_sharding,
                 name='dense',
             )
             .make()
@@ -220,6 +251,10 @@ class BaseConditioning(
                 (2,) + projection_channel_shape,
                 param_dtype=self._param_dtype,
                 dtype=self._dtype,
+                kernel_init=self._kernel_init,
+                kernel_sharding=self._kernel_sharding,
+                bias_init=self._bias_init,
+                bias_sharding=self._bias_sharding,
                 name='dense',
             )
             .make()
@@ -247,6 +282,8 @@ class BaseConditioning(
         combine_fn = utils.sequence_broadcast_concat
       case self.Combination.AFFINE:
         combine_fn = _affine_fn
+      case self.Combination.MUL:
+        combine_fn = utils.sequence_broadcast_product
       case _:
         raise ValueError(f'Unsupported combination: {self._combination}')
     return combine_fn(x, conditioning)
@@ -312,6 +349,15 @@ class Conditioning(BaseConditioning):
     dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
+    # Initializer for the kernel.
+    kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    # Optional sharding for the kernel. Any axes that are present in the input
+    # spec are marked as FANIN.
+    kernel_sharding: types.Sharding | None = None
+    # Initializer for the bias, if used and not gated by another config option.
+    bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
+    # Optional sharding for the bias.
+    bias_sharding: types.Sharding | None = None
     # An optional name for the layer.
     name: str | None = None
 
@@ -343,6 +389,22 @@ class Conditioning(BaseConditioning):
   @property
   def _param_dtype(self) -> types.DType:
     return self.config.param_dtype
+
+  @property
+  def _kernel_init(self) -> nn.initializers.Initializer:
+    return self.config.kernel_init
+
+  @property
+  def _kernel_sharding(self) -> types.Sharding | None:
+    return self.config.kernel_sharding
+
+  @property
+  def _bias_init(self) -> nn.initializers.Initializer:
+    return self.config.bias_init
+
+  @property
+  def _bias_sharding(self) -> types.Sharding | None:
+    return self.config.bias_sharding
 
   def get_initial_state(
       self,

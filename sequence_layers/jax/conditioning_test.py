@@ -29,6 +29,7 @@ IDENTITY = conditioning.Conditioning.Projection.IDENTITY
 LINEAR = conditioning.Conditioning.Projection.LINEAR
 LINEAR_AFFINE = conditioning.Conditioning.Projection.LINEAR_AFFINE
 ADD = conditioning.Conditioning.Combination.ADD
+MUL = conditioning.Conditioning.Combination.MUL
 CONCAT = conditioning.Conditioning.Combination.CONCAT
 AFFINE = conditioning.Conditioning.Combination.AFFINE
 
@@ -70,6 +71,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, ADD, (2, 5), (7,), (2, 5)),
       (LINEAR, ADD, (3, 1, 5), (2, 7), (3, 1, 5)),
       (LINEAR, ADD, (2, 7), (3, 1, 5), (2, 7)),
+      (LINEAR, MUL, tuple(), tuple(), tuple()),
+      (LINEAR, MUL, tuple(), (5,), tuple()),
+      (LINEAR, MUL, tuple(), (2, 5), tuple()),
+      (LINEAR, MUL, (2,), tuple(), (2,)),
+      (LINEAR, MUL, (2, 5), tuple(), (2, 5)),
+      (LINEAR, MUL, (5,), (7,), (5,)),
+      (LINEAR, MUL, (7,), (2, 5), (7,)),
+      (LINEAR, MUL, (2, 5), (7,), (2, 5)),
+      (LINEAR, MUL, (3, 1, 5), (2, 7), (3, 1, 5)),
+      (LINEAR, MUL, (2, 7), (3, 1, 5), (2, 7)),
       (LINEAR_AFFINE, AFFINE, tuple(), tuple(), tuple()),
       (LINEAR_AFFINE, AFFINE, tuple(), (5,), tuple()),
       (LINEAR_AFFINE, AFFINE, tuple(), (2, 5), tuple()),
