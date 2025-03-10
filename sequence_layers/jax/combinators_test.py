@@ -529,6 +529,26 @@ class ParallelTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.verify_contract(l, x, training=False)
     self.assertLen(l.variables['params'], 3)
 
+  def test_dimension_change(self):
+    # Apply a different layer on every index of the last channel.
+    # Then, stack the results to obtain the same shape as the input.
+    l = combinators.Parallel.Config(
+        [
+            simple.Slice.Config(slices=(0,)),
+            simple.Slice.Config(slices=(1,)),
+        ],
+        combination=utils.CombinationMode.STACK,
+    ).make()
+
+    batch_size, time, channels = 3, 5, 2
+    x = test_utils.random_sequence(batch_size, time, channels)
+
+    key = jax.random.PRNGKey(1234)
+    l = self.init_and_bind_layer(key, l, x)
+    y = self.verify_contract(l, x, training=False)
+
+    self.assertSequencesEqual(x, y)
+
   def test_invalid(self):
     # Different output ratios.
     l = combinators.Parallel.Config([

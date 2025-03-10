@@ -464,15 +464,13 @@ class Parallel(types.Emitting):
       constants: types.Constants | None = None,
   ) -> types.State:
     """Returns initial state for the layer."""
-    spec = input_spec
     states = []
     for child_layer in self.layers:
       states.append(
           child_layer.get_initial_state(
-              batch_size, spec, training=training, constants=constants
+              batch_size, input_spec, training=training, constants=constants
           )
       )
-      spec = child_layer.get_output_spec(spec, constants=constants)
     return tuple(states)
 
   @nn.nowrap
