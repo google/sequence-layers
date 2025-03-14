@@ -16,7 +16,6 @@
 import abc
 import dataclasses
 import fractions
-import functools
 from typing import Callable, Literal
 
 import flax.linen as nn
@@ -609,7 +608,11 @@ class FFTBase(types.Stateless, metaclass=abc.ABCMeta):
     pass
 
   @abc.abstractmethod
-  def _get_fft_fn(self, fft_length: int) -> Callable[..., jax.Array]:
+  def _get_fft_fn(self) -> Callable[..., types.Sequence]:
+    pass
+
+  @abc.abstractmethod
+  def _get_output_length(self, input_size: int) -> int:
     pass
 
   @nn.nowrap
@@ -617,22 +620,18 @@ class FFTBase(types.Stateless, metaclass=abc.ABCMeta):
     return self._fft_length or input_size
 
   @nn.nowrap
-  def _get_required_input_length(self, input_size: int) -> int:
-    return self._get_fft_length(input_size)
-
-  @nn.nowrap
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
       *,
       constants: types.Constants | None = None,
-  ) -> types.ShapeLike:
+  ) -> tuple[int, ...]:
     input_shape = list(input_shape)
     axis = _validate_and_normalize_axis(
         self._axis, (None, None) + tuple(input_shape)
     )
     axis -= 2
-    input_shape[axis] = self._get_fft_length(input_shape[axis])
+    input_shape[axis] = self._get_output_length(input_shape[axis])
     return tuple(input_shape)
 
   @types.check_layer
@@ -648,14 +647,8 @@ class FFTBase(types.Stateless, metaclass=abc.ABCMeta):
       raise ValueError('FFT requires an input of rank at least 3.')
 
     axis = _validate_and_normalize_axis(self._axis, x.shape)
-    axis_size = x.shape[axis]
-
-    required_input_length = self._get_required_input_length(axis_size)
-
-    fft_length = self._get_fft_length(axis_size)
-    fft_fn = self._get_fft_fn(fft_length)
-    x = _pad_or_truncate_for_fft(x, axis, required_input_length, self._padding)
-    return x.apply_values(fft_fn, axis=axis)
+    fft_fn = self._get_fft_fn()
+    return fft_fn(x, axis=axis)
 
 
 class FFT(types.PreservesType, FFTBase):
@@ -685,9 +678,18 @@ class FFT(types.PreservesType, FFTBase):
   def _padding(self) -> str:
     return self.config.padding
 
-  def _get_fft_fn(self, fft_length: int) -> Callable[..., jax.Array]:
-    del fft_length
-    return jnp.fft.fft
+  def _get_output_length(self, input_size: int) -> int:
+    return self.config.fft_length or input_size
+
+  def _get_fft_fn(self) -> Callable[..., types.Sequence]:
+    def fft_fn(x, axis):
+      required_length = self._get_output_length(x.shape[axis])
+      x = _pad_or_truncate_for_fft(
+          x, axis, required_length, self.config.padding
+      )
+      return x.apply_values(jnp.fft.fft, axis=axis)
+
+    return fft_fn
 
 
 class IFFT(types.PreservesType, FFTBase):
@@ -696,6 +698,7 @@ class IFFT(types.PreservesType, FFTBase):
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
     fft_length: int | None = None
+    frame_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
@@ -717,9 +720,18 @@ class IFFT(types.PreservesType, FFTBase):
   def _padding(self) -> str:
     return self.config.padding
 
-  def _get_fft_fn(self, fft_length: int) -> Callable[..., jax.Array]:
-    del fft_length
-    return jnp.fft.ifft
+  def _get_output_length(self, input_size: int) -> int:
+    return self.config.frame_length or input_size
+
+  def _get_fft_fn(self) -> Callable[..., types.Sequence]:
+    def ifft_fn(a, axis):
+      a = a.apply_values(jnp.fft.ifft, axis=axis)
+      required_length = self._get_output_length(a.shape[axis])
+      return _pad_or_truncate_for_fft(
+          a, axis, required_length, self.config.padding
+      )
+
+    return ifft_fn
 
 
 class RFFT(FFTBase):
@@ -749,30 +761,24 @@ class RFFT(FFTBase):
   def _padding(self) -> str:
     return self.config.padding
 
-  def _get_fft_fn(self, fft_length: int) -> Callable[..., jax.Array]:
+  def _get_fft_length(self, input_size: int) -> int:
+    return self.config.fft_length or input_size
+
+  def _get_output_length(self, input_size: int) -> int:
+    return self._get_fft_length(input_size) // 2 + 1
+
+  def _get_fft_fn(self) -> Callable[..., types.Sequence]:
 
     def rfft(a, axis=-1):
       # Cast input if the dtype is not supported by rfft.
+      fft_length = self._get_fft_length(a.shape[axis])
+      a = _pad_or_truncate_for_fft(a, axis, fft_length, self.config.padding)
+      rfft_inner = lambda v: jnp.fft.rfft(v, n=fft_length, axis=axis)
       if a.dtype == jnp.bfloat16:
-        a = a.astype(jnp.float32)
-      return jnp.fft.rfft(a, n=fft_length, axis=axis)
+        return a.apply_values(lambda v: rfft_inner(v.astype(jnp.float32)))
+      return a.apply_values(rfft_inner)
 
     return rfft
-
-  @nn.nowrap
-  def get_output_shape(
-      self,
-      input_shape: types.ShapeLike,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.Shape:
-    input_shape = list(input_shape)
-    axis = _validate_and_normalize_axis(
-        self._axis, (None, None) + tuple(input_shape)
-    )
-    axis -= 2
-    input_shape[axis] = self._get_fft_length(input_shape[axis]) // 2 + 1
-    return tuple(input_shape)
 
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
@@ -795,6 +801,7 @@ class IRFFT(FFTBase):
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
     fft_length: int | None = None
+    frame_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
@@ -830,19 +837,24 @@ class IRFFT(FFTBase):
         raise ValueError(f'Unsupported input dtype: {input_dtype}')
 
   @nn.nowrap
-  def _get_fft_fn(self, fft_length: int):
-    return functools.partial(
-        jnp.fft.irfft,
-        n=self.config.fft_length,
-    )
-
-  @nn.nowrap
   def _get_fft_length(self, input_size: int) -> int:
     return self.config.fft_length or (input_size - 1) * 2
 
   @nn.nowrap
-  def _get_required_input_length(self, input_size: int) -> int:
-    return self._get_fft_length(input_size) // 2 + 1
+  def _get_output_length(self, input_size: int) -> int:
+    return self.config.frame_length or self._get_fft_length(input_size)
+
+  @nn.nowrap
+  def _get_fft_fn(self) -> Callable[..., types.Sequence]:
+    def irfft_fn(a, axis=-1):
+      fft_length = self._get_fft_length(a.shape[axis])
+      a = a.apply_values(jnp.fft.irfft, axis=axis, n=fft_length)
+      required_length = self.config.frame_length or a.shape[axis]
+      return _pad_or_truncate_for_fft(
+          a, axis, required_length, self.config.padding
+      )
+
+    return irfft_fn
 
 
 class STFT(types.SequenceLayer):
@@ -1056,7 +1068,10 @@ class InverseSTFT(types.SequenceLayer):
         padding=self.config.time_padding,
     ).make()
     self.irfft = IRFFT.Config(
-        self.config.fft_length, axis=2, padding=self.config.fft_padding
+        self.config.fft_length,
+        self.config.frame_length,
+        axis=2,
+        padding=self.config.fft_padding,
     ).make()
 
   @property

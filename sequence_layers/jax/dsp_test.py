@@ -85,6 +85,7 @@ class FFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
 
     y_expected = x.apply_values(apply_fft).mask_invalid()
     self.assertSequencesClose(y, y_expected, atol=1e-5, rtol=1e-5)
+    self.assertEqual(y.shape[axis], fft_length)
 
 
 class IFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
@@ -92,23 +93,37 @@ class IFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
   @parameterized.parameters(
       itertools.product(
           (((2, 3, 32), -1), ((2, 3, 5, 32), -1), ((2, 3, 5, 32), -2)),
-          (31, 32, 33),
+          (31, 32, 33, None),
           ('center', 'right'),
       )
   )
-  def test_ifft(self, shape_axis, fft_length, padding):
+  def test_ifft(self, shape_axis, frame_length, padding):
     shape, axis = shape_axis
     key = jax.random.PRNGKey(1234)
+
+    # The length of the input sequence.
+    fft_length = shape[axis]
+
     x = test_utils.random_sequence(*shape, dtype=jnp.complex64)
     l = dsp.IFFT.Config(
-        fft_length, axis=axis, padding=padding, name='ifft'
+        fft_length,
+        frame_length=frame_length,
+        axis=axis,
+        padding=padding,
+        name='ifft',
     ).make()
+
+    # If frame_length is not provided, it should be infered from the input
+    # length by IFFT to be the same as fft_length.
+    if frame_length is None:
+      frame_length = fft_length
+
     l = self.init_and_bind_layer(key, l, x)
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'ifft')
     channel_shape = list(shape[2:])
-    channel_shape[axis] = fft_length
+    channel_shape[axis] = frame_length
     self.assertEqual(l.get_output_shape_for_sequence(x), tuple(channel_shape))
     y = self.verify_contract(l, x, training=False)
     self.assertEmpty(l.variables)
@@ -116,11 +131,12 @@ class IFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     # Check that the result is the same as manually padding/truncating followed
     # by the IFFT.
     def apply_fft(values):
-      values = _pad_or_truncate_for_fft(values, padding, axis, fft_length)
-      return np.fft.ifft(values, n=fft_length, axis=axis)
+      values = np.fft.ifft(values, n=fft_length, axis=axis)
+      return _pad_or_truncate_for_fft(values, padding, axis, frame_length)
 
     y_expected = x.apply_values(apply_fft).mask_invalid()
     self.assertSequencesClose(y, y_expected, atol=1e-5, rtol=1e-5)
+    self.assertEqual(y.shape[axis], frame_length)
 
 
 class RFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
@@ -152,6 +168,7 @@ class RFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
 
     y_expected = x.apply_values(apply_fft).mask_invalid()
     self.assertSequencesClose(y, y_expected, atol=1e-5, rtol=1e-5)
+    self.assertEqual(y.shape[axis], fft_length // 2 + 1)
 
   @parameterized.parameters(
       itertools.product(
@@ -182,23 +199,38 @@ class IRFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
   @parameterized.parameters(
       itertools.product(
           (((2, 3, 17), -1), ((2, 3, 5, 17), -1), ((2, 3, 5, 17), -2)),
-          (31, 32, 33),
+          (31, 32, 33, None),
+          (32, None),
           ('center', 'right'),
       )
   )
-  def test_irfft(self, shape_axis, fft_length, padding):
+  def test_irfft(self, shape_axis, frame_length, fft_length, padding):
     shape, axis = shape_axis
     key = jax.random.PRNGKey(1234)
+
     x = test_utils.random_sequence(*shape, dtype=jnp.complex64)
     l = dsp.IRFFT.Config(
-        fft_length, axis=axis, padding=padding, name='irfft'
+        fft_length,
+        frame_length=frame_length,
+        axis=axis,
+        padding=padding,
+        name='irfft',
     ).make()
     l = self.init_and_bind_layer(key, l, x)
+
+    # If frame_length or fft_length are not provided, they are infered from the
+    # input shape.
+    if fft_length is None:
+      fft_length = 2 * (shape[axis] - 1)
+
+    if frame_length is None:
+      frame_length = fft_length
+
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'irfft')
     channel_shape = list(shape[2:])
-    channel_shape[axis] = fft_length
+    channel_shape[axis] = frame_length
     self.assertEqual(l.get_output_shape_for_sequence(x), tuple(channel_shape))
     y = self.verify_contract(l, x, training=False)
     self.assertEmpty(l.variables)
@@ -206,14 +238,80 @@ class IRFFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     # Check that the result is the same as manually padding/truncating followed
     # by the IRFFT.
     def apply_fft(values):
-      required_input_length = fft_length // 2 + 1
-      values = _pad_or_truncate_for_fft(
-          values, padding, axis, required_input_length
-      )
-      return np.fft.irfft(values, n=fft_length, axis=axis)
+      values = np.fft.irfft(values, n=fft_length, axis=axis)
+      return _pad_or_truncate_for_fft(values, padding, axis, frame_length)
 
     y_expected = x.apply_values(apply_fft).mask_invalid()
     self.assertSequencesClose(y, y_expected, atol=1e-5, rtol=1e-5)
+    self.assertEqual(y.shape[axis], frame_length)
+
+
+class FFTInverseTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
+  """Tests that the FFT/IFFT and RFFT/IRFFT are inverses of each other."""
+
+  @parameterized.parameters(
+      itertools.product(
+          (((2, 3, 31), -1), ((2, 3, 5, 32), -1), ((2, 3, 5, 33), -2)),
+          (31, 32, 33),
+          (
+              (dsp.RFFT.Config, dsp.IRFFT.Config, jnp.float32),
+              (dsp.FFT.Config, dsp.IFFT.Config, jnp.complex64),
+          ),
+          ('center', 'right'),
+      )
+  )
+  def test_fft_inverse(self, shape_axis, fft_length, fft_config_dtype, padding):
+    shape, axis = shape_axis
+
+    forward_config_fn, backward_config_fn, dtype = fft_config_dtype
+
+    x = test_utils.random_sequence(*shape, dtype=dtype)
+
+    # The input length is necessary for the backward transfrom.
+    frame_length = x.shape[axis]
+
+    forward = (
+        forward_config_fn(
+            fft_length,
+            axis=axis,
+            padding=padding,
+            name='forward',
+        )
+        .make()
+        .bind({})
+    )
+    backward = (
+        backward_config_fn(
+            fft_length,
+            frame_length=frame_length,
+            axis=axis,
+            padding=padding,
+            name='backward',
+        )
+        .make()
+        .bind({})
+    )
+
+    # Shortcuts.
+    forward_fn = lambda x: forward(x, training=False)
+    backward_fn = lambda x: backward(x, training=False)
+
+    # Depending on the padding parameters, there may be no inverse.
+    # In that case the backward transform should be the pseudo-inverse.
+    # For a general test, we test the pseudo-inverse properties. Let A and B
+    # be the forward and backward transforms. They should satisfy:
+    # 1) A B A = A
+    # 2) B A B = B
+
+    y_A = forward_fn(x)  # pylint: disable=invalid-name
+    y_BA = backward_fn(y_A)  # pylint: disable=invalid-name
+    y_ABA = forward_fn(y_BA)  # pylint: disable=invalid-name
+    y_BABA = backward_fn(y_ABA)  # pylint: disable=invalid-name
+
+    # 1) A B A = A applied to x.
+    self.assertSequencesClose(y_A, y_ABA, atol=1e-5, rtol=1e-3)
+    # 2) B A B = B applied to A x.
+    self.assertSequencesClose(y_BA, y_BABA, atol=1e-5, rtol=1e-3)
 
 
 class FrameTest(test_utils.SequenceLayerTest, parameterized.TestCase):
