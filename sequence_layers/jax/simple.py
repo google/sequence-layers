@@ -63,6 +63,7 @@ __all__ = (
     'Maximum',
     'Minimum',
     'Mod',
+    'MoveAxis',
     'OneHot',
     'OptimizationBarrier',
     'PRelu',
@@ -75,6 +76,7 @@ __all__ = (
     'Softmax',
     'Softplus',
     'Squeeze',
+    'SwapAxes',
     'Swish',
     'Tanh',
     'Transpose',
@@ -1820,6 +1822,95 @@ class Transpose(types.PreservesType, types.Stateless):
   ) -> types.Sequence:
     axes = self._validate_axes(x.channel_shape)
     return x.apply_values_masked(lambda v: jnp.transpose(v, (0, 1) + axes))
+
+
+class SwapAxes(Transpose):
+  """Swap two channel axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    axis1: int
+    axis2: int
+    name: str | None = None
+
+    def make(self) -> 'SwapAxes':
+
+      axes = [self.axis1, self.axis2]
+      if 0 in axes or 1 in axes:
+        raise ValueError("Can't swap batch or time dimension.")
+
+      return SwapAxes(
+          Transpose.Config(axes=axes, name=self.name), name=self.name
+      )
+
+  @override
+  def _validate_axes(self, input_shape: types.ShapeLike) -> tuple[int, ...]:
+    ndim = 2 + len(input_shape)  # ndim including batch and time.
+    axes = [a if a >= 0 else ndim + a for a in self.config.axes]
+    if 0 in axes or 1 in axes:
+      raise ValueError("Can't move batch or time dimension.")
+    axis1, axis2 = axes
+    if axis1 < 1 or axis1 >= ndim or axis2 < 1 or axis2 >= ndim:
+      raise ValueError(
+          f'Out of bound axis (got {axis1=} {axis2=} for {ndim=}).'
+      )
+    axes = list(range(2 + len(input_shape)))
+    axes[axis1], axes[axis2] = axes[axis2], axes[axis1]
+    return tuple(axes[2:])
+
+
+class MoveAxis(Transpose):
+  """Moves one or several channel axes to new locations."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config of MoveAxis layer."""
+
+    source: int | TypingSequence[int]
+    destination: int | TypingSequence[int]
+    name: str | None = None
+
+    def __post_init__(self):
+      to_tuple = lambda x: (x,) if isinstance(x, int) else x
+      object.__setattr__(self, 'source', to_tuple(self.source))
+      object.__setattr__(self, 'destination', to_tuple(self.destination))
+
+    def make(self) -> 'MoveAxis':
+
+      if (
+          0 in self.source
+          or 1 in self.source
+          or 0 in self.destination
+          or 1 in self.destination
+      ):
+        raise ValueError("Can't move batch or time dimension.")
+
+      if len(self.source) != len(self.destination):
+        raise ValueError(
+            f'Inconsistent number of elements: {len(self.source)} vs'
+            f' {len(self.destination)}'
+        )
+
+      return MoveAxis(self, name=self.name)
+
+  config: Config
+
+  @override
+  def _validate_axes(self, input_shape: types.ShapeLike) -> tuple[int, ...]:
+    ndim = 2 + len(input_shape)  # ndim including batch and time.
+
+    canonicalize_axes = lambda axes: [a if a >= 0 else ndim + a for a in axes]
+    source = canonicalize_axes(self.config.source)
+    destination = canonicalize_axes(self.config.destination)
+
+    if 0 in source or 1 in source or 0 in destination or 1 in destination:
+      raise ValueError("Can't move batch or time dimension.")
+
+    perm = [i for i in range(ndim) if i not in source]
+    for dest, src in sorted(zip(destination, source, strict=True)):
+      perm.insert(dest, src)
+
+    return tuple(perm[2:])
 
 
 class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
