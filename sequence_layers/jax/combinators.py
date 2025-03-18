@@ -1074,9 +1074,10 @@ class Repeat(types.Emitting):
     del input_spec
     del constants
 
-    if (output_ratio := self.child_layer.output_ratio) != 1:
+    child_output_ratio = self._get_child_property(lambda l: l.output_ratio)[-1]
+    if child_output_ratio != 1:
       raise ValueError(
-          f'Repeat layer must have output ratio of 1: {output_ratio=}.'
+          f'Repeat layer must have output ratio of 1: {child_output_ratio=}.'
       )
 
     # TODO(rryan): Check that child layer's output dtype matches the input
