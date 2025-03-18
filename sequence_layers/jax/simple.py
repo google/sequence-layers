@@ -14,12 +14,15 @@
 """Simple (generally stateless) layers."""
 
 import abc
+from collections.abc import Mapping
 import dataclasses
 import fractions
+import functools
 import typing
 from typing import Any, Callable, Sequence as TypingSequence
 
 from absl import logging
+import einops
 import flax.linen as nn
 import jax
 import jax.ad_checkpoint
@@ -42,6 +45,7 @@ __all__ = (
     'Cast',
     'CheckpointName',
     'Dropout',
+    'EinopsRearrange',
     'Elu',
     'Embedding',
     'EmbeddingTranspose',
@@ -2306,6 +2310,69 @@ class Argmax(types.Stateless):
 
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return jnp.int32
+
+
+class EinopsRearrange(types.PreservesType, types.Stateless):
+  """A wrapper for einops.rearrange applied to the channel dimensions."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config of EinopsRearrange."""
+
+    # Rearrangement pattern exluding the batch and time dimensions.
+    pattern: str
+    # A dictionary of additional specifications for dimensions.
+    axes_lengths: Mapping[str, int] | None = None
+    # Optional name for the module.
+    name: str | None = None
+
+    def __post_init__(self):
+      if '->' not in self.pattern:
+        raise ValueError(
+            f'The input pattern is not valid (got {self.pattern}).'
+        )
+
+      # Find all unique labels.
+      labels = set(self.pattern.replace('(', ' ').replace(')', ' ').split(' '))
+      if 'batch' in labels or 'time' in labels:
+        raise ValueError(
+            f'`batch` and `time` are reserved axes labels (got {self.pattern}).'
+        )
+
+    def make(self) -> 'EinopsRearrange':
+      return EinopsRearrange(self, name=self.name)
+
+  config: Config
+
+  def _get_rearrange_fn(self) -> Callable[[jax.Array], jax.Array]:
+    before, after = self.config.pattern.split('->')
+    pattern = f'batch time {before} -> batch time {after}'
+    axes_lengths = self.config.axes_lengths if self.config.axes_lengths else {}
+    return functools.partial(einops.rearrange, pattern=pattern, **axes_lengths)
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    del training, constants
+    rearrange_fn = self._get_rearrange_fn()
+    return x.apply_values(rearrange_fn)
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    del constants
+    rearrange_fn = self._get_rearrange_fn()
+    output = jax.eval_shape(rearrange_fn, jnp.zeros((1, 1) + input_shape))
+    return tuple(output.shape[2:])
 
 
 class Squeeze(types.PreservesType, types.Stateless):
