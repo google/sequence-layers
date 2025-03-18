@@ -613,6 +613,118 @@ class TransposeTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
+class SwapAxesTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      ((2, 3, 4, 5), 2, 3, (5, 4)),
+      ((2, 3, 4, 5, 6), 4, 2, (6, 5, 4)),
+      ((2, 3, 4), 2, 2, (4,)),
+      ((2, 3, 4, 5, 6), -1, -3, (6, 5, 4)),
+  )
+  def test_swapaxes(self, input_shape, axis1, axis2, output_shape):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*input_shape)
+    l = simple.SwapAxes.Config(axis1, axis2, name='swapaxes').make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
+    self.assertEqual(l.name, 'swapaxes')
+
+    y = self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    y_expected = x.apply_values(jnp.swapaxes, axis1=axis1, axis2=axis2)
+    self.assertSequencesEqual(y, y_expected)
+
+  @parameterized.parameters(
+      ((2, 3), 0, 3),
+      ((2, 3), 2, 1),
+      ((2, 3, 4, 5, 6), 0, 2),
+      ((2, 3, 4, 5, 6), 3, 1),
+  )
+  def test_swapaxes_error_batch_time_axis(self, input_shape, axis1, axis2):
+    with self.assertRaises(ValueError):
+      simple.SwapAxes.Config(axis1, axis2, name='swapaxes').make()
+
+  @parameterized.parameters(
+      ((2, 3), 2, 3),
+      ((2, 3, 4, 5, 6), -4, 2),
+      ((2, 3, 4, 5, 6), 3, -5),
+  )
+  def test_swapaxes_wrong_axes(self, input_shape, axis1, axis2):
+    l = simple.SwapAxes.Config(axis1, axis2, name='swapaxes').make().bind({})
+    x = test_utils.random_sequence(*input_shape)
+
+    with self.assertRaises(ValueError):
+      l.get_output_shape_for_sequence(x)
+
+    with self.assertRaises(ValueError):
+      l.layer(x, training=False)
+
+
+class MoveAxisTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      ((2, 3, 4, 5), 2, -1, (5, 4)),
+      ((2, 3, 4, 5, 6), -1, 2, (6, 4, 5)),
+      ((2, 3, 4), 2, 2, (4,)),
+      ((2, 3, 4, 5, 6), -2, 2, (5, 4, 6)),
+      ((2, 3, 4, 5, 6), (2, 3), (3, 4), (6, 4, 5)),
+      ((2, 3, 4, 5, 6), (3, 2), (3, 4), (6, 5, 4)),
+      ((2, 3, 4, 5, 6), (2, 4), (3, 2), (6, 4, 5)),
+  )
+  def test_moveaxis(self, input_shape, source, destination, output_shape):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*input_shape)
+    l = simple.MoveAxis.Config(source, destination, name='moveaxis').make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
+    self.assertEqual(l.name, 'moveaxis')
+
+    y = self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    y_expected = x.apply_values(
+        jnp.moveaxis, source=source, destination=destination
+    )
+    self.assertSequencesEqual(y, y_expected)
+
+  @parameterized.parameters(
+      ((2, 3), 0, 3),
+      ((2, 3, 4), 2, 1),
+      ((2, 3, 4, 5, 6), (2,), (3, 4)),
+      ((2, 3, 4, 5, 6), 2, (3, 4)),
+  )
+  def test_moveaxis_error_make(self, input_shape, source, destination):
+    with self.assertRaises(ValueError):
+      simple.MoveAxis.Config(source, destination, name='moveaxis').make()
+
+  @parameterized.parameters(
+      ((2, 3, 4), -3, 2),
+      ((2, 3, 4), 2, -2),
+      ((2, 3, 4, 5, 6), (-4, 2), (2, 3)),
+      ((2, 3, 4, 5, 6), (3, 2), (2, -5)),
+  )
+  def test_moveaxis_wrong_axes(self, input_shape, source, destination):
+    l = (
+        simple.MoveAxis.Config(source, destination, name='moveaxis')
+        .make()
+        .bind({})
+    )
+    x = test_utils.random_sequence(*input_shape)
+
+    with self.assertRaises(ValueError):
+      l.get_output_shape_for_sequence(x)
+
+    with self.assertRaises(ValueError):
+      l.layer(x, training=False)
+
+
 class GradientClippingTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(((2, 13, 5),), ((2, 13, 5, 9),))
