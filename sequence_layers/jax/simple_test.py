@@ -20,6 +20,7 @@ from unittest import mock
 
 from absl import logging
 import chex
+import einops
 import flax
 import flax.linen as nn
 import jax
@@ -723,6 +724,53 @@ class MoveAxisTest(test_utils.SequenceLayerTest):
 
     with self.assertRaises(ValueError):
       l.layer(x, training=False)
+
+
+class EinopsRearrangeTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      ((2, 3, 4, 5), 'c d -> (c d)', None, (20,)),
+      ((2, 3, 20), '(c d) -> c d', {'c': 4}, (4, 5)),
+      ((2, 3, 4, 5), '(c d) e ->  c d e', {'c': 2}, (2, 2, 5)),
+      ((2, 3, 6, 5), '(c d) e ->  d e c', {'c': 2}, (3, 5, 2)),
+  )
+  def test_einops_rearrange(
+      self, input_shape, pattern, axes_lengths, output_shape
+  ):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*input_shape)
+    l = simple.EinopsRearrange.Config(
+        pattern, axes_lengths, name='rearrange'
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
+    self.assertEqual(l.name, 'rearrange')
+
+    y = self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    before, after = pattern.split('->')
+    pattern = f'batch time {before} -> batch time {after}'
+    if not axes_lengths:
+      axes_lengths = {}
+    y_expected = x.apply_values(
+        lambda v: einops.rearrange(v, pattern, **axes_lengths)
+    )
+    self.assertSequencesEqual(y, y_expected)
+
+  @parameterized.parameters(
+      ('(c d) time ->  c d time', {'c': 2}),
+      ('(c d) batch ->  c d batch', {'c': 2}),
+      ('(c d) batch - c d batch', {'c': 2}),
+  )
+  def test_einops_rearrange_error_make(self, pattern, axes_lengths):
+    with self.assertRaises(ValueError):
+      simple.EinopsRearrange.Config(
+          pattern, axes_lengths, name='rearrange'
+      ).make()
 
 
 class GradientClippingTest(test_utils.SequenceLayerTest):
