@@ -488,12 +488,12 @@ def pad_batch_axis_with_garbage(tree):
     paddings = [(0, 0)] * x.ndim
     paddings[0] = (1, 1)
 
-    if issubclass(x.dtype.type, jnp.floating):
+    if issubclass(x.dtype.type, (jnp.floating, jnp.complexfloating)):
       pad_value = jnp.nan
     elif issubclass(x.dtype.type, jnp.integer):
       pad_value = jnp.iinfo(x.dtype).max
     else:
-      pad_value = None
+      pad_value = 0
 
     if isinstance(x, jax.Array):
       return jnp.pad(x, paddings, constant_values=pad_value)
