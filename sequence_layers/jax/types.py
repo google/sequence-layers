@@ -287,7 +287,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
 
     # NOTE: We can't have `tuple` in the bad types, as e.g. PartitionSpec
     #   inherits from it.
-    bad_types = (int, str, list, set, Sequence, MaskedSequence)
+    bad_types = (int, list, set, Sequence, MaskedSequence)
     if isinstance(self.values, bad_types) or isinstance(self.mask, bad_types):
       raise jt.JaxTypeCheckError(
           'Sequence values and mask must be array-like. Got values:'
