@@ -63,10 +63,13 @@ class Frame(types.PreservesType, types.SequenceLayer):
     # sum to frame_length - 1. If 'causal_valid', 'reverse_causal_valid',
     # 'causal', 'reverse_causal', 'semicausal' or if the explicit padding sums
     # to `frame_length - 1`, then the `Frame` is streamable.
-    # TODO(rryan): Support explicit padding in general.
+    # TODO(b/407645797): Support explicit padding in general.
     padding: tuple[int, int] | types.PaddingModeString = (
         types.PaddingMode.REVERSE_CAUSAL_VALID.value
     )
+    # TODO(b/407645797): Remove this and migrate all users to SAME-like padding
+    # in explicit mode.
+    explicit_padding_is_same_like: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -208,8 +211,10 @@ class Frame(types.PreservesType, types.SequenceLayer):
       ):
         mask = jnp.zeros((batch_size, buffer_width), dtype=types.MASK_DTYPE)
       case (unused_pad_left, unused_pad_right):
-        # TODO(rryan): Change explicit padding from valid-like to same-like.
-        mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
+        if self.config.explicit_padding_is_same_like:
+          mask = jnp.zeros((batch_size, buffer_width), dtype=types.MASK_DTYPE)
+        else:
+          mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
       case _:
         raise ValueError(
             'Stepwise processing is not supported with padding:'
