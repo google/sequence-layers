@@ -40,6 +40,7 @@ __all__ = (
     'OverlapAdd',
     'RFFT',
     'STFT',
+    'Window',
     # go/keep-sorted end
 )
 
@@ -1458,3 +1459,57 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     if not self.config.length:
       return x
     return x[:, self.config.length :]
+
+
+class Window(types.PreservesShape, types.PreservesType, types.Stateless):
+  """Applies a window function as in the STFT/InverseSTFT."""
+
+  @dataclasses.dataclass(frozen=True, slots=True)
+  class Config(types.SequenceLayerConfig):
+    """Config of this layer."""
+
+    # The axis onto which the window is applied.
+    axis: int
+    # The window function to use.
+    window_fn: Callable[..., jax.Array | np.ndarray] | None = signal.hann_window
+    # Optional name for this layer.
+    name: str | None = None
+
+    def make(self) -> 'Window':
+      return Window(self, name=self.name)
+
+  config: Config
+
+  def _get_axis(self, x: types.Sequence):
+    axis = self.config.axis
+    if axis < 0:
+      axis = x.ndim + axis
+
+    if axis in (0, 1):
+      raise ValueError(
+          f'The axis cannot be 0 (batch) or 1 (time) (got {self.config.axis}).'
+      )
+
+    if axis >= x.ndim:
+      raise ValueError(
+          f'Axis {self.config.axis} larger than inputs ndim ({{x.ndim}})'
+      )
+
+    return axis
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+
+    axis = self._get_axis(x)
+
+    window = self.config.window_fn(x.shape[axis], dtype=x.dtype)
+    shape_broadcast = [jnp.newaxis] * x.ndim
+    shape_broadcast[axis] = slice(None, None)
+
+    return x.apply_values(lambda v: v * window[tuple(shape_broadcast)])
