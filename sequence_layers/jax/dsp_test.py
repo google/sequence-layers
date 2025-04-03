@@ -18,6 +18,7 @@ import itertools
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import combinators
 from sequence_layers.jax import dsp
 from sequence_layers.jax import signal
 from sequence_layers.jax import test_utils
@@ -762,6 +763,76 @@ class LookaheadTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     y = self.verify_contract(l, x, training=False)
     self.assertEqual(y.shape[1], 11 - length)
     self.assertEmpty(l.variables)
+
+
+class WindowTest(test_utils.SequenceLayerTest, parameterized.TestCase):
+
+  @parameterized.parameters(
+      (20, 2),
+      (15, 3),
+      (10, 4),
+  )
+  def test_window(self, frame_step, frame_length_multiplier):
+    frame_length = frame_step * frame_length_multiplier
+    batch = 2
+    time = 11 * frame_step + frame_length
+    seq_in = test_utils.random_sequence(
+        batch, time, low_length=2 * frame_length, dtype=jnp.float32
+    )
+
+    module = (
+        combinators.Serial.Config(
+            [
+                dsp.Frame.Config(
+                    frame_length=frame_length,
+                    frame_step=frame_step,
+                    padding='semicausal',
+                ),  # (B T1 T2 S+K O)
+                dsp.Window.Config(
+                    axis=2,
+                    window_fn=signal.hamming_window,
+                ),
+                dsp.Window.Config(
+                    axis=2,
+                    window_fn=signal.inverse_stft_window_fn(
+                        frame_step, signal.hamming_window
+                    ),
+                ),
+                dsp.OverlapAdd.Config(
+                    frame_length=frame_length,
+                    frame_step=frame_step,
+                    padding='causal',
+                ),  # (B T S O)
+                dsp.Lookahead.Config(frame_length - frame_step),
+            ],
+            name='test',
+        )
+        .make()
+        .bind({})
+    )
+
+    seq_out = module.layer(seq_in, training=False)
+
+    # Trim the lengths.
+    expected = types.Sequence.from_lengths(
+        seq_in.values[:, : -frame_length + frame_step], seq_out.lengths()
+    )
+
+    self.assertSequencesClose(expected, seq_out)
+
+  @parameterized.parameters((0,), (1,), (-2,), (-3,), (3,))
+  def test_window_invalid_axis(self, axis):
+    seq_in = test_utils.random_sequence(2, 5, 1)
+    module = (
+        dsp.Window.Config(
+            axis=axis, window_fn=signal.hamming_window, name='test'
+        )
+        .make()
+        .bind({})
+    )
+
+    with self.assertRaises(ValueError):
+      module.layer(seq_in, training=False, constants=None)
 
 
 if __name__ == '__main__':
