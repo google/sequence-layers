@@ -591,8 +591,6 @@ class GmmAttentionTest(test_utils.SequenceLayerTest):
     l = self.init_and_bind_layer(key, l, x, constants=constants)
 
     _, emits = l.layer_with_emits(x, training=False, constants=constants)
-    emit_specs = l.get_emit_specs_for_sequence(x, constants=constants)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities_by_source[source_name].values.shape,
         (batch_size, time, num_heads, source_time),
@@ -611,8 +609,6 @@ class GmmAttentionTest(test_utils.SequenceLayerTest):
         training=False,
         constants=constants,
     )
-    emit_specs = l.get_emit_specs_for_sequence(x, constants=constants)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities_by_source[source_name].values.shape,
         (batch_size, 3, num_heads, source_time),
@@ -703,8 +699,6 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.name, 'dot_product_attention')
 
     _, emits = l.layer_with_emits(x, training=False, constants=constants)
-    emit_specs = l.get_emit_specs_for_sequence(x, constants=constants)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities_by_source[source_name].shape,
         (batch_size, time, num_heads, source_time),
@@ -723,8 +717,6 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         training=False,
         constants=constants,
     )
-    emit_specs = l.get_emit_specs_for_sequence(x, constants=constants)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities_by_source[source_name].shape,
         (batch_size, 3, num_heads, source_time),
@@ -1732,8 +1724,6 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.output_ratio, 1)
 
     _, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities.values.shape,
         (batch_size, time, num_heads, time),
@@ -1747,8 +1737,6 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l.get_initial_state(batch_size, x.channel_spec, training=False),
         training=False,
     )
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertEqual(
         emits.probabilities.values.shape,
         (batch_size, 3, num_heads, 3 + max_past_horizon),

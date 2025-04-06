@@ -106,18 +106,6 @@ class AddCountLayer(types.PreservesShape, types.PreservesType, types.Emitting):
   ) -> types.State:
     return jnp.zeros((batch_size,), dtype=jnp.int32)
 
-  def get_emit_specs(
-      self, input_spec: types.ChannelSpec, *, constants: Any | None = None
-  ) -> types.EmitSpecs:
-    # Just emit the state and input sequence at each timestep.
-    return {
-        'count': types.ShapeDType([], dtype=jnp.int32),
-        'x': types.Sequence(
-            input_spec,
-            types.ShapeDType([], dtype=types.MASK_DTYPE),
-        ),
-    }
-
   def layer_with_emits(
       self,
       x: types.Sequence,

@@ -2512,24 +2512,6 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
       )
     return (self.config.num_heads, self.config.units_per_head)
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ShapeDType,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
-    return SelfAttentionEmits(
-        types.Sequence(
-            types.ShapeDType(
-                (num_kv_heads, None),
-                self.get_output_dtype(input_spec.dtype),
-            ),
-            types.ShapeDType((), types.MASK_DTYPE),
-        )
-    )
-
   @types.check_step_with_emits
   def step_with_emits(
       self,
@@ -3201,23 +3183,6 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
       )
     return (self.config.num_heads, self.config.units_per_head)
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ShapeDType,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    source = self._get_source(constants)
-    spec = types.Sequence(
-        types.ShapeDType(
-            (self.config.num_heads, source.shape[1]),
-            self.get_output_dtype(input_spec.dtype),
-        ),
-        types.ShapeDType((), types.MASK_DTYPE),
-    )
-    return CrossAttentionEmits({self.config.source_name: spec})
-
   @types.check_step_with_emits
   def step_with_emits(
       self,
@@ -3517,22 +3482,6 @@ class GmmAttention(types.PreservesType, types.Emitting):
     # units_per_head) because GmmAttention does not perform a values projection.
     # (We may try adding this).
     return (self.config.num_heads, source.shape[2])
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ShapeDType,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    source = _get_source(self, self.config.source_name, constants)
-    spec = types.Sequence(
-        types.ShapeDType(
-            (self.config.num_heads, source.shape[1]), input_spec.dtype
-        ),
-        types.ShapeDType((), types.MASK_DTYPE),
-    )
-    return CrossAttentionEmits({self.config.source_name: spec})
 
   @types.check_layer_with_emits
   def layer_with_emits(
@@ -4302,23 +4251,6 @@ class LocalDotProductSelfAttention(
       )
     return (self.config.num_heads, self.config.units_per_head)
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ShapeDType,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    return SelfAttentionEmits(
-        types.Sequence(
-            types.ShapeDType(
-                (self.config.num_heads, None),
-                self.get_output_dtype(input_spec.dtype),
-            ),
-            types.ShapeDType((), types.MASK_DTYPE),
-        )
-    )
-
   @types.check_step_with_emits
   def step_with_emits(
       self,
@@ -5046,23 +4978,6 @@ class StreamingLocalDotProductAttention(
           f' {(None, None) + tuple(input_shape)}'
       )
     return (self.config.num_heads, self.config.units_per_head)
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ShapeDType,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    return CrossAttentionEmits({
-        self.config.source_name: types.Sequence(
-            types.ShapeDType(
-                (self.config.num_heads, None),
-                self.get_output_dtype(input_spec.dtype),
-            ),
-            types.ShapeDType((), types.MASK_DTYPE),
-        )
-    })
 
   @types.check_step_with_emits
   def step_with_emits(

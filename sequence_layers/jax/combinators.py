@@ -103,15 +103,6 @@ class WrapperMixin:
   ) -> types.Shape:
     return self.child_layer.get_output_shape(input_shape, constants=constants)
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    return self.child_layer.get_emit_specs(input_spec, constants=constants)
-
   def layer(
       self,
       x: types.Sequence,
@@ -257,28 +248,6 @@ class SerialCombinatorMixin:
     for child_layer in self.layers:
       shape = child_layer.get_output_shape(shape, constants=constants)
     return shape
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    """Gets emit specs for this serial."""
-    output_spec = input_spec
-    emit_specs = {}
-    for child_layer in self.layers:
-      layer_emit_specs = child_layer.get_emit_specs(
-          output_spec, constants=constants
-      )
-      utils.insert_with_unique_key(
-          emit_specs, child_layer.name, layer_emit_specs
-      )
-      output_spec = child_layer.get_output_spec(
-          output_spec, constants=constants
-      )
-    return emit_specs
 
   def step_with_emits(
       self,
@@ -474,23 +443,6 @@ class Parallel(types.Emitting):
     return tuple(states)
 
   @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    emit_specs = {}
-    for child_layer in self.layers:
-      layer_emit_specs = child_layer.get_emit_specs(
-          input_spec, constants=constants
-      )
-      utils.insert_with_unique_key(
-          emit_specs, child_layer.name, layer_emit_specs
-      )
-    return emit_specs
-
-  @nn.nowrap
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -622,21 +574,6 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
     return utils.sequence_broadcast_combine_output_channel_shape(
         self.config.combination, *output_shapes
     )
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    emit_specs = []
-    for child_layer in self.layers:
-      layer_emit_specs = child_layer.get_emit_specs(
-          input_spec, constants=constants
-      )
-      emit_specs.append(layer_emit_specs)
-    return tuple(emit_specs)
 
   def _validate_inputs(self, x: types.Sequence) -> None:
     if x.ndim == 2:
@@ -926,19 +863,6 @@ class Residual(SerialCombinatorMixin, types.Emitting):
     # integer and float types, since this is usually a sign of a bug.
     return jnp.result_type(layer_dtype, shortcut_dtype)
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    body_emit_specs = super().get_emit_specs(input_spec, constants=constants)
-    shortcut_emit_specs = self.shortcut_layer.get_emit_specs(
-        input_spec, constants=constants
-    )
-    return (body_emit_specs, shortcut_emit_specs)
-
 
 class Repeat(types.Emitting):
   """A combinator that repeats the specified SequenceLayer N times.
@@ -1084,19 +1008,6 @@ class Repeat(types.Emitting):
     # dtype. We cannot accurately compute child_layer's output type using
     # SequenceLayer.get_output_dtype, since the Gemax trainer might have
     # replaced our weights with donwcasted versions when bf16_mode != NOWHERE.
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    self._validate(input_spec, constants)
-    emit_spec_i = self.child_layer.get_emit_specs(
-        input_spec, constants=constants
-    )
-    return (emit_spec_i,) * self.config.num_repeats
 
   @types.check_layer
   def layer(
@@ -1683,21 +1594,6 @@ class Bidirectional(types.Emitting):
         batch_size, input_spec, training=training, constants=constants
     )
     return (forward_state, backward_state)
-
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      *,
-      constants: types.Constants | None = None,
-  ) -> types.EmitSpecs:
-    forward_emit_spec = self.forward.get_emit_specs(
-        input_spec, constants=constants
-    )
-    backward_emit_spec = self.backward.get_emit_specs(
-        input_spec, constants=constants
-    )
-    return (forward_emit_spec, backward_emit_spec)
 
   def step_with_emits(
       self,
