@@ -233,8 +233,6 @@ class SerialTest(test_utils.SequenceLayerTest):
     l = self.init_and_bind_layer(key, l, x)
 
     y, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
 
     self.assertEqual(
         list(emits.keys()),
@@ -595,8 +593,6 @@ class ParallelTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     l = self.init_and_bind_layer(key, l, x)
 
     y, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
 
     self.assertEqual(
         list(emits.keys()), ['layers_0', 'layers_1', 'layers_2', 'layers_3']
@@ -978,8 +974,6 @@ class ResidualTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(2, 16, 1)
     l = self.init_and_bind_layer(key, l, x)
     y, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
 
     body_emits, shortcut_emits = emits
     self.assertEqual(body_emits['emit'].values.shape, (2, 16, 1))
@@ -1279,8 +1273,6 @@ class BidirectionalTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(2, 16, 1)
     l = self.init_and_bind_layer(key, l, x)
     _, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
 
     forward_emits, backward_emits = emits
     self.assertEqual(forward_emits.values.shape, (2, 16, 1))

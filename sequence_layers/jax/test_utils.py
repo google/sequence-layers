@@ -869,29 +869,6 @@ class SequenceLayerTest(parameterized.TestCase):
 
     return y_layer
 
-  def assertEmitsCompatible(  # pylint: disable=invalid-name
-      self, emit_specs: types.EmitSpecs, emits: types.Emits
-  ):
-    """Checks the provided emits are compatible with emit_specs."""
-
-    def check_compatible_fn(emit_spec, emit) -> bool:
-      if emit_spec.dtype != emit.dtype:
-        return False
-      try:
-        utils.assert_is_compatible_with(emit.shape[2:], emit_spec.shape)
-        return True
-      except ValueError:
-        return False
-
-    def error_message_fn(emit_spec, emit) -> str:
-      if isinstance(emit, types.Sequence):
-        emit = emit.channel_spec
-      return f'{emit_spec=} does not match {emit=}.'
-
-    chex.assert_trees_all_equal_comparator(
-        check_compatible_fn, error_message_fn, emit_specs, emits
-    )
-
   def assertSequencesClose(  # pylint: disable=invalid-name
       self,
       a: types.Sequence,

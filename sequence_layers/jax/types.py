@@ -38,7 +38,6 @@ __all__ = (
     'ChannelSpec',
     'Constants',
     'DType',
-    'EmitSpecs',
     'Emits',
     'Emitting',
     'ExpandedMaskT',
@@ -120,7 +119,6 @@ DType = np.dtype
 ShapeDType = jax.ShapeDtypeStruct
 Constants = MutableMapping[str, jt.AnyPyTree]
 Emits = jt.AnyPyTree
-EmitSpecs = jt.AnyPyTree
 ChannelSpec = ShapeDType
 ArrayLike = jax.Array | jax.core.Tracer | jax.core.ShapedArray | np.ndarray
 
@@ -685,7 +683,7 @@ class Steppable(metaclass=abc.ABCMeta):
   - An output `Sequence` shaped  `[b, block_size * n * output_ratio, ...]`
     whose `...` shape matches `get_output_shape`.
   - A `state` output whose structure matches `get_initial_state`.
-  - (Optionally) an `emits` output whose structure/specs match `get_emit_specs`.
+  - (Optionally) an `emits` output.
 
   The output `Sequence` is the primary output of the step, while the `emits`
   represent "auxiliary" outputs that are produced by the layer (for example,
@@ -699,7 +697,7 @@ class Steppable(metaclass=abc.ABCMeta):
   This produces:
   - An output `Sequence` shaped  `[b,  t * output_ratio, ...]`
     whose `...` shape matches `get_output_shape`.
-  - (Optionally) an `emits` output whose structure/specs match `get_emit_specs`.
+  - (Optionally) an `emits` output.
 
   The output `Sequence` is the primary output of the layer, while the `emits`
   represent "auxiliary" outputs that are produced by the layer (for example,
@@ -801,9 +799,8 @@ class Steppable(metaclass=abc.ABCMeta):
     """Process this layer layer-wise, producing emitted tensors.
 
     This is like `layer`, except it has an additional return value which is the
-    "emitted" tensors for the laeyr. The emitted tensors are a structure of
-    tensors whose spec matches the return value of `get_emit_specs` and whose
-    values are `ArrayLike`s or `Sequence`s.
+    "emitted" tensors for the layer. The emitted tensors are a structure of
+    tensors whose whose values are `ArrayLike`s or `Sequence`s.
 
     Args:
       x: Input sequence with values shaped [b, t_i, ...].
@@ -817,8 +814,7 @@ class Steppable(metaclass=abc.ABCMeta):
       y: The outputs corresponding to this layer with values shaped
         [b, t_o, ...] where `t_o == t_i * output_ratio`. t_o may have been
         truncated to only represent valid frames.
-      emits: A nest of emitted tensors or Sequences. The nest structure and
-        tensor specs match `get_emit_specs`.
+      emits: A nest of emitted tensors or Sequences.
     """
     outputs = self.layer(x, training=training, constants=constants)
     return outputs, ()
@@ -870,8 +866,7 @@ class Steppable(metaclass=abc.ABCMeta):
 
     This is like `step`, except it has an additional return value which is the
     "emitted" tensors for the step. The emitted tensors are a structure of
-    tensors whose spec matches the return value of `get_emit_specs` and whose
-    values are `ArrayLike`s or `Sequence`s.
+    tensors whose values are `ArrayLike`s or `Sequence`s.
 
     Args:
       x: Input sequence with values shaped [b, t_i, ...], where t_i is a
@@ -889,8 +884,7 @@ class Steppable(metaclass=abc.ABCMeta):
         where `t_o == t_i * output_ratio`.
       state: A structure of state tensors matching get_initial_state. The
         new state for this layer.
-      emits: A nest of emitted tensors or Sequences. The nest structure and
-        tensor specs match `get_emit_specs`.
+      emits: A nest of emitted tensors or Sequences.
     """
     outputs, state = self.step(x, state, training=training, constants=constants)
     return outputs, state, ()
@@ -984,28 +978,6 @@ class Steppable(metaclass=abc.ABCMeta):
     """
     return self.get_output_spec(x.channel_spec, constants=constants)
 
-  @nn.nowrap
-  def get_emit_specs_for_sequence(
-      self, x: Sequence, *, constants: Constants | None = None
-  ) -> EmitSpecs:
-    """Returns the emit specs this layer produces for the provided Sequence.
-
-    A convenience wrapper around get_emit_specs.
-
-    Args:
-      x: Sequence. An input sequence.
-      constants: A dictionary of constant name to ArrayLike or sl.Sequence.
-        Values or sequences that are "constant" with respect to the
-        SequenceLayer, but may affect its processing. For example, for an
-        attention layer this may contain the source sequence to attend to.
-
-    Returns:
-      A nest of ShapeDType whose structure matches that of the emit structure
-      returned from layer_with_emits or step_with_emits. Shapes represent the
-      channels dimensions (i.e. not including the batch or time dimension).
-    """
-    return self.get_emit_specs(x.channel_spec, constants=constants)
-
   @abc.abstractmethod
   def get_output_dtype(self, input_dtype: DType) -> DType:
     """Returns the layer's output dtype for the specified input dtype."""
@@ -1034,29 +1006,6 @@ class Steppable(metaclass=abc.ABCMeta):
     shape = self.get_output_shape(input_spec.shape, constants=constants)
     dtype = self.get_output_dtype(input_spec.dtype)
     return ChannelSpec(shape, dtype)
-
-  @nn.nowrap
-  def get_emit_specs(
-      self, input_spec: ChannelSpec, *, constants: Constants | None = None
-  ) -> EmitSpecs:
-    """Returns the emit specs this layer produces for an input spec.
-
-    Args:
-      input_spec: A ChannelSpec which represents the channels shape and dtype of
-        the input sequence (i.e. not including the batch or time dimension).
-      constants: A dictionary of constant name to ArrayLike or sl.Sequence.
-        Values or sequences that are "constant" with respect to the
-        SequenceLayer, but may affect its processing. For example, for an
-        attention layer this may contain the source sequence to attend to.
-
-    Returns:
-      A nest of ShapeDtype whose structure matches the emit structure
-      returned from `layer_with_emits` or `step_with_emits`. Shapes represent
-      the channels dimensions (i.e. not including the batch or time dimension).
-    """
-    del input_spec
-    del constants
-    return ()
 
 
 def _check_step_common(layer: Steppable, x: Sequence) -> None:
@@ -1139,7 +1088,6 @@ def check_layer_with_emits(layer_with_emits_fn):
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, Emits]:
-    # TODO(rryan): Validate emits against get_emit_specs.
     y, emits = layer_with_emits_fn(
         self, x, training=training, constants=constants
     )
@@ -1189,7 +1137,6 @@ def check_step_with_emits(step_with_emits_fn):
   ) -> tuple[Sequence, State, Emits]:
     _check_step_common(self, x)
 
-    # TODO(rryan): Validate emits against get_emit_specs.
     # TODO(rryan): Validate state pytree does not change.
     y, state, emits = step_with_emits_fn(
         self, x, state, training=training, constants=constants
@@ -1281,12 +1228,6 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
   ) -> tuple[Sequence, Emits]:
     pass
 
-  @abc.abstractmethod
-  def get_emit_specs(
-      self, input_spec: ChannelSpec, *, constants: Constants | None = None
-  ) -> EmitSpecs:
-    pass
-
 
 class Stateless(SequenceLayer):
   """A SequenceLayer with no state over time required for step-wise processing.
@@ -1328,7 +1269,6 @@ class StatelessEmitting(Emitting):
   - layer_with_emits
   - get_output_shape
   - get_output_dtype
-  - get_emit_specs
   """
 
   def step_with_emits(

@@ -1929,17 +1929,6 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
 
   config: Config
 
-  @nn.nowrap
-  def get_emit_specs(
-      self,
-      input_spec: types.ChannelSpec,
-      constants: types.Constants | None = None,
-  ) -> types.Sequence:
-    return types.Sequence(
-        input_spec,
-        types.ChannelSpec([], types.MASK_DTYPE),
-    )
-
   @types.check_layer_with_emits
   def layer_with_emits(
       self,

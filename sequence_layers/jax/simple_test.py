@@ -879,8 +879,6 @@ class EmitTest(test_utils.SequenceLayerTest):
     self.assertEmpty(l.variables)
 
     y, emits = l.layer_with_emits(x, training=False)
-    emit_specs = l.get_emit_specs_for_sequence(x)
-    self.assertEmitsCompatible(emit_specs, emits)
     self.assertSequencesEqual(y, emits)
 
 
