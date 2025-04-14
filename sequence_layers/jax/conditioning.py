@@ -90,8 +90,12 @@ class BaseConditioning(
     CONCAT = 2
     # Affine conditioning. Requires LINEAR_AFFINE projection.
     AFFINE = 3
+    # Affine shift conditioning. Requires LINEAR projection.
+    AFFINE_SHIFT = 4
+    # Affine scale conditioning. Requires LINEAR projection.
+    AFFINE_SCALE = 5
     # Broadcast-multiply conditioning. Requires LINEAR or IDENTITY projection.
-    MUL = 4
+    MUL = 6
 
   def _projected_condition_shape(
       self, input_shape: types.Shape, condition_shape: types.Shape
@@ -177,6 +181,16 @@ class BaseConditioning(
     ):
       raise ValueError('AFFINE combination requires LINEAR_AFFINE projection.')
     if (
+        self._combination == self.Combination.AFFINE_SHIFT
+        and self._projection != self.Projection.LINEAR
+    ):
+      raise ValueError('AFFINE_SHIFT combination requires LINEAR projection.')
+    if (
+        self._combination == self.Combination.AFFINE_SCALE
+        and self._projection != self.Projection.LINEAR
+    ):
+      raise ValueError('AFFINE_SCALE combination requires LINEAR projection.')
+    if (
         self._combination != self.Combination.AFFINE
         and self._projection == self.Projection.LINEAR_AFFINE
     ):
@@ -194,7 +208,12 @@ class BaseConditioning(
         input_shape, conditioning_channel_shape
     )
     match self._combination:
-      case self.Combination.ADD | self.Combination.MUL:
+      case (
+          self.Combination.ADD
+          | self.Combination.MUL
+          | self.Combination.AFFINE_SHIFT
+          | self.Combination.AFFINE_SCALE
+      ):
         return jnp.broadcast_shapes(input_shape, projected_conditioning_shape)
       case self.Combination.CONCAT:
         input_inner_dim = input_shape[-1] if input_shape else 1
@@ -271,9 +290,18 @@ class BaseConditioning(
 
     def _affine_fn(x, conditioning):
       scale, shift = utils.sequence_unstack(conditioning, axis=2)
-      # Offset scale by 1.0
+      # Offset scale by 1.0. With parameter itializations near 0, this provides
+      # a stable initialization near 1.0 and allows the network to
+      # learn residual scaling adjustments more easily.
       scale = scale.apply_values(lambda v: v + 1.0)
       return utils.sequence_broadcast_affine(x, scale, shift)
+
+    def _affine_scale_fn(x, conditioning):
+      # Offset scale by 1.0. With parameter itializations near 0, this provides
+      # a stable initialization near 1.0 and allows the network to
+      # learn residual scaling adjustments more easily.
+      scale = conditioning.apply_values(lambda v: v + 1.0)
+      return utils.sequence_broadcast_product(x, scale)
 
     match self._combination:
       case self.Combination.ADD:
@@ -282,6 +310,10 @@ class BaseConditioning(
         combine_fn = utils.sequence_broadcast_concat
       case self.Combination.AFFINE:
         combine_fn = _affine_fn
+      case self.Combination.AFFINE_SHIFT:
+        combine_fn = utils.sequence_broadcast_add
+      case self.Combination.AFFINE_SCALE:
+        combine_fn = _affine_scale_fn
       case self.Combination.MUL:
         combine_fn = utils.sequence_broadcast_product
       case _:

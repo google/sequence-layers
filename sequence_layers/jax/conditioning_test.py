@@ -29,6 +29,8 @@ IDENTITY = conditioning.Conditioning.Projection.IDENTITY
 LINEAR = conditioning.Conditioning.Projection.LINEAR
 LINEAR_AFFINE = conditioning.Conditioning.Projection.LINEAR_AFFINE
 ADD = conditioning.Conditioning.Combination.ADD
+AFFINE_SHIFT = conditioning.Conditioning.Combination.AFFINE_SHIFT
+AFFINE_SCALE = conditioning.Conditioning.Combination.AFFINE_SCALE
 MUL = conditioning.Conditioning.Combination.MUL
 CONCAT = conditioning.Conditioning.Combination.CONCAT
 AFFINE = conditioning.Conditioning.Combination.AFFINE
@@ -91,6 +93,26 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR_AFFINE, AFFINE, (2, 5), (7,), (2, 5)),
       (LINEAR_AFFINE, AFFINE, (3, 1, 5), (2, 7), (3, 1, 5)),
       (LINEAR_AFFINE, AFFINE, (2, 7), (3, 1, 5), (2, 7)),
+      (LINEAR, AFFINE_SHIFT, tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (5,), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (2, 5), tuple()),
+      (LINEAR, AFFINE_SHIFT, (2,), tuple(), (2,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), tuple(), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SHIFT, (7,), (2, 5), (7,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), (7,), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (3, 1, 5), (2, 7), (3, 1, 5)),
+      (LINEAR, AFFINE_SHIFT, (2, 7), (3, 1, 5), (2, 7)),
+      (LINEAR, AFFINE_SCALE, tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (5,), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (2, 5), tuple()),
+      (LINEAR, AFFINE_SCALE, (2,), tuple(), (2,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), tuple(), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SCALE, (7,), (2, 5), (7,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), (7,), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (3, 1, 5), (2, 7), (3, 1, 5)),
+      (LINEAR, AFFINE_SCALE, (2, 7), (3, 1, 5), (2, 7)),
       (LINEAR, CONCAT, tuple(), tuple(), (2,)),
       (LINEAR, CONCAT, tuple(), (5,), (2,)),
       (LINEAR, CONCAT, tuple(), (2, 5), (2,)),
@@ -168,6 +190,8 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (IDENTITY, CONCAT, (2, 5), tuple(), (2, 6)),
       (LINEAR, ADD, (5,), (7,), (5,)),
       (LINEAR_AFFINE, AFFINE, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SCALE, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SHIFT, (5,), (7,), (5,)),
   )
   def test_conditioning_sequence_streaming(
       self,
@@ -267,6 +291,26 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, CONCAT, (2, 5), (7,), (2, 1), (2, 6)),
       (LINEAR, CONCAT, (3, 1, 5), (2, 7), (3, 1, 1), (3, 1, 6)),
       (LINEAR, CONCAT, (2, 7), (3, 1, 5), (2, 1), (2, 8)),
+      (LINEAR, AFFINE_SHIFT, tuple(), tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (5,), tuple(), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (2, 5), tuple(), tuple()),
+      (LINEAR, AFFINE_SHIFT, (2,), tuple(), (1,), (2,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), tuple(), (1, 1), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (5,), (7,), (1,), (5,)),
+      (LINEAR, AFFINE_SHIFT, (7,), (2, 5), (1,), (7,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), (7,), (1, 1), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (3, 1, 5), (2, 7), (1, 1, 1), (3, 1, 5)),
+      (LINEAR, AFFINE_SHIFT, (2, 7), (3, 1, 5), (1, 1), (2, 7)),
+      (LINEAR, AFFINE_SCALE, tuple(), tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (5,), tuple(), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (2, 5), tuple(), tuple()),
+      (LINEAR, AFFINE_SCALE, (2,), tuple(), (1,), (2,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), tuple(), (1, 1), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (5,), (7,), (1,), (5,)),
+      (LINEAR, AFFINE_SCALE, (7,), (2, 5), (1,), (7,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), (7,), (1, 1), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (3, 1, 5), (2, 7), (1, 1, 1), (3, 1, 5)),
+      (LINEAR, AFFINE_SCALE, (2, 7), (3, 1, 5), (1, 1), (2, 7)),
   )
   def test_projection_channel_shape(
       self,
@@ -393,6 +437,26 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, CONCAT, (2, 5), (7,), (2, 10)),
       (LINEAR, CONCAT, (3, 1, 5), (2, 7), (3, 1, 10)),
       (LINEAR, CONCAT, (2, 7), (3, 1, 5), (2, 14)),
+      (LINEAR, AFFINE_SHIFT, tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (5,), tuple()),
+      (LINEAR, AFFINE_SHIFT, tuple(), (2, 5), tuple()),
+      (LINEAR, AFFINE_SHIFT, (2,), tuple(), (2,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), tuple(), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SHIFT, (7,), (2, 5), (7,)),
+      (LINEAR, AFFINE_SHIFT, (2, 5), (7,), (2, 5)),
+      (LINEAR, AFFINE_SHIFT, (3, 1, 5), (2, 7), (3, 1, 5)),
+      (LINEAR, AFFINE_SHIFT, (2, 7), (3, 1, 5), (2, 7)),
+      (LINEAR, AFFINE_SCALE, tuple(), tuple(), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (5,), tuple()),
+      (LINEAR, AFFINE_SCALE, tuple(), (2, 5), tuple()),
+      (LINEAR, AFFINE_SCALE, (2,), tuple(), (2,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), tuple(), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (5,), (7,), (5,)),
+      (LINEAR, AFFINE_SCALE, (7,), (2, 5), (7,)),
+      (LINEAR, AFFINE_SCALE, (2, 5), (7,), (2, 5)),
+      (LINEAR, AFFINE_SCALE, (3, 1, 5), (2, 7), (3, 1, 5)),
+      (LINEAR, AFFINE_SCALE, (2, 7), (3, 1, 5), (2, 7)),
   )
   def test_conditioning_tensor(
       self,
