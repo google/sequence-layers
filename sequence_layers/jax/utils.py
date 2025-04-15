@@ -1587,14 +1587,18 @@ def _get_constant(
     expected_shape: types.ShapeLike | None,
     expected_dtype: types.DType | None,
     allow_broadcastable: bool,
-) -> jax.Array | types.Sequence:
+    optional: bool,
+) -> jax.Array | types.Sequence | None:
   """Returns the constant with the given name from the constants dictionary."""
   value = (constants or {}).get(name)
   if value is None:
-    raise ValueError(
-        f'{layer} requires the constant {name} to be provided via '
-        f'constants, got: {constants}'
-    )
+    if optional:
+      return None
+    else:
+      raise ValueError(
+          f'{layer} requires the constant {name} to be provided via '
+          f'constants, got: {constants}'
+      )
 
   wrong_shape = False
   if expected_shape is not None:
@@ -1633,6 +1637,7 @@ def get_constant_array(
       expected_shape,
       expected_dtype,
       allow_broadcastable,
+      optional=False,
   )
   if isinstance(value, types.Sequence) and unpack_sequence:
     value = value.values
@@ -1659,9 +1664,62 @@ def get_constant_sequence(
       expected_shape,
       expected_dtype,
       allow_broadcastable,
+      optional=False,
   )
   if not isinstance(value, types.Sequence):
     raise ValueError(
         f'{layer} requires the constant {name} to be a sequence, got: {value}'
     )
   return value
+
+
+def get_optional_constant_sequence(
+    layer: types.SequenceLayer,
+    constants: types.Constants | None,
+    name: str,
+    expected_shape: types.ShapeLike | None = None,
+    expected_dtype: types.DType | None = None,
+    allow_broadcastable: bool = False,
+) -> types.Sequence | None:
+  """Returns the constant with the given name from the constants dictionary."""
+  value = _get_constant(
+      layer,
+      constants,
+      name,
+      expected_shape,
+      expected_dtype,
+      allow_broadcastable,
+      optional=True,
+  )
+  if value is None:
+    return None
+  if not isinstance(value, types.Sequence):
+    raise ValueError(
+        f'{layer} requires the constant {name} to be a sequence, got: {value}'
+    )
+  return value
+
+
+def get_step_with_emits_output_spec(
+    layer: types.SequenceLayer,
+    x: types.Sequence,
+    state: types.State,
+    *,
+    training: bool,
+    constants: types.Constants | None = None,
+) -> tuple[types.Sequence, types.Emits]:
+  """Returns the output spec of the layer."""
+
+  def step_fn(
+      layer: types.SequenceLayer,
+      x: types.Sequence,
+      state: types.State,
+      constants: types.Constants,
+  ):
+    y, _, emits = layer.step_with_emits(
+        x, state, training=training, constants=constants
+    )
+    return y, emits
+
+  step_fn = functools.partial(nn.jit(step_fn), layer)
+  return jax.eval_shape(step_fn, x, state, constants)
