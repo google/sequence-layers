@@ -2166,5 +2166,31 @@ class ParallelChannelsTest(
       self.init_and_bind_layer(key, l, x)
 
 
+class BlockwiseTest(test_utils.SequenceLayerTest):
+
+  def test_basic(self):
+    key = jax.random.PRNGKey(1234)
+    config = combinators.Blockwise.Config(
+        convolution.Conv1D.Config(
+            8, kernel_size=3, strides=2, padding='semicausal', name='conv'
+        ),
+        block_size=10,
+        name='blockwise',
+    )
+
+    x = test_utils.random_sequence(2, 12, 9, low_length=6)
+    l = self.init_and_bind_layer(key, config.make(), x)
+
+    self.assertEqual(l.block_size, 10)
+    self.verify_contract(l, x, training=False)
+
+    y, _, _ = utils.step_by_step_dynamic(l, x, training=False)
+    y_expected, _, _ = utils.step_by_step_dynamic(
+        l.child_layer, x, training=False
+    )
+    self.assertSequencesClose(y, y_expected)
+    self.assertAllEqual(y.lengths(), (x.lengths() + 1) // 2)
+
+
 if __name__ == '__main__':
   test_utils.main()
