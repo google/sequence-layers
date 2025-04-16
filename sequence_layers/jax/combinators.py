@@ -35,6 +35,7 @@ CombinationMode = utils.CombinationMode
 __all__ = (
     # go/keep-sorted start
     'Bidirectional',
+    'Blockwise',
     'CheckpointGradient',
     'CombinationMode',
     'Parallel',
@@ -1059,7 +1060,7 @@ class Repeat(types.Emitting):
 
     if self.config.remat:
       # TODO(rryan): Support customization (prevent_cse, policy, etc.).
-      scan_fn = nn.remat(scan_fn)
+      scan_fn = nn.remat(scan_fn, prevent_cse=False)
 
     metadata_params = {
         # For params we replicate along this scan-over-layers axis.
@@ -1649,3 +1650,35 @@ class Bidirectional(types.Emitting):
     )
     emits = (forward_emits, backward_emits)
     return y, emits
+
+
+class Blockwise(WrapperMixin, types.SequenceLayer):
+  """Processes the provided layer in blocks of a given size."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config for Blockwise."""
+
+    child_layer: types.SequenceLayerConfig
+    block_size: int
+    name: str | None = None
+
+    def make(self) -> 'Blockwise':
+      return Blockwise(self, name=self.name)
+
+  config: Config
+
+  def setup(self) -> None:
+    self.child_layer = self.config.child_layer.make()
+    nn.share_scope(self, self.child_layer)
+
+    if self.config.block_size % self.child_layer.block_size != 0:
+      raise ValueError(
+          'Block size must be a multiple of the child layer block size.'
+          f' {self.config.block_size=} % {self.child_layer.block_size=} =='
+          f' {self.config.block_size % self.child_layer.block_size}'
+      )
+
+  @property
+  def block_size(self) -> int:
+    return self.config.block_size
