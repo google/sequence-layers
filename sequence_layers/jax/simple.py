@@ -34,6 +34,7 @@ from typing_extensions import override
 
 from google3.learning.gemini.gemax.core.models import sharding as sharding_lib
 
+# pylint: disable=logging-fstring-interpolation
 
 __all__ = (
     # go/keep-sorted start
@@ -1701,8 +1702,8 @@ class Reshape(types.PreservesType, types.Stateless):
   class Config(types.SequenceLayerConfig):
     """Configuration for Reshape."""
 
-    # The new shape of the channels dimension. Must have the same number of
-    # elements as the input channels shape.
+    # The new shape of the channels dimension. Can't contain -1, and must have
+    # the same number of elements as the input channels shape.
     output_shape: TypingSequence[int]
     # An optional name for the layer.
     name: str | None = None
@@ -1748,6 +1749,96 @@ class Reshape(types.PreservesType, types.Stateless):
     return x.apply_values_masked(
         lambda v: jnp.reshape(v, v.shape[:2] + self.config.output_shape)
     )
+
+
+class GlobalReshape(types.PreservesType, types.Stateless):
+  """Reshapes the time and channel dimensions of the input sequence globally.
+
+  This layer reshapes inputs of shape [batch_size, time_in, *channel_shape_in]
+  to outputs of shape `[batch_size, *output_shape]`.  The total number of
+  elements across the time and channel dimensions must remain constant.
+
+  Examples:
+  * shape = [4, 3, 6], tensor shape [8, 6, 2, 6], output shape is [8, 4, 3, 6]
+  * shape = [12, 6], tensor shape [8, 6, 2, 6], output shape is [8, 12, 6]
+  * shape = [4, 18], tensor shape [8, 6, 2, 6], output shape is [8, 4, 18]
+
+  Important notes:
+  * A timestep in the output is valid (mask=True) only if *all* values that were
+    reshaped into that timestep came from a valid timestep in the input.
+  * Because this operation depends on the full time dimension of the input,
+    it is neither padding invariant nor streamable (`supports_step` is False).
+  """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Configuration for GlobalReshape."""
+
+    # The desired [new_time, *new_channels] shape *after* the batch dimension.
+    # Can't contain -1, and the product of elements in output_shape must equal
+    # the product of the input time and channel dimensions.
+    output_shape: TypingSequence[int]
+    # An optional name for the layer.
+    name: str | None = None
+
+    def __post_init__(self):
+      # Use hashable types for sequences.
+      object.__setattr__(self, 'output_shape', tuple(self.output_shape))
+
+    def make(self) -> 'GlobalReshape':
+      return GlobalReshape(self, name=self.name)
+
+  config: Config
+
+  def _validate_reshape(self, input_shape: types.ShapeLike) -> None:
+    input_elements = np.prod(input_shape)
+    output_elements = np.prod(self.config.output_shape)
+    if input_elements != output_elements:
+      raise ValueError(
+          f'{self.config.output_shape=} must have the same number of '
+          f'elements as {input_shape=}.'
+      )
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    del constants
+    return tuple(self.config.output_shape[1:])
+
+  @property
+  def supports_step(self) -> bool:
+    return False
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+
+    self._validate_reshape(x.shape[1:])
+
+    # Perform reshape across time and channels.
+    out_shape = (x.shape[0],) + tuple(self.config.output_shape)
+    out = jnp.reshape(x.values, out_shape)
+    # Since output_time can be {=, >, <} input_time, we may be splitting or
+    # joining input timesteps into the reshaped output. This means we need to
+    # carefully calculate the output mask:
+    # 1. Broadcast the mask to the full input shape, and then reshape it to the
+    # output shape.
+    mask = jnp.reshape(x.mask, x.shape[:2] + (1,) * len(x.channel_shape))
+    mask = jnp.broadcast_to(mask, x.shape)
+    # 2. Reshape the mask to the output shape, and then call jnp.all to ensure
+    # that any timestep with *any* invalid input is invalid in the output).
+    mask = jnp.reshape(mask, out_shape)
+    mask = jnp.all(mask, axis=range(2, mask.ndim))
+    return types.Sequence(out, mask=mask)
 
 
 class Transpose(types.PreservesType, types.Stateless):
