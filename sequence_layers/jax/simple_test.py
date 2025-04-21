@@ -531,6 +531,74 @@ class FlattenTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(y, y_expected)
 
 
+class GlobalReshapeTest(test_utils.SequenceLayerTest):
+
+  def run_global_reshape(self, shape, output_shape):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*shape)
+    l = simple.GlobalReshape.Config(output_shape, name='global_reshape').make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    with self.subTest('properties'):
+      self.assertEqual(l.block_size, 1)
+      self.assertEqual(l.output_ratio, 1)
+      self.assertEqual(l.get_output_shape_for_sequence(x), output_shape[1:])
+      self.assertEqual(l.name, 'global_reshape')
+      self.assertFalse(l.supports_step)
+
+    with self.subTest('verify_contract'):
+      self.verify_contract(
+          l, x, training=False, test_padding_invariance=False
+      )
+      self.assertEmpty(l.variables)
+
+  @parameterized.parameters(
+      # same in/out channel_shape, channel_ndims=0
+      ((2, 3), (3,)),
+      # same in/out channel_shape, channel_ndims=1, channel_dim=1
+      ((2, 3, 1), (3, 1)),
+      # same in/out channel_shape, channel_ndims=1
+      ((2, 3, 5), (3, 5)),
+      # same in/out channel_shape, channel_ndims=2
+      ((2, 3, 5, 9), (3, 5, 9)),
+  )
+  def test_input_time_equals_output_time(self, shape, output_shape):
+    """Cases where shape[1] is equal to output_shape[0]."""
+    self.run_global_reshape(shape, output_shape)
+
+  @parameterized.parameters(
+      # input_time < output_time, input channel_ndims = output channel_ndims
+      ((2, 3, 5, 7), (7, 5, 3)),
+      # input_time < output_time, input channel_ndims < output channel_ndims
+      ((2, 3, 35), (7, 5, 3)),
+      # input_time < output_time, input channel_ndims > output channel_ndims
+      ((2, 3, 5, 7), (7, 15)),
+  )
+  def test_input_time_is_less_than_output_time(self, shape, output_shape):
+    """Cases where shape[1] is less than output_shape[0]."""
+    self.run_global_reshape(shape, output_shape)
+
+  @parameterized.parameters(
+      # input_time > output_time, input channel_ndims = output channel_ndims
+      ((2, 7, 5, 3), (3, 5, 7)),
+      # input_time > output_time, input channel_ndims < output channel_ndims
+      ((2, 7, 15), (3, 5, 7)),
+      # input_time > output_time, input channel_ndims > output channel_ndims
+      ((2, 7, 5, 3), (3, 35)),
+  )
+  def test_input_time_is_greater_than_output_time(self, shape, output_shape):
+    """Cases where shape[1] is greater than output_shape[0]."""
+    self.run_global_reshape(shape, output_shape)
+
+  def test_wrong_shape(self):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 3, 5)
+    l = simple.GlobalReshape.Config([4], name='global_reshape').make().bind({})
+
+    with self.assertRaises(ValueError):
+      self.init_and_bind_layer(key, l, x)
+
+
 class ReshapeTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
@@ -646,6 +714,7 @@ class SwapAxesTest(test_utils.SequenceLayerTest):
       ((2, 3, 4, 5, 6), 3, 1),
   )
   def test_swapaxes_error_batch_time_axis(self, input_shape, axis1, axis2):
+    del input_shape
     with self.assertRaises(ValueError):
       simple.SwapAxes.Config(axis1, axis2, name='swapaxes').make()
 
@@ -702,6 +771,7 @@ class MoveAxisTest(test_utils.SequenceLayerTest):
       ((2, 3, 4, 5, 6), 2, (3, 4)),
   )
   def test_moveaxis_error_make(self, input_shape, source, destination):
+    del input_shape
     with self.assertRaises(ValueError):
       simple.MoveAxis.Config(source, destination, name='moveaxis').make()
 
