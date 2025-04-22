@@ -58,6 +58,7 @@ __all__ = (
     'GatedTanhUnit',
     'GatedUnit',
     'Gelu',
+    'GlobalReshape',
     'GradientClipping',
     'Identity',
     'Lambda',
