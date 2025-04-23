@@ -657,7 +657,7 @@ class Conv1D(BaseConv):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -710,7 +710,7 @@ class Conv1D(BaseConv):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.compact
@@ -757,7 +757,7 @@ class Conv1D(BaseConv):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(
@@ -796,7 +796,7 @@ class DepthwiseConv1D(BaseConv):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -849,7 +849,7 @@ class DepthwiseConv1D(BaseConv):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.compact
@@ -888,7 +888,7 @@ class DepthwiseConv1D(BaseConv):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(
@@ -936,7 +936,7 @@ class Conv2D(BaseConv):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -1034,7 +1034,7 @@ class Conv2D(BaseConv):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.compact
@@ -1099,7 +1099,7 @@ class Conv2D(BaseConv):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(
@@ -1148,7 +1148,7 @@ class Conv3D(BaseConv):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -1249,7 +1249,7 @@ class Conv3D(BaseConv):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.compact
@@ -1315,7 +1315,7 @@ class Conv3D(BaseConv):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(
@@ -1357,7 +1357,7 @@ class Conv1DTranspose(types.SequenceLayer):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: str | None = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -1404,7 +1404,7 @@ class Conv1DTranspose(types.SequenceLayer):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @property
@@ -1479,7 +1479,7 @@ class Conv1DTranspose(types.SequenceLayer):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(
@@ -1628,7 +1628,7 @@ class Conv2DTranspose(types.SequenceLayer):
     use_bias: bool = True
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: str | None = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -1717,7 +1717,7 @@ class Conv2DTranspose(types.SequenceLayer):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @property
@@ -1796,7 +1796,7 @@ class Conv2DTranspose(types.SequenceLayer):
       bias = None
 
     x, kernel, bias = nn.dtypes.promote_dtype(
-        x, kernel, bias, dtype=self.config.dtype
+        x, kernel, bias, dtype=self.config.compute_dtype
     )
 
     y = jax.lax.conv_general_dilated(

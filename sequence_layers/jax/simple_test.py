@@ -992,7 +992,7 @@ def embedding_layer_from_weights(
   num_embeddings, dimension = weights.shape
   key = jax.random.PRNGKey(1234)
   layer = simple.Embedding.Config(
-      dtype=compute_dtype,
+      compute_dtype=compute_dtype,
       param_dtype=param_dtype,
       dimension=dimension,
       num_embeddings=num_embeddings,
@@ -1208,7 +1208,7 @@ class EmbeddingTransposeTest(test_utils.SequenceLayerTest):
         embedding=embedding,
         use_bias=use_bias,
         bias_init=nn.initializers.ones_init(),
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='embedding_transpose',
     ).make()

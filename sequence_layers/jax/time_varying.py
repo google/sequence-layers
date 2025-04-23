@@ -62,7 +62,7 @@ class SequenceEmbedding(types.SequenceLayer):
     # The number of valid timesteps for the SequenceEmbedding layer.
     num_steps: int
     # The dtype of the embeddings output by the layer.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # By default, initialize embeddings to have a norm of 1.
@@ -146,9 +146,9 @@ class SequenceEmbedding(types.SequenceLayer):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     self._validate_input_dtype(input_dtype)
-    if self.config.dtype is None:
+    if self.config.compute_dtype is None:
       return self.config.param_dtype
-    return self.config.dtype
+    return self.config.compute_dtype
 
   @types.check_layer
   def layer(
@@ -196,7 +196,7 @@ class SequenceEmbedding(types.SequenceLayer):
 
     embedding = self.embedding
     (embedding,) = nn.dtypes.promote_dtype(
-        embedding, dtype=self.config.dtype, inexact=False
+        embedding, dtype=self.config.compute_dtype, inexact=False
     )
 
     def broadcast_to_x(a: jax.Array) -> jax.Array:
@@ -265,7 +265,7 @@ class SequenceDense(types.SequenceLayer):
     # An optional activation to apply after the dense layer.
     activation: Callable[[jax.Array], jax.Array] | None = None
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # An optional precision to use for the einsum.
@@ -290,7 +290,7 @@ class SequenceDense(types.SequenceLayer):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -377,7 +377,7 @@ class SequenceDense(types.SequenceLayer):
       bias = None
 
     inputs, kernel, bias = nn.dtypes.promote_dtype(
-        x.values, kernel, bias, dtype=self.config.dtype
+        x.values, kernel, bias, dtype=self.config.compute_dtype
     )
 
     # Slice [T, I, O] kernel to be used with current timesteps.
@@ -451,7 +451,7 @@ class MaskedDense(types.SequenceLayer):
     # An optional activation to apply after the dense layer.
     activation: Callable[[jax.Array], jax.Array] | None = None
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # An optional precision to use for the einsum.
@@ -476,7 +476,7 @@ class MaskedDense(types.SequenceLayer):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -591,7 +591,7 @@ class MaskedDense(types.SequenceLayer):
       bias = None
 
     step_input, kernel, bias = nn.dtypes.promote_dtype(
-        step_input, kernel, bias, dtype=self.config.dtype
+        step_input, kernel, bias, dtype=self.config.compute_dtype
     )
 
     # Construct a [T, T', 1, 1] upper triangular autoregressive mask matrix,

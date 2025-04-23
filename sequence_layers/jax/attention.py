@@ -322,7 +322,7 @@ class AttentionInputProjectionHelper:
       units_per_head: int,
       use_bias: bool,
       precision: jax.lax.PrecisionLike,
-      dtype: types.DType,
+      compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
   ) -> None:
@@ -360,7 +360,7 @@ class AttentionInputProjectionHelper:
                 config.bias_init, config.bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='query_key_value_projection',
@@ -380,7 +380,7 @@ class AttentionInputProjectionHelper:
                 config.bias_init, config.bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='query_projection',
@@ -399,7 +399,7 @@ class AttentionInputProjectionHelper:
                 config.bias_init, config.bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='key_projection',
@@ -418,7 +418,7 @@ class AttentionInputProjectionHelper:
                 config.bias_init, config.bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='value_projection',
@@ -438,7 +438,7 @@ class AttentionInputProjectionHelper:
                 config.q_bias_init, config.q_bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='query_projection',
@@ -462,7 +462,7 @@ class AttentionInputProjectionHelper:
                 config.kv_bias_init, config.kv_bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='key_value_projection',
@@ -482,7 +482,7 @@ class AttentionInputProjectionHelper:
                 config.q_bias_init, config.q_bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='query_projection',
@@ -505,7 +505,7 @@ class AttentionInputProjectionHelper:
                 config.kv_bias_init, config.kv_bias_sharding
             ),
             precision=precision,
-            dtype=dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
             name='shared_key_value_projection',
@@ -2172,7 +2172,7 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
     # to (i.e. all possible keys are masked).
     zero_fully_masked: bool = False
     # The dtype of the layer's computations.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype of the layer's parameters.
     param_dtype: types.DType = jnp.float32
     # The number of sink embeddings to include in the key and value.
@@ -2215,7 +2215,7 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
         units_per_head=self.config.units_per_head,
         use_bias=self.config.use_bias,
         precision=self.config.precision,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
     )
     if self.config.max_past_horizon < -1:
@@ -2495,7 +2495,7 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -2916,7 +2916,7 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
     # to (i.e. all possible keys are masked).
     zero_fully_masked: bool = False
     # The dtype of the layer's computations.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype of the layer's parameters.
     param_dtype: types.DType = jnp.float32
     # The number of sink embeddings to include in the key and value.
@@ -2984,7 +2984,7 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
         units_per_head=self.config.units_per_head,
         use_bias=self.config.use_bias,
         precision=self.config.precision,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         # Not possible for cross attention.
         allow_combined_qkv=False,
@@ -3166,7 +3166,7 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -3272,7 +3272,7 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
     compute_dtype = utils.get_promoted_dtype(
         query.values.dtype,
         keys.values.dtype,
-        dtype=self.config.dtype,
+        dtype=self.config.compute_dtype,
     )
 
     # Guard against NaN/Inf in values, since values are contracted when
@@ -3382,6 +3382,8 @@ class GmmAttention(types.PreservesType, types.Emitting):
     max_offset: float = -1.0
     # Name of the layer.
     name: str | None = None
+
+    # TODO(b/330395665): compute and param dtype.
 
     def make(self) -> 'GmmAttention':
       return GmmAttention(self, name=self.name)
@@ -3913,7 +3915,7 @@ class LocalDotProductSelfAttention(
     # to (i.e. all possible keys are masked).
     zero_fully_masked: bool = False
     # The dtype of the layer's computations.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype of the layer's parameters.
     param_dtype: types.DType = jnp.float32
     # The number of sink embeddings to include in the key and value.
@@ -3958,7 +3960,7 @@ class LocalDotProductSelfAttention(
         units_per_head=self.config.units_per_head,
         use_bias=self.config.use_bias,
         precision=self.config.precision,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
     )
     if self.config.max_past_horizon < 1:
@@ -4234,7 +4236,7 @@ class LocalDotProductSelfAttention(
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -4636,7 +4638,7 @@ class StreamingLocalDotProductAttention(
     # to the source outside of this layer.
     use_query_delay_buffer: bool = True
     # The dtype of the layer's computations.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # DType of parameters.
     param_dtype: types.DType = jnp.float32
     # The number of sink embeddings to include in the key and value.
@@ -4704,7 +4706,7 @@ class StreamingLocalDotProductAttention(
         units_per_head=self.config.units_per_head,
         use_bias=self.config.use_bias,
         precision=self.config.precision,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         # Not possible for cross attention.
         allow_combined_qkv=False,
@@ -4962,7 +4964,7 @@ class StreamingLocalDotProductAttention(
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap

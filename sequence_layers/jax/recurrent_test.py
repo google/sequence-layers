@@ -75,7 +75,10 @@ class LSTMTest(test_utils.SequenceLayerTest):
     param_dtype = jnp.float32
     key = jax.random.PRNGKey(1234)
     l = recurrent.LSTM.Config(
-        units=8, param_dtype=param_dtype, dtype=compute_dtype, name='lstm'
+        units=8,
+        param_dtype=param_dtype,
+        compute_dtype=compute_dtype,
+        name='lstm',
     ).make()
 
     batch_size, channels, time = 2, 3, 8
