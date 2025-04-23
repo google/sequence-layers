@@ -223,7 +223,7 @@ class Conv3DTest(test_utils.SequenceLayerTest):
         time_padding=time_padding,
         spatial_padding=(spatial_padding, spatial_padding),
         use_weight_norm=use_weight_norm,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='conv3d',
     ).make()

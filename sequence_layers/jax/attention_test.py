@@ -1024,7 +1024,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         num_heads=num_heads,
         units_per_head=units_per_head,
         precision=jax.lax.Precision.HIGHEST,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
     )
     l = attention.DotProductAttention.Config(**(defaults | config)).make()
@@ -1543,7 +1543,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_past_horizon=max_past_horizon,
         max_future_horizon=max_future_horizon,
         relative_position_embedding=relative_embedding,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         name='dot_product_self_attention',
     ).make()
 
@@ -1660,7 +1660,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_past_horizon=max_past_horizon,
         max_future_horizon=max_future_horizon,
         relative_position_embedding=relative_embedding,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         name='dot_product_self_attention',
     ).make()
 
@@ -1851,7 +1851,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         units_per_head=3,
         max_past_horizon=-1,
         precision=jax.lax.Precision.HIGHEST,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
     )
     l = attention.DotProductSelfAttention.Config(**(defaults | config)).make()
@@ -2389,7 +2389,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_future_horizon=max_future_horizon,
         relative_position_embedding=relative_embedding,
         precision=jax.lax.Precision.HIGHEST,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         name='local_dot_product_self_attention',
     ).make()
 
@@ -2585,7 +2585,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         block_size=1,
         relative_position_embedding=None,
         precision=jax.lax.Precision.HIGHEST,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
     )
     l = attention.LocalDotProductSelfAttention.Config(
@@ -3242,7 +3242,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
             max_past_horizon=1,
             max_future_horizon=3,
             precision=jax.lax.Precision.HIGHEST,
-            dtype=compute_dtype,
+            compute_dtype=compute_dtype,
             param_dtype=param_dtype,
         )
         | config

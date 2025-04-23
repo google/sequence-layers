@@ -1363,7 +1363,7 @@ class OneHot(types.Stateless):
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
     depth: int
-    dtype: types.DType = jnp.float32
+    compute_dtype: types.DType = jnp.float32
     name: str | None = None
 
     def make(self) -> 'OneHot':
@@ -1391,7 +1391,7 @@ class OneHot(types.Stateless):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     self._validate(input_dtype)
-    return self.config.dtype
+    return self.config.compute_dtype
 
   @types.check_layer
   def layer(
@@ -1406,7 +1406,9 @@ class OneHot(types.Stateless):
     # "0" is mapped to "[1] + [0] * (depth - 1)", so mask status is not
     # preserved.
     return x.apply_values(
-        lambda v: jax.nn.one_hot(v, self.config.depth, dtype=self.config.dtype)
+        lambda v: jax.nn.one_hot(
+            v, self.config.depth, dtype=self.config.compute_dtype
+        )
     )
 
 
@@ -1423,7 +1425,7 @@ class Embedding(types.Stateless):
     # in the range [0, num_embeddings).
     num_embeddings: int
     # The dtype of the embeddings output by the layer.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # By default, initialize embeddings to have a norm of 1.
@@ -1468,9 +1470,9 @@ class Embedding(types.Stateless):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     self._validate(input_dtype)
-    if self.config.dtype is None:
+    if self.config.compute_dtype is None:
       return self.config.param_dtype
-    return self.config.dtype
+    return self.config.compute_dtype
 
   @types.check_layer
   def layer(
@@ -1483,7 +1485,7 @@ class Embedding(types.Stateless):
     self._validate(x.dtype)
     embedding = self.embedding
     (embedding,) = nn.dtypes.promote_dtype(
-        embedding, dtype=self.config.dtype, inexact=False
+        embedding, dtype=self.config.compute_dtype, inexact=False
     )
     return x.apply_values(lambda v: jnp.take(embedding, v, axis=0))
 
@@ -1522,7 +1524,7 @@ class Embedding(types.Stateless):
         else self.embedding
     )
     values, embedding = nn.dtypes.promote_dtype(
-        values, embedding, dtype=(compute_dtype or self.config.dtype)
+        values, embedding, dtype=(compute_dtype or self.config.compute_dtype)
     )
     return type(x)(jnp.dot(values, embedding.T), x.mask)
 
@@ -1546,7 +1548,7 @@ class EmbeddingTranspose(types.Stateless):
     bias_sharding: types.Sharding = None
 
     # The dtype for layer compute; if set, overrides embedding's dtype.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype for layer parameters; if set, overrides embedding's param_dtype.
     param_dtype: types.DType | None = None
     # Optional name for the layer.
@@ -1570,7 +1572,7 @@ class EmbeddingTranspose(types.Stateless):
     return utils.get_promoted_dtype(
         input_dtype,
         self.config.param_dtype or self.embedding.config.param_dtype,
-        dtype=self.config.dtype or self.embedding.config.dtype,
+        dtype=self.config.compute_dtype or self.embedding.config.compute_dtype,
     )
 
   @override
@@ -1617,7 +1619,7 @@ class EmbeddingTranspose(types.Stateless):
 
     ret = self.embedding.attend(
         x,
-        compute_dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         embedding_dtype=self.config.param_dtype,
     )
     if bias is not None:

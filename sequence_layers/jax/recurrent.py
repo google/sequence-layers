@@ -76,7 +76,7 @@ class LSTM(types.SequenceLayer):
     """Config for LSTM."""
 
     units: int
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType | None = jnp.float32
     precision: nn.linear.PrecisionLike = None
     activation: Callable[[jax.Array], jax.Array] = jax.nn.tanh
@@ -112,7 +112,7 @@ class LSTM(types.SequenceLayer):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.compact
@@ -129,7 +129,7 @@ class LSTM(types.SequenceLayer):
     z = utils.FlaxEinsumDense(
         '...d,dh->...h',
         output_shape=(4 * self.config.units,),
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         precision=self.config.precision,
         kernel_init=self.config.kernel_init,
@@ -140,7 +140,7 @@ class LSTM(types.SequenceLayer):
     z += utils.FlaxEinsumDense(
         '...u,uh->...h',
         output_shape=(4 * self.config.units,),
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         precision=self.config.precision,
         kernel_init=self.config.recurrent_kernel_init,
@@ -324,7 +324,7 @@ class RGLRU(types.SequenceLayer):
     # [num_heads, units // units_per_head] if only_real or [num_heads, units //
     # (2 * units_per_head)] if complex.
     gate_bias_sharding: types.Sharding | None = None
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType | None = jnp.float32
     # An optional name for the layer.
     name: str | None = None
@@ -383,7 +383,7 @@ class RGLRU(types.SequenceLayer):
       input_dtype: types.DType,
   ) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @jt.typed
@@ -517,7 +517,7 @@ class RGLRU(types.SequenceLayer):
         ),
         kernel_sharding=self.config.gate_kernel_sharding,
         bias_sharding=self.config.gate_bias_sharding,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         name='input_gate',
     )
@@ -532,7 +532,7 @@ class RGLRU(types.SequenceLayer):
         ),
         kernel_sharding=self.config.gate_kernel_sharding,
         bias_sharding=self.config.gate_bias_sharding,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         name='a_gate',
     )
@@ -541,7 +541,7 @@ class RGLRU(types.SequenceLayer):
         x,
         a_real_param,
         a_imag_param,
-        dtype=self.config.dtype,
+        dtype=self.config.compute_dtype,
     )
 
     # Group x into heads.

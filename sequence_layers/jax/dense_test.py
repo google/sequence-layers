@@ -106,7 +106,7 @@ class DenseTest(test_utils.SequenceLayerTest):
         2,
         use_bias=use_bias,
         bias_init=nn.initializers.normal(),
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='dense',
     ).make()
@@ -193,7 +193,7 @@ class DenseShapedTest(test_utils.SequenceLayerTest):
         output_shape,
         use_bias=use_bias,
         bias_init=nn.initializers.normal(),
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='dense_shaped',
     ).make()
@@ -438,7 +438,7 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
         equation,
         output_shape,
         bias_axes,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='einsum_dense',
     ).make()

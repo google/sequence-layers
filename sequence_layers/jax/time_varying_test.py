@@ -242,7 +242,7 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
         dimension=dimension,
         num_embeddings_per_step=num_embeddings,
         num_steps=num_groups,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='sequence_embedding',
     ).make()
@@ -388,7 +388,7 @@ class SequenceDenseTest(test_utils.SequenceLayerTest):
         num_steps=num_steps,
         use_bias=use_bias,
         bias_init=nn.initializers.normal(),
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='sequence_dense',
     ).make()
@@ -539,7 +539,7 @@ class MaskedDenseTest(test_utils.SequenceLayerTest):
         num_steps=num_steps,
         use_bias=use_bias,
         bias_init=nn.initializers.normal(),
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='masked_dense',
     ).make()

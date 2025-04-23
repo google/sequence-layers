@@ -508,7 +508,7 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         dilation_rate=dilation_rate,
         padding=padding,
         use_weight_norm=use_weight_norm,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='conv1d',
     ).make()
@@ -686,7 +686,7 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         dilation_rate=dilation_rate,
         padding=padding,
         use_weight_norm=use_weight_norm,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         name='depthwise_conv1d',
     ).make()
@@ -905,7 +905,7 @@ class Conv1DTransposeTest(test_utils.SequenceLayerTest):
         strides=stride,
         padding=padding,
         use_weight_norm=use_weight_norm,
-        dtype=compute_dtype,
+        compute_dtype=compute_dtype,
         name='transpose_conv1d',
     ).make()
 

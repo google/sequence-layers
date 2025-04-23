@@ -146,7 +146,7 @@ class BaseConditioning(
 
   @property
   @abc.abstractmethod
-  def _dtype(self) -> types.DType | None:
+  def _compute_dtype(self) -> types.DType | None:
     pass
 
   @property
@@ -254,7 +254,7 @@ class BaseConditioning(
             dense.DenseShaped.Config(
                 projection_channel_shape,
                 param_dtype=self._param_dtype,
-                dtype=self._dtype,
+                compute_dtype=self._compute_dtype,
                 kernel_init=self._kernel_init,
                 kernel_sharding=self._kernel_sharding,
                 bias_init=self._bias_init,
@@ -269,7 +269,7 @@ class BaseConditioning(
             dense.DenseShaped.Config(
                 (2,) + projection_channel_shape,
                 param_dtype=self._param_dtype,
-                dtype=self._dtype,
+                compute_dtype=self._compute_dtype,
                 kernel_init=self._kernel_init,
                 kernel_sharding=self._kernel_sharding,
                 bias_init=self._bias_init,
@@ -378,7 +378,7 @@ class Conditioning(BaseConditioning):
     # block_size as the input sequence.
     streaming: bool = False
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # Initializer for the kernel.
@@ -415,8 +415,8 @@ class Conditioning(BaseConditioning):
     return self.config.combination
 
   @property
-  def _dtype(self) -> types.DType | None:
-    return self.config.dtype
+  def _compute_dtype(self) -> types.DType | None:
+    return self.config.compute_dtype
 
   @property
   def _param_dtype(self) -> types.DType:

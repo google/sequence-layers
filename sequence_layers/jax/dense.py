@@ -48,7 +48,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
     # An optional activation to apply after the dense layer.
     activation: Callable[[jax.Array], jax.Array] | None = None
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # An optional precision to use for the einsum.
@@ -76,7 +76,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -118,7 +118,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
         (x.shape[-1], self.config.features),
         bias_shape=(self.config.features,) if self.config.use_bias else None,
         activation=self.config.activation,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         precision=self.config.precision,
         kernel_init=self.config.kernel_init,
@@ -146,7 +146,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
     # An optional activation to apply after the dense layer.
     activation: Callable[[jax.Array], jax.Array] | None = None
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # An optional precision to use for the einsum.
@@ -175,7 +175,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -237,7 +237,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
         kernel_shape,
         bias_shape=output_kernel_shape if self.config.use_bias else None,
         activation=self.config.activation,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         precision=self.config.precision,
         kernel_init=self.config.kernel_init,
@@ -290,7 +290,7 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
     # An optional activation to apply after the dense layer.
     activation: Callable[[jax.Array], jax.Array] | None = None
     # The dtype to use for layer compute.
-    dtype: types.DType | None = None
+    compute_dtype: types.DType | None = None
     # The dtype to use for layer parameters.
     param_dtype: types.DType = jnp.float32
     # An optional precision to use for the einsum.
@@ -375,7 +375,7 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
     return utils.get_promoted_dtype(
-        input_dtype, self.config.param_dtype, dtype=self.config.dtype
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
 
   @nn.nowrap
@@ -436,7 +436,7 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
         kernel_shape,
         bias_shape,
         activation=self.config.activation,
-        dtype=self.config.dtype,
+        compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
         precision=self.config.precision,
         kernel_init=self.config.kernel_init,

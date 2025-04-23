@@ -608,7 +608,7 @@ class EinsumCommon(Protocol):
       kernel_shape: types.ShapeLike,
       bias_shape: types.ShapeLike | None,
       activation: Callable[[jax.Array], jax.Array] | None = None,
-      dtype: types.DType | None = None,
+      compute_dtype: types.DType | None = None,
       param_dtype: types.DType = jnp.float32,
       precision: nn.linear.PrecisionLike = None,
       kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init,
@@ -630,7 +630,7 @@ class EinsumCommon(Protocol):
       bias = None
 
     inputs, kernel, bias = nn.dtypes.promote_dtype(
-        inputs, kernel, bias, dtype=dtype
+        inputs, kernel, bias, dtype=compute_dtype
     )
 
     if einsum_factory is None:
@@ -666,7 +666,7 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
   # output portion of the equation string.
   bias_axes: str | None = None
   activation: Callable[[jax.Array], jax.Array] | None = None
-  dtype: types.DType | None = None
+  compute_dtype: types.DType | None = None
   param_dtype: types.DType = jnp.float32
   precision: nn.linear.PrecisionLike = None
   kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
@@ -682,7 +682,9 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
       param_dtype = jnp.float32
     else:
       param_dtype = jax.tree_util.tree_leaves(self.scope.variables())[0].dtype
-    return get_promoted_dtype(input_dtype, param_dtype, dtype=self.dtype)
+    return get_promoted_dtype(
+        input_dtype, param_dtype, dtype=self.compute_dtype
+    )
 
   def project_sequence(self, inputs: types.Sequence) -> types.Sequence:
     """Applies dense to Sequence. If no bias, mask status is preserved."""
@@ -707,7 +709,7 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
         kernel_shape,
         bias_shape,
         activation=self.activation,
-        dtype=self.dtype,
+        compute_dtype=self.compute_dtype,
         param_dtype=self.param_dtype,
         precision=self.precision,
         kernel_init=self.kernel_init,
