@@ -1381,6 +1381,7 @@ class SequenceLayerConfig(metaclass=abc.ABCMeta):
       return typing.cast(Self, dataclasses.replace(self, **kwargs))
     except TypeError as type_error:
       raise AttributeError(
-          f'Failed to create a copy of the SequenceLayerConfig {self=}; are all'
-          f' keys in {kwargs=} fields of this dataclass?'
+          'Failed to copy SequenceLayerConfig. Make sure that the kwargs keys '
+          f'({list(kwargs.keys())}) you\'re passing to copy() are all fields '
+          f'in the SequenceLayerConfig being copied: {self}, {kwargs=}'
       ) from type_error
