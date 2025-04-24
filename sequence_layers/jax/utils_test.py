@@ -146,28 +146,50 @@ class AddCountLayer(types.PreservesShape, types.PreservesType, types.Emitting):
 class StepByStepTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
-      ((),),
-      ((5,),),
-      ((5, 7),),
-      ((5, 7, 11),),
+      ((), False),
+      ((5,), False),
+      ((5, 7), False),
+      ((5, 7, 11), False),
+      ((5,), True),
   )
   def test_step_by_step_static(
       self,
       channel_shape,
+      stream_constants,
   ):
     key = jax.random.PRNGKey(1234)
     l = AddCountLayer()
 
+    if stream_constants:
+      constants = {'test': test_utils.random_sequence(2, 15)}
+    else:
+      constants = {'test': jnp.array([42, 42])}
+
     x = test_utils.random_sequence(2, 15, *channel_shape)
-    l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(l, x, training=False)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=stream_constants,
+    )
 
     for t in range(15, 20):
       for blocks_per_step in range(1, 4):
+        if stream_constants:
+          constants['test'] = test_utils.random_sequence(2, t)
         x = test_utils.random_sequence(2, t, *channel_shape)
-        y_layer, y_layer_emits = l.layer_with_emits(x, training=False)
+        y_layer, y_layer_emits = l.layer_with_emits(
+            x, training=False, constants=constants
+        )
         y_step, _, y_step_emits = utils.step_by_step_static(
-            l, x, training=False, blocks_per_step=blocks_per_step
+            l,
+            x,
+            training=False,
+            blocks_per_step=blocks_per_step,
+            constants=constants,
+            stream_constants=stream_constants,
         )
         self.assertSequencesClose(y_step_emits['x'], y_layer_emits['x'])
         trim = y_layer_emits['count'].shape[1]
@@ -177,24 +199,39 @@ class StepByStepTest(test_utils.SequenceLayerTest):
         self.assertSequencesClose(y_step.mask_invalid(), y_layer.mask_invalid())
 
   @parameterized.parameters(
-      ((),),
-      ((5,),),
-      ((5, 7),),
-      ((5, 7, 11),),
+      ((), False),
+      ((5,), False),
+      ((5, 7), False),
+      ((5, 7, 11), False),
+      ((5,), True),
   )
   def test_step_by_step_dynamic(
       self,
       channel_shape,
+      stream_constants,
   ):
     key = jax.random.PRNGKey(1234)
     l = AddCountLayer()
 
+    if stream_constants:
+      constants = {'test': test_utils.random_sequence(2, 15)}
+    else:
+      constants = {'test': jnp.array([42, 42])}
+
     x = test_utils.random_sequence(2, 15, *channel_shape)
-    l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(l, x, training=False)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=stream_constants,
+    )
 
     for t in range(15, 20):
       for blocks_per_step in range(1, 4):
+        if stream_constants:
+          constants['test'] = test_utils.random_sequence(2, t)
         x = test_utils.random_sequence(2, t, *channel_shape)
         y_layer, y_layer_emits = l.layer_with_emits(x, training=False)
         y_step, _, y_step_emits = utils.step_by_step_dynamic(
