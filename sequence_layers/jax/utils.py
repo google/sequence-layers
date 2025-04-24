@@ -316,6 +316,7 @@ def step_by_step_dynamic(
     constants: types.Constants | None = None,
     with_emits: bool = True,
     unroll: int = 1,
+    stream_constants: bool = False,
 ) -> tuple[types.Sequence, types.State, types.Emits]:
   """Executes a SequenceLayer timestep-by-timestep dynamically.
 
@@ -337,6 +338,8 @@ def step_by_step_dynamic(
     unroll: How many scan iterations to unroll in one iteration of the dynamic
       loop. Unrolling enables more XLA fusion, but increases memory usage and
       compile times.
+    stream_constants: If True, stream Sequences present in constants at the same
+      block size as x.
 
   Returns:
     The resulting sequence, final state, and emits stacked over time (if
@@ -353,17 +356,41 @@ def step_by_step_dynamic(
   input_block_size = l.block_size * blocks_per_step
   x_blocked = _extract_blocks(x, input_block_size)
 
+  if constants is None:
+    constants = {}
+
+  if stream_constants:
+    blocked_constants = {}
+    static_constants = {}
+    for k, v in constants.items():
+      if isinstance(v, types.Sequence):
+        blocked_constants[k] = _extract_blocks(v, input_block_size)
+      else:
+        static_constants[k] = v
+  else:
+    blocked_constants = {}
+    static_constants = constants
+
   def step_fn(
-      layer: types.Steppable, state: types.State, inputs: types.Sequence
+      layer: types.Steppable,
+      state: types.State,
+      inputs: types.Sequence,
+      step_constants: types.Constants,
   ) -> tuple[types.State, tuple[types.Sequence, types.Emits]]:
     # Check supports_step within the nn.scan body so that layers are bound.
     if with_emits:
       output, state, emits = layer.step_with_emits(
-          inputs, state, training=training, constants=constants
+          inputs,
+          state,
+          training=training,
+          constants=static_constants | step_constants,
       )
     else:
       output, state = layer.step(
-          inputs, state, training=training, constants=constants
+          inputs,
+          state,
+          training=training,
+          constants=static_constants | step_constants,
       )
       emits = ()
 
@@ -382,7 +409,9 @@ def step_by_step_dynamic(
       unroll=unroll,
   )
 
-  state, (output, emits) = scan_fn(l, initial_state, x_blocked)
+  state, (output, emits) = scan_fn(
+      l, initial_state, x_blocked, blocked_constants
+  )
   output, emits = jax.tree_util.tree_map(_flatten_blocks, (output, emits))
   return output, state, emits
 
