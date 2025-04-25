@@ -250,6 +250,24 @@ class OverlapAndAddTest(test_utils.SequenceLayerTest):
     z = signal.overlap_and_add(y, frame_step=3)
     self.assertAllEqual(z, jnp.asarray([1, 2, 3, 8, 5, 0, 0]))
 
+    y = signal.frame(
+        x, frame_length=2, frame_step=3, pad_mode='semicausal_full'
+    )
+    z = signal.overlap_and_add(y, frame_step=3)
+    self.assertAllEqual(z, jnp.asarray([1, 2, 0, 4, 5]))
+
+    y = signal.frame(
+        x, frame_length=3, frame_step=3, pad_mode='semicausal_full'
+    )
+    z = signal.overlap_and_add(y, frame_step=3)
+    self.assertAllEqual(z, jnp.asarray([1, 2, 3, 4, 5, 0]))
+
+    y = signal.frame(
+        x, frame_length=4, frame_step=3, pad_mode='semicausal_full'
+    )
+    z = signal.overlap_and_add(y, frame_step=3)
+    self.assertAllEqual(z, jnp.asarray([0, 1, 2, 6, 4, 5, 0]))
+
 
 class WindowTest(parameterized.TestCase):
 

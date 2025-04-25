@@ -14,6 +14,7 @@
 """DSP tests."""
 
 import itertools
+import math
 
 import jax
 import jax.numpy as jnp
@@ -329,6 +330,7 @@ class FrameTest(test_utils.SequenceLayerTest, parameterized.TestCase):
           'same',
           'valid',
           'explicit_semicausal',
+          'semicausal_full',
       ),
   )
   def test_frame(self, frame_length_frame_step, channel_shape, padding):
@@ -376,6 +378,8 @@ class FrameTest(test_utils.SequenceLayerTest, parameterized.TestCase):
         expected_input_latency = (frame_length - 1) - max(
             0, frame_length - frame_step
         )
+      case 'semicausal_full':
+        expected_input_latency = frame_step - 1
       case _:
         # Unsupported defaults to zero.
         expected_input_latency = 0
@@ -633,6 +637,92 @@ class InverseSTFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertSequencesClose(y, y_expected)
 
 
+class STFTPerfectReconstructionTest(
+    test_utils.SequenceLayerTest, parameterized.TestCase
+):
+  """With padding SEMICAUSAL_FULL, the STFT/InverseSTFT should give perfect reconstruction."""
+
+  @parameterized.parameters(
+      itertools.product(
+          (
+              (32, 16, 32),
+              (32, 8, 32),
+              (32, 8, 64),
+              (50, 15, 64),
+          ),
+          (signal.hann_window, signal.hamming_window),
+          ('center', 'right'),
+      )
+  )
+  def test_stft_perfect_reconstruction_padding_semicausal_full(
+      self,
+      length_frame_step_fft,
+      window_fn,
+      fft_padding,
+  ):
+    frame_length, frame_step, fft_length = length_frame_step_fft
+    batch_size = 2
+    overlap = math.ceil(frame_length / frame_step)
+    time = 2 * overlap * frame_length + 3
+
+    # Perfect reconstruction is possible with SEMICAUSAL_FULL at the cost of
+    # steppability.
+    time_padding = types.PaddingMode.SEMICAUSAL_FULL.value
+
+    x = test_utils.random_sequence(batch_size, time, dtype=jnp.float32)
+    forward = (
+        dsp.STFT.Config(
+            frame_length=frame_length,
+            frame_step=frame_step,
+            fft_length=fft_length,
+            window_fn=signal.hann_window,
+            time_padding=time_padding,
+            fft_padding=fft_padding,
+            name='stft',
+        )
+        .make()
+        .bind({})
+    )
+    backward = (
+        dsp.InverseSTFT.Config(
+            frame_length=frame_length,
+            frame_step=frame_step,
+            fft_length=fft_length,
+            window_fn=signal.inverse_stft_window_fn(
+                frame_step, signal.hann_window
+            ),
+            time_padding=time_padding,
+            fft_padding=fft_padding,
+            name='inverse_stft',
+        )
+        .make()
+        .bind({})
+    )
+
+    y = forward(x, training=False)
+    x_hat = backward(y, training=False)
+
+    size = x.shape[1]
+    self.assertLess(size, x_hat.shape[1])
+
+    # Intersection should be the same.
+    mask_and = jnp.logical_and(x.mask, x_hat.mask[:, :size])
+    np.testing.assert_allclose(
+        x.values * mask_and,
+        x_hat.values[:, :size] * mask_and,
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+    # Difference should be zero in the output.
+    mask_xor = jnp.logical_xor(
+        jnp.pad(x.mask, ((0, 0), (0, x_hat.shape[1] - size))), x_hat.mask
+    )
+
+    x_hat = x_hat.mask_invalid()
+    self.assertTrue(jnp.all(abs(x_hat.values[mask_xor]) < 1e-6))
+
+
 class LinearToMelSpectrogramTest(
     test_utils.SequenceLayerTest, parameterized.TestCase
 ):
@@ -676,6 +766,7 @@ class OverlapAddTest(test_utils.SequenceLayerTest, parameterized.TestCase):
               'causal',
               # 'same',  # TODO(rryan): Fix SAME tests.
               'valid',
+              'semicausal_full',
           ),
       )
   )
@@ -703,6 +794,50 @@ class OverlapAddTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     )
     self.verify_contract(l, x, training=False)
     self.assertEmpty(l.variables)
+
+  @parameterized.parameters((1, 1), (2, 1), (2, 2), (3, 2))
+  def test_frame_overlap_add_perfect(self, frame_length, frame_step):
+
+    b, t = 2, 35
+    x = test_utils.random_sequence(b, t)
+    forward = (
+        dsp.Frame.Config(
+            frame_length=frame_length,
+            frame_step=frame_step,
+            padding='semicausal_full',
+            name='forward',
+        )
+        .make()
+        .bind({})
+    )
+    backward = (
+        dsp.OverlapAdd.Config(
+            frame_length=frame_length,
+            frame_step=frame_step,
+            padding='semicausal_full',
+            name='backward',
+        )
+        .make()
+        .bind({})
+    )
+
+    y = forward.layer(x, training=False)
+    z = backward.layer(y, training=False)
+
+    # z should not be shorter than x and the extra part should only contain
+    # zeros.
+    self.assertLessEqual(x.shape[1], z.shape[1])
+    self.assertTrue(jnp.all(z.lengths() >= x.lengths()))
+    np.testing.assert_array_equal(
+        z.mask[:, x.shape[1] :],
+        jnp.zeros((z.shape[0], z.shape[1] - x.shape[1]), dtype=jnp.bool_),
+    )
+
+    # The extra valid entries of z should only contain zeros.
+    z_values = z.values[:, : x.shape[1]]
+    z_mask = z.mask[:, : x.shape[1]]
+    difference_mask = jnp.logical_xor(x.mask, z_mask)
+    self.assertTrue(jnp.all(z_values[difference_mask] == 0))
 
 
 class DelayTest(test_utils.SequenceLayerTest, parameterized.TestCase):

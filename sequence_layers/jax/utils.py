@@ -106,6 +106,10 @@ def convolution_explicit_padding(
       return pad_left, pad_right
     case types.PaddingMode.VALID.value:
       return 0, 0
+    case types.PaddingMode.SEMICAUSAL_FULL.value:
+      pad_left = max(effective_kernel_size - stride, 0)
+      pad_right = effective_kernel_size - 1
+      return pad_left, pad_right
     case _:
       raise ValueError(f'Unsupported padding: {padding}')
 
