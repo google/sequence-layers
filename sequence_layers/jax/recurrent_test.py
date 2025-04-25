@@ -112,7 +112,7 @@ class LSTMTest(test_utils.SequenceLayerTest):
         l,
         x,
         training=False,
-        **test_utils.get_grad_tols(l, x, param_dtype),
+        **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
         jit=False,
     )
 
@@ -256,7 +256,7 @@ class RGLRUTest(test_utils.SequenceLayerTest):
           l,
           x,
           training=False,
-          **test_utils.get_grad_tols(l, x, param_dtype),
+          **test_utils.get_grad_tols(l, x, param_dtype, None),
       )
 
       # Compare to recurrentgemma reference implementation.

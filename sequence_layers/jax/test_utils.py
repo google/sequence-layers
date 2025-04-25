@@ -382,7 +382,7 @@ def get_grad_tols(
     l: types.SequenceLayer,
     x: types.Sequence,
     param_dtype: types.DType | None,
-    compute_dtype: types.DType | None = None,
+    compute_dtype: types.DType | None,
 ) -> dict[str, float | None]:
   """Estimate reasonable tolerances given the layer, inputs, and dtypes."""
   del l, x

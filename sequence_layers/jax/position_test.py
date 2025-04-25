@@ -220,7 +220,7 @@ class AddTimingSignalTest(test_utils.SequenceLayerTest):
           l,
           x,
           training=False,
-          **test_utils.get_grad_tols(l, x, param_dtype),
+          **test_utils.get_grad_tols(l, x, param_dtype, input_dtype),
       )
 
 
