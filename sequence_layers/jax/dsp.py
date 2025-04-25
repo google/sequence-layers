@@ -145,9 +145,30 @@ class Frame(types.PreservesType, types.SequenceLayer):
         # input as part of the latency, the input latency is one smaller than
         # the effective kernel size.
         return self.config.frame_length - 1
+      case types.PaddingMode.SEMICAUSAL_FULL.value:
+        # SEMICAUSAL_FULL padding only needs to wait for frame_step samples.
+        return self.config.frame_step - 1
       case _:
         # Unsupported.
         return 0
+
+  @property
+  def output_latency(self) -> fractions.Fraction:
+    """Returns the output latency of this layer.
+
+    Output latency is defined as the number of output timesteps before the
+    step-wise output of the layer matches its layer-wise output.
+    """
+    match self.config.padding:
+      case types.PaddingMode.SEMICAUSAL_FULL.value:
+        # The semicausal-full padding has both left and right padding, which
+        # requires a different output_latency for correct operations.
+        # It only requires to wait for strides[0] - 1 samples, and the
+        # output_ratio is also strides[0], which means the latency is 0.
+        return fractions.Fraction(0)
+      case _:
+        # Other cases are handled in the parent class.
+        return super().output_latency
 
   @property
   def _buffer_width(self) -> int:
@@ -172,6 +193,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
           types.PaddingMode.CAUSAL_VALID.value
           | types.PaddingMode.CAUSAL.value
           | types.PaddingMode.SEMICAUSAL.value
+          | types.PaddingMode.SEMICAUSAL_FULL.value
       ):
         return 0
       case (
@@ -199,6 +221,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
       case (
           types.PaddingMode.CAUSAL_VALID.value
           | types.PaddingMode.REVERSE_CAUSAL_VALID.value
+          | types.PaddingMode.SEMICAUSAL_FULL.value
       ):
         # For CAUSAL_VALID and REVERSE_CAUSAL_VALID, since the mask calculation
         # is a windowed logical-AND, we have to prepend the mask with valid
@@ -320,6 +343,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
         padding=self.config.padding,
         is_step=False,
     )
+
     # If the frame receptive field is 1 then preserve the input mask state.
     result_type = types.Sequence if self.config.frame_length > 1 else type(x)
     return result_type(values, mask)
@@ -345,8 +369,13 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
     frame_length: int
     # The step or stride of the overlap-add operation.
     frame_step: int
-    # Padding to use for the overlap-add. Only 'causal' or 'valid' are
-    # supported.
+    # Padding to use for the overlap-add. Only 'causal', 'valid', and
+    # 'semicausal_full' are supported.
+    # The 'semicausal_full' padding will trim (frame_length - frame_step)
+    # samples from the right side of the signal. This behavior is intended
+    # to remove the part that was padded by an hypothetical Frame layer also
+    # using the same padding type. This allows sample aligned reconstruction in
+    # layer mode.
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
     # An optional name for the layer.
     name: str | None = None
@@ -459,14 +488,27 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
         padding=self.config.padding,
     )
 
-    # Trim the last frame_length - frame_step samples since we don't produce
-    # these in step mode (we can only produce frame_step samples at a time in
-    # step mode, so we can't produce the final frame_length - frame_step
-    # samples).
-    if self.config.padding == types.PaddingMode.CAUSAL.value:
-      trim = max(self.config.frame_length - self.config.frame_step, 0)
-      if trim:
-        values = values[:, :-trim]
+    trim = max(self.config.frame_length - self.config.frame_step, 0)
+    match self.config.padding:
+      case types.PaddingMode.CAUSAL.value:
+        # Trim the last frame_length - frame_step samples since we don't produce
+        # these in step mode (we can only produce frame_step samples at a time
+        # in step mode, so we can't produce the final frame_length - frame_step
+        # samples).
+        if trim:
+          values = values[:, :-trim]
+
+      case types.PaddingMode.SEMICAUSAL_FULL.value:
+        # Remove the front padding that should be zero and invalid.
+        if trim:
+          values = values[:, trim:]
+          mask = mask[:, trim:]
+
+        size = min(values.shape[1], mask.shape[1])
+        return types.Sequence(values[:, :size], mask[:, :size])
+
+      case _:
+        pass
 
     # Overlap add leaves padding with nonzero values.
     y = types.Sequence(values, mask)

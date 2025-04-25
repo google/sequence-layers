@@ -226,6 +226,13 @@ class PaddingMode(enum.Enum):
   #   input timestep is valid.
   SEMICAUSAL = 'semicausal'
 
+  # In SEMICAUSAL_FULL padding mode, the input sequence is padded such that the
+  # output of the corresponding overlap-add or transpose convolution is of the
+  # same size as the input sequence and perfect reconstruction can be achieved.
+  # The reconstructed signal is of the same length or of length rounded up to
+  # cover the full input sequence.
+  SEMICAUSAL_FULL = 'semicausal_full'
+
 
 PaddingModeString = Literal[
     'valid',
@@ -235,6 +242,7 @@ PaddingModeString = Literal[
     'causal',
     'reverse_causal',
     'semicausal',
+    'semicausal_full',
 ]
 
 

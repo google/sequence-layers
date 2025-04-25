@@ -41,8 +41,12 @@ __all__ = (
 )
 
 
-def _compute_conv_mask_logical_and(
-    mask: types.MaskT, kernel_size: int, stride: int, dilation_rate: int
+def _compute_conv_mask_logical(
+    mask: types.MaskT,
+    kernel_size: int,
+    stride: int,
+    dilation_rate: int,
+    use_logical_or: bool,
 ) -> types.MaskT:
   """Computes the mask resulting from applying a "logical AND" masking rule.
 
@@ -51,6 +55,8 @@ def _compute_conv_mask_logical_and(
     kernel_size: The kernel size in the time dimension.
     stride: The stride in the time dimension.
     dilation_rate: The dilation rate in the time dimension.
+    use_logical_or: When False (default), an AND mask is computed. When True, an
+      OR mask is used instead.
 
   Returns:
     The mask resulting from applying a VALID-like "logical AND" rule. If any
@@ -64,17 +70,30 @@ def _compute_conv_mask_logical_and(
     num_frames = mask.shape[1] // stride
     mask = mask[:, : num_frames * stride]
     mask = jnp.reshape(mask, [mask.shape[0], num_frames, stride])
-    mask = jnp.min(mask, axis=-1)
+
+    if use_logical_or:
+      mask = jnp.max(mask, axis=-1)
+    else:
+      mask = jnp.min(mask, axis=-1)
 
     kernel_size = kernel_size // stride
     stride = 1
 
-  # Compute an AND operation over windows so any window with invalid samples is
-  # considered invalid.
+  if use_logical_or:
+    # Compute an OR operation over windows so any window overlapping with at
+    # least some valid samples is considered valid.
+    computation_fn = jax.lax.max
+    init_value = False
+  else:
+    # Compute an AND operation over windows so any window with invalid samples
+    # is considered invalid.
+    computation_fn = jax.lax.min
+    init_value = True
+
   mask = jax.lax.reduce_window(
       mask,
-      init_value=True,
-      computation=jax.lax.min,
+      init_value=init_value,
+      computation=computation_fn,
       window_dimensions=(1, kernel_size),
       base_dilation=(1, 1),
       window_dilation=(1, dilation_rate),
@@ -173,8 +192,8 @@ def compute_conv_mask(
           types.PaddingMode.CAUSAL_VALID.value,
           types.PaddingMode.REVERSE_CAUSAL_VALID.value,
       ), padding
-      return _compute_conv_mask_logical_and(
-          mask, kernel_size, stride, dilation_rate
+      return _compute_conv_mask_logical(
+          mask, kernel_size, stride, dilation_rate, use_logical_or=False
       )
 
   # All logic below concerns layer-wise mask calculation.
@@ -194,6 +213,7 @@ def compute_conv_mask(
       types.PaddingMode.VALID.value,
       types.PaddingMode.CAUSAL_VALID.value,
       types.PaddingMode.REVERSE_CAUSAL_VALID.value,
+      types.PaddingMode.SEMICAUSAL_FULL.value,
   ), padding
 
   past_pad, future_pad = utils.convolution_explicit_padding(
@@ -208,8 +228,12 @@ def compute_conv_mask(
       constant_values=padding == types.PaddingMode.CAUSAL_VALID.value,
   )
 
-  return _compute_conv_mask_logical_and(
-      mask, kernel_size, stride, dilation_rate
+  return _compute_conv_mask_logical(
+      mask,
+      kernel_size,
+      stride,
+      dilation_rate,
+      use_logical_or=(padding == types.PaddingMode.SEMICAUSAL_FULL.value),
   )
 
 
@@ -229,7 +253,11 @@ def _compute_conv_transpose_output_length(
   )
 
   match padding:
-    case types.PaddingMode.SAME.value | types.PaddingMode.CAUSAL.value:
+    case (
+        types.PaddingMode.SAME.value
+        | types.PaddingMode.CAUSAL.value
+        | types.PaddingMode.SEMICAUSAL_FULL.value
+    ):
       output_time = time * stride
     case types.PaddingMode.VALID.value:
       output_time = time * stride + max(effective_kernel_size - stride, 0)
@@ -271,6 +299,9 @@ def _transpose_conv_explicit_padding(
       else:
         pad_left = int(np.ceil(pad_amount / 2))
       pad_right = pad_amount - pad_left
+    case types.PaddingMode.SEMICAUSAL_FULL.value:
+      pad_left = effective_kernel_size - stride
+      pad_right = effective_kernel_size - 1
     case _:
       raise ValueError(f'Unsupported padding: {padding}')
 
@@ -324,9 +355,18 @@ def compute_conv_transpose_mask(
       padding,
   )
 
-  invalid_mask = jnp.logical_not(mask)
+  # Any non-zero values in mask have been corrupted by invalid timesteps.
+  if padding == types.PaddingMode.SEMICAUSAL_FULL.value:
+    # The mask will result in an OR mask.
+    test_signal = mask
+    test_fn = jnp.greater
+  else:
+    # The invalid mask will give an AND mask.
+    test_signal = jnp.logical_not(mask)
+    test_fn = jnp.equal
+
   mask = jax.lax.conv_general_dilated(
-      invalid_mask.astype(jnp.float32)[:, :, jnp.newaxis],
+      test_signal.astype(jnp.float32)[:, :, jnp.newaxis],
       jnp.ones((kernel_size, 1, 1)),
       window_strides=(1,),
       padding=(explicit_padding,),
@@ -336,8 +376,7 @@ def compute_conv_transpose_mask(
       feature_group_count=1,
       batch_group_count=1,
   )
-  # Any non-zero values in mask have been corrupted by invalid timesteps.
-  return jnp.squeeze(jnp.equal(mask, 0.0), -1)
+  return jnp.squeeze(test_fn(mask, 0.0), -1)
 
 
 class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
@@ -398,16 +437,38 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
       case (
           types.PaddingMode.REVERSE_CAUSAL_VALID.value
           | types.PaddingMode.REVERSE_CAUSAL.value
+          | types.PaddingMode.SEMICAUSAL_FULL.value
       ):
         # Reverse causal introduces no past padding in layer-wise mode, so we
         # need a full effective_kernel_size kernel to compute the first output
         # layer-wise processing would produce. Since we do not count the current
         # input as part of the latency, the input latency is one smaller than
         # the effective kernel size.
+        # Semicausal-full will pad zeros at the end of the sequence until the
+        # kernel no longer overlaps with the sequence. This results in at most
+        # the effective kernel size minus 1 zeros padded.
         return effective_kernel_size - 1
       case _:
         # Unsupported.
         return 0
+
+  @property
+  def output_latency(self) -> fractions.Fraction:
+    """Returns the output latency of this layer.
+
+    Output latency is defined as the number of output timesteps before the
+    step-wise output of the layer matches its layer-wise output.
+    """
+    match self._paddings[0]:
+      case types.PaddingMode.SEMICAUSAL_FULL.value:
+        # The semicausal-full padding has both left and right padding, which
+        # requires a different output_latency for correct operations.
+        # It only requires to wait for strides[0] - 1 samples, and the
+        # output_ratio is also strides[0], which means the latency is 0.
+        return fractions.Fraction(0)
+      case _:
+        # Other cases are handled in the parent class.
+        return super().output_latency
 
   @property
   def _buffer_width(self) -> int:

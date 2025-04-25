@@ -78,6 +78,29 @@ def _expected_conv_mask(
       )[:, :, 0]
       # Only timesteps that add up to kernel_size are valid.
       return mask_golden > kernel_size - 1e-3
+    case types.PaddingMode.SEMICAUSAL_FULL.value:
+      explicit_padding = utils.convolution_explicit_padding(
+          types.validate_padding(padding),
+          kernel_size,
+          stride,
+          dilation_rate,
+      )
+      # Causal padding pads the mask with valid samples.
+      mask = jnp.pad(
+          mask,
+          [(0, 0), explicit_padding],
+          constant_values=False,
+      )
+      mask_golden = jax.lax.conv_general_dilated(
+          mask[:, :, jnp.newaxis].astype(jnp.float32),
+          jnp.ones([kernel_size, 1, 1]),
+          window_strides=[stride],
+          padding='VALID',
+          rhs_dilation=[dilation_rate],
+          dimension_numbers=('NHC', 'HIO', 'NHC'),
+      )[:, :, 0]
+      # All timesteps where the kernel overlaps with the mask.
+      return mask_golden > 0
 
 
 class ComputeConvMaskTest(test_utils.SequenceLayerTest):
@@ -115,6 +138,7 @@ class ComputeConvMaskTest(test_utils.SequenceLayerTest):
           'causal',
           'reverse_causal',
           'semicausal',
+          'semicausal_full',
       ],
   )
   def test_dense_left_aligned_mask(self, params, padding):
@@ -472,6 +496,75 @@ class ComputeConvMaskTest(test_utils.SequenceLayerTest):
         dilation_rate=2,
         padding='semicausal',
         expected=[[True, False, True, False, True, False, True, False]],
+    )
+
+  def test_semicausal_full_padding(self):
+    def check(mask, kernel_size, stride, dilation_rate, padding, expected):
+      actual = convolution.compute_conv_mask(
+          jnp.asarray(mask),
+          kernel_size=kernel_size,
+          stride=stride,
+          dilation_rate=dilation_rate,
+          padding=padding,
+          is_step=False,
+      )
+      self.assertAllEqual(actual, jnp.asarray(expected))
+
+    # kernel_size > stride
+    check(
+        mask=[[True, True, True, False]],
+        kernel_size=3,
+        stride=2,
+        dilation_rate=1,
+        padding='semicausal_full',
+        expected=[[
+            True,
+            True,
+            False,
+        ]],
+    )
+
+    # kernel_size == stride
+    check(
+        mask=[[True, True, True, True, True, True, True, False, False]],
+        kernel_size=3,
+        stride=3,
+        dilation_rate=1,
+        padding='semicausal_full',
+        expected=[[True, True, True]],
+    )
+
+    # kernel_size < stride
+    check(
+        mask=[[True, True, True, True, True, True, True, False, False]],
+        kernel_size=2,
+        stride=3,
+        dilation_rate=1,
+        padding='semicausal_full',
+        expected=[[True, True, True]],
+    )
+
+    # kernel dilation
+    check(
+        mask=[[True, False, True, False, True, False, True, False]],
+        kernel_size=3,
+        stride=1,
+        dilation_rate=2,
+        padding='semicausal_full',
+        expected=[[
+            True,
+            False,
+            True,
+            False,
+            True,
+            False,
+            True,
+            False,
+            True,
+            False,
+            True,
+            False,
+        ]],
     )
 
 
