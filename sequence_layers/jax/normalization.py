@@ -492,7 +492,8 @@ def _cumulative_masked_moments_streaming(
   sum_v = accum_sum_v + jnp.cumsum(sum_v, axis=cumulative_axis)
   count_v = accum_count_v + jnp.cumsum(count_v, axis=cumulative_axis)
 
-  # Keep final timestep as accumulator state *before* cross-replica sum.
+  # Keep the total sum/count up to the end of this chunk as the accumulator
+  # state.
   accum_sum_v = jax.lax.slice_in_dim(
       sum_v, -1, limit_index=None, axis=cumulative_axis
   )
@@ -510,7 +511,8 @@ def _cumulative_masked_moments_streaming(
   # Broadcast add the accumulators to the cumsum of the input timesteps.
   sum_vv = accum_sum_vv + jnp.cumsum(sum_vv, axis=cumulative_axis)
 
-  # Keep final timestep as accumulator state *before* cross-replica sum.
+  # Keep the total sum/count up to the end of this chunk as the accumulator
+  # state.
   accum_sum_vv = jax.lax.slice_in_dim(
       sum_vv, -1, limit_index=None, axis=cumulative_axis
   )
