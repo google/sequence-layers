@@ -172,38 +172,33 @@ class Frame(types.PreservesType, types.SequenceLayer):
 
   @property
   def _buffer_width(self) -> int:
-    if self.config.padding == types.PaddingMode.SEMICAUSAL.value:
-      return max(self.config.frame_length - self.config.frame_step, 0)
-    else:
-      return self.config.frame_length - 1
-
-  @property
-  def _stride_offset(self) -> int:
-    # When processing step-wise step() receives multiples of block_size inputs
-    # at a time. When combining incoming blocks with state's _buffer_width
-    # timesteps, _stride_offset describes the offset into the combined [state,
-    # input] sequence that aligns the step-wise output with the layer-wise
-    # output.
     if not isinstance(self.config.padding, str):
-      _, future_pad = self.config.padding
-      return future_pad % self.config.frame_step
+      past_pad, future_pad = self.config.padding
+      assert past_pad + future_pad == self.config.frame_length - 1
+      return (
+          self.config.frame_length - 1 - (future_pad % self.config.frame_step)
+      )
 
     match self.config.padding:
+      case types.PaddingMode.SEMICAUSAL.value:
+        return max(self.config.frame_length - self.config.frame_step, 0)
       case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
-          | types.PaddingMode.SEMICAUSAL_FULL.value
+          types.PaddingMode.REVERSE_CAUSAL.value
+          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
       ):
-        return 0
+        return (
+            (self.config.frame_length - 1)
+            // self.config.frame_step
+            * self.config.frame_step
+        )
       case (
-          types.PaddingMode.REVERSE_CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
+          types.PaddingMode.CAUSAL.value | types.PaddingMode.CAUSAL_VALID.value
       ):
-        return (self.config.frame_length - 1) % self.config.frame_step
+        return self.config.frame_length - 1
       case _:
-        # Unsupported.
-        return 0
+        raise NotImplementedError(
+            f'Unsupported padding mode: {self.config.padding}'
+        )
 
   def get_initial_state(
       self,
@@ -271,20 +266,14 @@ class Frame(types.PreservesType, types.SequenceLayer):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.State]:
-    if not self.supports_step:
-      raise ValueError(f'{self} does not support stepping.')
+    if self.config.frame_length > 1:
+      x = x.mask_invalid()
 
     if buffer_width := self._buffer_width:
       # Concatenate the new frames with the previous buffer_width frames.
-      state = state.concatenate(x.mask_invalid())
+      state = state.concatenate(x)
     else:
-      if self.config.frame_length > 1:
-        x = x.mask_invalid()
       state = x
-
-    # Slice samples off state if we have a stride offset:
-    if stride_offset := self._stride_offset:
-      state = state[:, stride_offset:]
 
     values = signal.frame(
         state.values,
@@ -303,18 +292,14 @@ class Frame(types.PreservesType, types.SequenceLayer):
         is_step=True,
     )
 
-    # Keep the last buffer_width samples as state.
+    # Keep the trailing buffer_width samples for the next step.
     if buffer_width:
       state = state[:, -buffer_width:]
-      # Even though we masked the input, padded frames can have non-zero values
-      # as a result of framing valid values.
-      result_type = types.Sequence
     else:
       state = ()
-      # Preserve the masking state of the input.
-      result_type = type(x)
 
-    return result_type(values, mask), state
+    # Framing can leave unmasked values with non-zero values.
+    return types.Sequence(values, mask), state
 
   @types.check_layer
   def layer(
