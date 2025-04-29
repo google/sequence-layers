@@ -156,6 +156,11 @@ class BaseConditioning(
 
   @property
   @abc.abstractmethod
+  def affine_scale_offset(self) -> complex:
+    pass
+
+  @property
+  @abc.abstractmethod
   def _kernel_init(self) -> nn.initializers.Initializer:
     pass
 
@@ -290,17 +295,11 @@ class BaseConditioning(
 
     def _affine_fn(x, conditioning):
       scale, shift = utils.sequence_unstack(conditioning, axis=2)
-      # Offset scale by 1.0. With parameter itializations near 0, this provides
-      # a stable initialization near 1.0 and allows the network to
-      # learn residual scaling adjustments more easily.
-      scale = scale.apply_values(lambda v: v + 1.0)
+      scale = scale.apply_values(lambda v: v + self.affine_scale_offset)
       return utils.sequence_broadcast_affine(x, scale, shift)
 
     def _affine_scale_fn(x, conditioning):
-      # Offset scale by 1.0. With parameter itializations near 0, this provides
-      # a stable initialization near 1.0 and allows the network to
-      # learn residual scaling adjustments more easily.
-      scale = conditioning.apply_values(lambda v: v + 1.0)
+      scale = conditioning.apply_values(lambda v: v + self.affine_scale_offset)
       return utils.sequence_broadcast_product(x, scale)
 
     match self._combination:
@@ -390,6 +389,11 @@ class Conditioning(BaseConditioning):
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     # Optional sharding for the bias.
     bias_sharding: types.Sharding | None = None
+    # An offset to add to the affine scale when `combination` is AFFINE or
+    # AFFINE_SCALE. Typically 1.0 is used with parameter initializations near 0,
+    # as this is close to an identity function and allows the network to learn
+    # residual scaling adjustments more easily.
+    affine_scale_offset: complex = 1.0
     # An optional name for the layer.
     name: str | None = None
 
@@ -421,6 +425,10 @@ class Conditioning(BaseConditioning):
   @property
   def _param_dtype(self) -> types.DType:
     return self.config.param_dtype
+
+  @property
+  def affine_scale_offset(self) -> complex:
+    return self.config.affine_scale_offset
 
   @property
   def _kernel_init(self) -> nn.initializers.Initializer:
