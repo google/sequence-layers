@@ -145,33 +145,20 @@ class BasePooling1D(
     effective_pool_size = utils.convolution_effective_kernel_size(
         self.config.pool_size, self.config.dilation_rate
     )
-    if self.config.padding == types.PaddingMode.SEMICAUSAL.value:
-      return max(effective_pool_size - self.config.strides, 0)
-    else:
-      return effective_pool_size - 1
-
-  @property
-  def _stride_offset(self) -> int:
-    # When processing step-wise step() receives multiples of block_size inputs
-    # at a time. When combining incoming blocks with state's _buffer_width
-    # timesteps, _stride_offset describes the offset into the combined [state,
-    # input] sequence that aligns the step-wise output with the layer-wise
-    # output.
     match self.config.padding:
+      case types.PaddingMode.SEMICAUSAL.value:
+        return max(effective_pool_size - self.config.strides, 0)
       case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
+          types.PaddingMode.REVERSE_CAUSAL.value
+          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
       ):
-        return 0
-      case (
-          types.PaddingMode.REVERSE_CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
-      ):
-        return self._buffer_width % self.config.strides
+        return (
+            (effective_pool_size - 1)
+            // self.config.strides
+            * self.config.strides
+        )
       case _:
-        # Unsupported.
-        return 0
+        return effective_pool_size - 1
 
   def get_initial_state(
       self,
@@ -205,38 +192,15 @@ class BasePooling1D(
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.State]:
-    if not self.supports_step:
-      raise ValueError(f'{self} does not support stepping.')
-
-    # Special case no state.
-    if not (buffer_width := self._buffer_width):
-      # Slice samples off x if we have a stride offset:
-      if stride_offset := self._stride_offset:
-        x = x[:, stride_offset:]
-
-      # Replace masked timesteps with pad value.
-      x = x.mask_invalid(self._pad_value(x.dtype))
-
-      values = self._layer(x.values, padding=(0, 0))
-      mask = convolution.compute_conv_mask(
-          x.mask,
-          self.config.pool_size,
-          self.config.strides,
-          self.config.dilation_rate,
-          self.config.padding,
-          is_step=True,
-      )
-      return types.Sequence(values, mask), state
-
-    # Concatenate the new frames with the previous buffer_width frames.
-    state = state.concatenate(x)
-
-    # Slice samples off state if we have a stride offset:
-    if stride_offset := self._stride_offset:
-      state = state[:, stride_offset:]
 
     # Replace masked timesteps with pad value.
-    state = state.mask_invalid(self._pad_value(state.dtype))
+    x = x.mask_invalid(self._pad_value(x.dtype))
+
+    if buffer_width := self._buffer_width:
+      # Concatenate the new frames with the previous buffer_width frames.
+      state = state.concatenate(x)
+    else:
+      state = x
 
     # Compute the output for the current timestep.
     values = self._layer(state.values, padding=(0, 0))
@@ -250,8 +214,12 @@ class BasePooling1D(
     )
 
     # Keep the trailing buffer_width samples for the next step.
-    state = state[:, -buffer_width:]
+    if buffer_width:
+      state = state[:, -buffer_width:]
+    else:
+      state = ()
 
+    # Pooling can leave unmasked values with non-zero values.
     return types.Sequence(values, mask), state
 
   @types.check_layer
@@ -498,33 +466,20 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
     effective_pool_size = utils.convolution_effective_kernel_size(
         self.config.pool_size[0], self.config.dilation_rate[0]
     )
-    if self.config.time_padding == types.PaddingMode.SEMICAUSAL.value:
-      return max(effective_pool_size - self.config.strides[0], 0)
-    else:
-      return effective_pool_size - 1
-
-  @property
-  def _stride_offset(self) -> int:
-    # When processing step-wise step() receives multiples of block_size inputs
-    # at a time. When combining incoming blocks with state's _buffer_width
-    # timesteps, _stride_offset describes the offset into the combined [state,
-    # input] sequence that aligns the step-wise output with the layer-wise
-    # output.
     match self.config.time_padding:
+      case types.PaddingMode.SEMICAUSAL.value:
+        return max(effective_pool_size - self.config.strides[0], 0)
       case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
+          types.PaddingMode.REVERSE_CAUSAL.value
+          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
       ):
-        return 0
-      case (
-          types.PaddingMode.REVERSE_CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
-      ):
-        return self._buffer_width % self.config.strides[0]
+        return (
+            (effective_pool_size - 1)
+            // self.config.strides[0]
+            * self.config.strides[0]
+        )
       case _:
-        # Unsupported.
-        return 0
+        return effective_pool_size - 1
 
   def get_initial_state(
       self,
@@ -595,9 +550,6 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.State]:
-    if not self.supports_step:
-      raise ValueError(f'{self} does not support stepping.')
-
     # In step mode, padding is handled by the state that is concatenated below.
     time_padding = (0, 0)
     spatial_padding = utils.convolution_explicit_padding(
@@ -607,32 +559,16 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
         self.config.dilation_rate[1],
     )
 
-    # Special case no state.
-    if not (buffer_width := self._buffer_width):
-      # Slice samples off x if we have a stride offset:
-      if stride_offset := self._stride_offset:
-        x = x[:, stride_offset:]
-      x = x.mask_invalid(mask_value=self._pad_value(x.dtype))
-      values = self._layer(x.values, padding=(time_padding, spatial_padding))
-      mask = convolution.compute_conv_mask(
-          x.mask,
-          self.config.pool_size[0],
-          self.config.strides[0],
-          self.config.dilation_rate[0],
-          self.config.time_padding,
-          is_step=True,
-      )
-      return types.Sequence(values, mask), state
+    # Replace masked timesteps with pad value.
+    x = x.mask_invalid(self._pad_value(x.dtype))
 
-    # Concatenate the new frames with the previous buffer_width frames.
-    state = state.concatenate(x)
-
-    # Slice samples off state if we have a stride offset:
-    if stride_offset := self._stride_offset:
-      state = state[:, stride_offset:]
+    if buffer_width := self._buffer_width:
+      # Concatenate the new frames with the previous buffer_width frames.
+      state = state.concatenate(x)
+    else:
+      state = x
 
     # Compute the output for the current timestep.
-    state = state.mask_invalid(mask_value=self._pad_value(state.dtype))
     values = self._layer(state.values, padding=(time_padding, spatial_padding))
     mask = convolution.compute_conv_mask(
         state.mask,
@@ -644,8 +580,12 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
     )
 
     # Keep the trailing buffer_width samples for the next step.
-    state = state[:, -buffer_width:]
+    if buffer_width:
+      state = state[:, -buffer_width:]
+    else:
+      state = ()
 
+    # Pooling can leave unmasked values with non-zero values.
     return types.Sequence(values, mask), state
 
   @types.check_layer

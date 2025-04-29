@@ -475,33 +475,25 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
     effective_kernel_size = utils.convolution_effective_kernel_size(
         self._kernel_size[0], self._dilation_rate[0]
     )
-    if self._paddings[0] == types.PaddingMode.SEMICAUSAL.value:
-      return max(effective_kernel_size - self._strides[0], 0)
-    else:
-      return effective_kernel_size - 1
 
-  @property
-  def _stride_offset(self) -> int:
-    # When processing step-wise step() receives multiples of block_size inputs
-    # at a time. When combining incoming blocks with state's _buffer_width
-    # timesteps, _stride_offset describes the offset into the combined [state,
-    # input] sequence that aligns the step-wise output with the layer-wise
-    # output.
     match self._paddings[0]:
+      case types.PaddingMode.SEMICAUSAL.value:
+        return max(effective_kernel_size - self._strides[0], 0)
       case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
+          types.PaddingMode.REVERSE_CAUSAL.value
+          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
       ):
-        return 0
+        return (
+            (effective_kernel_size - 1) // self._strides[0] * self._strides[0]
+        )
       case (
-          types.PaddingMode.REVERSE_CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
+          types.PaddingMode.CAUSAL.value | types.PaddingMode.CAUSAL_VALID.value
       ):
-        return self._buffer_width % self._strides[0]
+        return effective_kernel_size - 1
       case _:
-        # Unsupported.
-        return 0
+        raise NotImplementedError(
+            f'Unsupported padding mode: {self._paddings[0]}'
+        )
 
   def get_initial_state(
       self,
@@ -527,6 +519,7 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
       case (
           types.PaddingMode.CAUSAL_VALID.value
           | types.PaddingMode.REVERSE_CAUSAL_VALID.value
+          | types.PaddingMode.SEMICAUSAL_FULL.value
       ):
         mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
       case (
@@ -573,40 +566,18 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
         )
     )
 
-    # Special case no state.
-    if not (buffer_width := self._buffer_width):
-      effective_kernel_size = utils.convolution_effective_kernel_size(
-          self._kernel_size[0], self._dilation_rate[0]
-      )
-      # Mask the input if the effective kernel size is greater than 1.
-      if effective_kernel_size > 1:
-        x = x.mask_invalid()
+    effective_kernel_size = utils.convolution_effective_kernel_size(
+        self._kernel_size[0], self._dilation_rate[0]
+    )
+    # Mask the input if the effective kernel size is greater than 1.
+    if effective_kernel_size > 1:
+      x = x.mask_invalid()
 
-      # Slice samples off x if we have a stride offset:
-      if stride_offset := self._stride_offset:
-        x = x[:, stride_offset:]
-      values = self._layer(x.values, padding=explicit_paddings)
-      mask = compute_conv_mask(
-          x.mask,
-          self._kernel_size[0],
-          self._strides[0],
-          self._dilation_rate[0],
-          self._paddings[0],
-          is_step=True,
-      )
-      # If no bias in use, the masked state of the input is preserved.
-      result_type = types.Sequence if self.config.use_bias else type(x)
-      return result_type(values, mask), state
-
-    # Mask inputs since time receptive field is greater than 1.
-    x = x.mask_invalid()
-
-    # Concatenate the new frames with the previous buffer_width frames.
-    state = state.concatenate(x)
-
-    # Slice samples off state if we have a stride offset:
-    if stride_offset := self._stride_offset:
-      state = state[:, stride_offset:]
+    if buffer_width := self._buffer_width:
+      # Concatenate the new frames with the previous buffer_width frames.
+      state = state.concatenate(x)
+    else:
+      state = x
 
     # Compute the output for the current timestep.
     values = self._layer(state.values, padding=explicit_paddings)
@@ -620,7 +591,10 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
     )
 
     # Keep the trailing buffer_width samples for the next step.
-    state = state[:, -buffer_width:]
+    if buffer_width:
+      state = state[:, -buffer_width:]
+    else:
+      state = ()
 
     # Convolution can leave unmasked values with non-zero values.
     return types.Sequence(values, mask), state
