@@ -252,7 +252,7 @@ def _compute_conv_transpose_output_length(
       kernel_size, dilation_rate
   )
 
-  match padding:
+  match padding:  # pytype: disable=incomplete-match
     case (
         types.PaddingMode.SAME.value
         | types.PaddingMode.CAUSAL.value
@@ -278,7 +278,7 @@ def _transpose_conv_explicit_padding(
       kernel_size, dilation_rate
   )
 
-  match padding:
+  match padding:  # pytype: disable=incomplete-match
     case types.PaddingMode.VALID.value:
       pad_amount = (
           effective_kernel_size
