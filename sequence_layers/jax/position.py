@@ -206,6 +206,16 @@ class ApplyRotaryPositionalEncoding(
 
   config: Config
 
+  def setup(self) -> None:
+    if (
+        self.config.only_advance_position_for_valid_timesteps
+        and self.config.positions_name
+    ):
+      raise ValueError(
+          'only_advance_position_for_valid_timesteps is incompatible with'
+          f' {self.config.positions_name=}.'
+      )
+
   @nn.nowrap
   def _check_inputs(self, input_spec: types.ShapeDType):
     if input_spec.dtype not in (

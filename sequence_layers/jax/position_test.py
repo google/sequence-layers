@@ -341,6 +341,7 @@ class ApplyRotaryPositionalEncodingTest(test_utils.SequenceLayerTest):
     key = jax.random.PRNGKey(1234)
     l = position_lib.ApplyRotaryPositionalEncoding.Config(
         max_wavelength=1.0e4,
+        only_advance_position_for_valid_timesteps=False,
         positions_name='positions',
         name='rope',
     ).make()
@@ -366,6 +367,26 @@ class ApplyRotaryPositionalEncodingTest(test_utils.SequenceLayerTest):
     )
     # Since the positions repeat, the first half should equal the second half.
     self.assertSequencesEqual(y[:, :5], y[:, 5:])
+
+  def test_error_only_advance_position_for_valid_timesteps_and_external_positions(
+      self,
+  ):
+    with self.assertRaises(ValueError):
+      key = jax.random.PRNGKey(1234)
+      l = position_lib.ApplyRotaryPositionalEncoding.Config(
+          max_wavelength=1.0e4,
+          positions_name='positions',
+          only_advance_position_for_valid_timesteps=True,
+          name='rope',
+      ).make()
+      x = test_utils.random_sequence(1, 5, 8, random_lengths=False)
+      x = types.Sequence.concatenate_sequences([x, x])
+      constants = {
+          'positions': types.Sequence.from_values(
+              jnp.arange(10)[jnp.newaxis] % 5
+          )
+      }
+      self.init_and_bind_layer(key, l, x, constants=constants)
 
 
 if __name__ == '__main__':
