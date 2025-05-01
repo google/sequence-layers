@@ -21,7 +21,7 @@ https://arxiv.org/abs/1810.04805
 
 from typing import Optional, Tuple
 from sequence_layers import tensorflow as sl
-from sequence_layers.examples import transformer
+from sequence_layers.tensorflow.examples import transformer
 import tensorflow.compat.v2 as tf
 
 

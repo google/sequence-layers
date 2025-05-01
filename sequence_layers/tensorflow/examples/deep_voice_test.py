@@ -13,50 +13,34 @@
 # limitations under the License.
 
 from absl.testing import parameterized
-from sequence_layers.examples import transformer
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import deep_voice
 import tensorflow.compat.v2 as tf
 
 
-class TransformerTest(test_util.SequenceLayerTest, parameterized.TestCase):
+class DeepVoice3Test(test_util.SequenceLayerTest, parameterized.TestCase):
 
-  @parameterized.parameters(False, True)
-  def test_transformer_encoder(self, training):
-    batch_size, target_length, target_dimension = 2, 4, 6
-    # The target sequence to learn.
-    x = self.random_sequence(batch_size, target_length, target_dimension)
-    l = transformer.TransformerEncoder(
-        num_layers=2,
-        dimension=8,
-        num_heads=2,
-        max_horizon=8,
-        max_future_horizon=8,
-    )
-
-    self.verify_contract(l, x, training=training, pad_nan=False)
-    # Use flex for Einsum.
-    self.verify_tflite_step(l, x, use_flex=True)
-
-  @parameterized.parameters(False, True)
-  def test_transformer_decoder(self, training):
+  @parameterized.parameters(1, 2, 3)
+  def test_deep_voice_3(self, rf):
     batch_size, source_length, source_dim = 2, 3, 5
-    target_length, target_dimension = 4, 6
+    target_length, target_dimension = 7, 11
     source_name = 'source'
     # The target sequence to learn.
     x = self.random_sequence(batch_size, target_length, target_dimension)
-    l = transformer.TransformerDecoder(
-        source_name, num_layers=2, dimension=8, num_heads=2, max_horizon=8
+    l = deep_voice.DeepVoice3Decoder(
+        source_name, reduction_factor=rf, target_dimension=target_dimension
     )
 
     # The encoder sequence to attend to.
     source = self.random_sequence(batch_size, source_length, source_dim)
     constants = {source_name: source}
 
-    self.verify_contract(
-        l, x, training=training, pad_nan=False, constants=constants
-    )
+    # Only test training=False because the model has dropout.
+    self.verify_contract(l, x, training=False, constants=constants)
     # Use flex for Einsum.
-    self.verify_tflite_step(l, x, constants=constants, use_flex=True)
+    self.verify_tflite_step(
+        l, x, constants=constants, use_flex=True, rtol=5e-7, atol=5e-7
+    )
 
 
 if __name__ == '__main__':

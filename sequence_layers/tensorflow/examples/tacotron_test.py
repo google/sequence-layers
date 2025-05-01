@@ -14,8 +14,8 @@
 
 from absl.testing import parameterized
 from sequence_layers import proto
-from sequence_layers.examples import tacotron
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import tacotron
 import tensorflow.compat.v2 as tf
 
 

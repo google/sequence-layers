@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from sequence_layers.examples import conformer
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import conformer
 import tensorflow.compat.v2 as tf
 
 

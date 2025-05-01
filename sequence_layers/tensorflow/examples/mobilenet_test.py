@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from absl.testing import parameterized
-from sequence_layers.examples import mobilenet
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import mobilenet
 import tensorflow.compat.v2 as tf
 
 

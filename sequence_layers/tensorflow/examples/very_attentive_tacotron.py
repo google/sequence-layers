@@ -33,8 +33,8 @@ import math
 
 import numpy as np
 from sequence_layers import tensorflow as sl
-from sequence_layers.examples import t5
 from sequence_layers.tensorflow import utils
+from sequence_layers.tensorflow.examples import t5
 import tensorflow.compat.v2 as tf
 
 
