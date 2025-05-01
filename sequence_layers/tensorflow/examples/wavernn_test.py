@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from sequence_layers.examples import wavernn
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import wavernn
 import tensorflow.compat.v1 as tf1
 import tensorflow.compat.v2 as tf
 

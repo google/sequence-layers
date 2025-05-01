@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from absl import logging
-from sequence_layers.examples import very_attentive_tacotron
 from sequence_layers.tensorflow import test_util
+from sequence_layers.tensorflow.examples import very_attentive_tacotron
 import tensorflow.compat.v2 as tf
 
 
