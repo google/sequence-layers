@@ -261,9 +261,6 @@ class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
                                 ),
                                 name='ffn_layer2',
                             ),
-                            sl.Dropout.Config(
-                                rate=0.0, name='residual_dropout'
-                            ),
                             sl.RMSNormalization.Config(
                                 param_dtype=self.config.param_dtype,
                                 reductions_in_at_least_fp32=True,
@@ -328,9 +325,6 @@ class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
                                 reductions_in_at_least_fp32=True,
                                 name='post_norm',
                             ),
-                            sl.Dropout.Config(
-                                rate=0.0, name='residual_dropout'
-                            ),
                         ],
                         name='trans_atten',
                     ),
@@ -378,7 +372,6 @@ class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
                                 ),
                                 name='linear_end',
                             ),
-                            sl.Dropout.Config(0.0, name='dropout'),
                         ],
                         name='lconv',
                     ),
@@ -400,7 +393,6 @@ class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
                                 ),
                                 name='ffn_layer1',
                             ),
-                            sl.Dropout.Config(rate=0.0, name='relu_dropout'),
                             sl.Dense.Config(
                                 self.config.model_dims,
                                 use_bias=False,
@@ -410,9 +402,6 @@ class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
                                     self.config.einsum_factories.mlp.linear,
                                 ),
                                 name='ffn_layer2',
-                            ),
-                            sl.Dropout.Config(
-                                rate=0.0, name='residual_dropout'
                             ),
                             sl.RMSNormalization.Config(
                                 param_dtype=self.config.param_dtype,
