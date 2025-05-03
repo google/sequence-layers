@@ -45,6 +45,7 @@ __all__ = (
     'Argmax',
     'Cast',
     'CheckpointName',
+    'Downsample1D',
     'Dropout',
     'EinopsRearrange',
     'Elu',
@@ -2128,6 +2129,48 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
   ) -> types.Sequence:
     # No mask status change since dropout only zeros values.
     return x.apply_values_masked(self.apply_dropout, training=training)
+
+
+class Downsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
+  """A 1D downsampling layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Configuration for Downsample1D."""
+
+    rate: int
+    name: str | None = None
+
+    def make(self) -> 'Downsample1D':
+      return Downsample1D(self, name=self.name)
+
+  config: Config
+
+  @property
+  def block_size(self) -> int:
+    return self.config.rate
+
+  @property
+  def output_ratio(self) -> fractions.Fraction:
+    return fractions.Fraction(1, self.config.rate)
+
+  @property
+  def input_latency(self) -> int:
+    return self.config.rate - 1
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    # Downsampling does not change the masked state, so use the type of x to
+    # repack the downsampled values and mask.
+    return type(x)(
+        x.values[:, :: self.config.rate], x.mask[:, :: self.config.rate]
+    )
 
 
 class Upsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
