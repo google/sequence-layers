@@ -20,40 +20,33 @@ import fractions
 import jax
 import jax.numpy as jnp
 import sequence_layers.jax as sl
-from sequence_layers.jax import types
-
-
-EinsumFactoryT = types.EinsumFactoryT
 
 
 @dataclasses.dataclass(frozen=True)
 class AttentionEinsumFactoryConfig:
-  qkv_einsum: EinsumFactoryT | None = None
-  position_embedding: EinsumFactoryT | None = None
+  qkv_einsum: sl.EinsumFactoryT | None = None
+  position_embedding: sl.EinsumFactoryT | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class ConvEinsumFactoryConfig:
-  linear: EinsumFactoryT | None = None
+  linear: sl.EinsumFactoryT | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class FFWEinsumFactoryConfig:
-  linear: EinsumFactoryT | None = None
+  linear: sl.EinsumFactoryT | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class EinsumFactoryConfig:
-  """Configuration for einsum factory replacement.
+  """Configuration for einsum factory replacement."""
 
-  Attributes:
-    attention: Attention einsum factory config.
-    conv: Conv einsum factory config.
-    mlp: MLP einsum factory config.
-  """
-
+  # Attention einsum factory config.
   attention: AttentionEinsumFactoryConfig = AttentionEinsumFactoryConfig()
+  # Conv einsum factory config.
   conv: ConvEinsumFactoryConfig = ConvEinsumFactoryConfig()
+  # MLP einsum factory config.
   mlp: FFWEinsumFactoryConfig = FFWEinsumFactoryConfig()
 
 
@@ -74,8 +67,8 @@ class QuantMode(enum.Enum):
 
 
 def prepare_einsum_factory(
-    einsum_factory: EinsumFactoryT | None,
-) -> EinsumFactoryT | None:
+    einsum_factory: sl.EinsumFactoryT | None,
+) -> sl.EinsumFactoryT | None:
   # Note, we ignore the `w_wrapper` from cl/549464508.
   # It is unclear if it is still necessary.
   if einsum_factory is None:
@@ -126,308 +119,296 @@ class UniformReducer(sl.PreservesType, sl.PreservesShape, sl.Stateless):
     return sl.Sequence(values, mask)
 
 
-class Gemma3nAudioEncoder(sl.SerialCombinatorMixin, sl.Emitting):
-  """A conformer-based audio encoder implemented with SequenceLayers."""
+@dataclasses.dataclass(frozen=True)
+class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
+  """Configuration for the Gemma 3n audio encoder.
 
-  @dataclasses.dataclass(frozen=True)
-  class Config(sl.SequenceLayerConfig):
-    """Configuration and builder for the Gemma3nAudioEncoder."""
+  A Conformer / USM-based audio encoder implemented with SequenceLayers.
+  """
 
-    # input_latency is the SequenceLayer.output_latency of the layers preceding
-    # this network. It's used to insert appropriate delays in the strided
-    # convolutions so that stepwise execution matches layerwise execution.
-    input_latency: int = 0
-    # Default to regular dtype promotion rules based on inputs and parameters.
-    compute_dtype: sl.DType | None = None
-    # By default store all model weights as float32.
-    param_dtype: sl.DType = jnp.float32
+  # input_latency is the SequenceLayer.output_latency of the layers preceding
+  # this network. It's used to insert appropriate delays in the strided
+  # convolutions so that stepwise execution matches layerwise execution.
+  input_latency: int = 0
+  # Default to regular dtype promotion rules based on inputs and parameters.
+  compute_dtype: sl.DType | None = None
+  # By default store all model weights as float32.
+  param_dtype: sl.DType = jnp.float32
 
-    # Only available to be changed for testing.
-    num_layers: int = 12
-    model_dims: int = 1536
-    ffn_residual_weight: float = 0.5
-    atten_num_heads: int = 8
-    atten_left_context: int = 13
-    conv_causal_time_padding_type: types.PaddingModeString = (
-        types.PaddingMode.REVERSE_CAUSAL.value
-    )
-    conv_spatial_padding_type: types.PaddingModeString = (
-        types.PaddingMode.SAME.value
-    )
-    name: str | None = None
+  # Only available to be changed for testing.
+  num_layers: int = 12
+  model_dims: int = 1536
+  ffn_residual_weight: float = 0.5
+  atten_num_heads: int = 8
+  atten_left_context: int = 13
+  name: str | None = None
 
-    # Optional quantization
-    einsum_factories: EinsumFactoryConfig = EinsumFactoryConfig()
+  # Optional quantization
+  einsum_factories: EinsumFactoryConfig = EinsumFactoryConfig()
 
-    def make(self) -> 'Gemma3nAudioEncoder':
-      return Gemma3nAudioEncoder(config=self, name=self.name)
-
-  config: Config
-
-  def setup(self) -> None:
-    """Feature processing Sequence layers."""
-    filters = (128, 32)
-    kernel_size = ((3, 3), (3, 3))
-    stride = ((2, 2), (2, 2))
-
-    self.layers = [
-        sl.Serial.Config(
-            [
-                sl.ExpandDims.Config(-1),
-                sl.Delay.Config(
-                    # Use stride[0][0] for time dim.
-                    -self.config.input_latency % stride[0][0],
-                    delay_layer_output=False,
-                ),
-                sl.Conv2D.Config(
-                    filters=filters[0],
-                    kernel_size=kernel_size[0],
-                    strides=stride[0],
-                    time_padding=self.config.conv_causal_time_padding_type,
-                    spatial_padding=self.config.conv_spatial_padding_type,
-                    use_bias=False,
-                    compute_dtype=self.config.compute_dtype,
-                    param_dtype=self.config.param_dtype,
-                    name='subsampling_0',
-                ),
-                sl.GroupNormalization.Config(
-                    num_groups=1,
-                    epsilon=1e-3,
-                    cumulative=True,
-                    use_bias=False,
-                    name='norm_0',
-                ),
-                sl.Relu.Config(),
-                # Introduce a delay in step mode so that the accumulated
-                # latency is divisible by the stride.
-                sl.Delay.Config(1, delay_layer_output=False),
-                sl.Conv2D.Config(
-                    filters=filters[1],
-                    kernel_size=kernel_size[1],
-                    strides=stride[1],
-                    time_padding=self.config.conv_causal_time_padding_type,
-                    spatial_padding=self.config.conv_spatial_padding_type,
-                    use_bias=False,
-                    compute_dtype=self.config.compute_dtype,
-                    param_dtype=self.config.param_dtype,
-                    name='subsampling_1',
-                ),
-                sl.GroupNormalization.Config(
-                    num_groups=1,
-                    epsilon=1e-3,
-                    cumulative=True,
-                    use_bias=False,
-                    name='norm_1',
-                ),
-                sl.Relu.Config(),
-                sl.DenseShaped.Config(
-                    [self.config.model_dims],
-                    use_bias=False,
-                    compute_dtype=None,
-                    param_dtype=self.config.param_dtype,
-                    name='input_proj',
-                ),
-            ],
-            name='feature',
-        ).make(),
-        sl.Repeat.Config(
+  def make(self) -> sl.SequenceLayer:
+    """Builds the Gemma 3n audio encoder."""
+    conv_stride = 2
+    return sl.Serial.Config(
+        [
             sl.Serial.Config(
                 [
-                    sl.Residual.Config(
-                        [
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='pre_layer_norm',
-                            ),
-                            sl.Dense.Config(
-                                self.config.model_dims * 4,
-                                use_bias=False,
-                                activation=jax.nn.swish,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.mlp.linear,
-                                ),
-                                name='ffn_layer1',
-                            ),
-                            sl.Dense.Config(
-                                self.config.model_dims,
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.mlp.linear,
-                                ),
-                                name='ffn_layer2',
-                            ),
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='post_layer_norm',
-                            ),
-                            sl.Scale.Config(self.config.ffn_residual_weight),
-                        ],
-                        name='fflayer_start',
+                    sl.ExpandDims.Config(-1),
+                    sl.Delay.Config(
+                        -self.input_latency % conv_stride,
+                        delay_layer_output=False,
                     ),
-                    # Attention with residual connection.
-                    sl.Residual.Config(
-                        [
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='pre_norm',
-                            ),
-                            sl.LocalDotProductSelfAttention.Config(
-                                input_projection=sl.CombinedQueryKeyValueProjection(
-                                    einsum_factory=prepare_einsum_factory(
-                                        self.config.einsum_factories.attention.qkv_einsum,
-                                    ),
-                                ),
-                                num_heads=self.config.atten_num_heads,
-                                units_per_head=self.config.model_dims
-                                // self.config.atten_num_heads,
-                                use_bias=False,
-                                block_size=12,
-                                max_past_horizon=self.config.atten_left_context
-                                - 1,
-                                max_future_horizon=0,
-                                attention_logits_soft_cap=50.0,
-                                relative_position_embedding=sl.TransformerXLRelativePositionEmbedding.Config(
-                                    num_heads=self.config.atten_num_heads,
-                                    units_per_head=self.config.model_dims
-                                    // self.config.atten_num_heads,
-                                    max_backward=self.config.atten_left_context
-                                    - 1,
-                                    max_forward=0,
-                                    position_bias_dim=self.config.model_dims,
-                                    use_bias=False,
-                                    param_dtype=self.config.param_dtype,
-                                    einsum_factory=prepare_einsum_factory(
-                                        self.config.einsum_factories.attention.position_embedding,
-                                    ),
-                                ),
-                                attention_probabilities_dropout_rate=0.0,
-                                per_dim_scale=True,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                name='self_atten',
-                            ),
-                            sl.DenseShaped.Config(
-                                [self.config.model_dims],
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                name='post',
-                            ),
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='post_norm',
-                            ),
-                        ],
-                        name='trans_atten',
+                    sl.Conv2D.Config(
+                        filters=128,
+                        kernel_size=3,
+                        strides=conv_stride,
+                        time_padding='reverse_causal',
+                        spatial_padding='same',
+                        use_bias=False,
+                        compute_dtype=self.compute_dtype,
+                        param_dtype=self.param_dtype,
+                        name='subsampling_0',
                     ),
-                    sl.Residual.Config(
-                        [
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='ln',
-                            ),
-                            sl.Dense.Config(
-                                2 * self.config.model_dims,
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.conv.linear,
-                                ),
-                                name='linear_start',
-                            ),
-                            sl.GatedLinearUnit.Config(name='glu'),
-                            sl.DepthwiseConv1D.Config(
-                                kernel_size=5,
-                                strides=1,
-                                depth_multiplier=1,
-                                padding='causal',
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                name='depthwise_conv1d',
-                            ),
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='conv_norm',
-                            ),
-                            sl.Swish.Config(name='conv_activation'),
-                            sl.Dense.Config(
-                                self.config.model_dims,
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.conv.linear,
-                                ),
-                                name='linear_end',
-                            ),
-                        ],
-                        name='lconv',
+                    sl.GroupNormalization.Config(
+                        num_groups=1,
+                        epsilon=1e-3,
+                        cumulative=True,
+                        use_bias=False,
+                        name='norm_0',
                     ),
-                    sl.Residual.Config(
-                        [
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='pre_layer_norm',
-                            ),
-                            sl.Dense.Config(
-                                self.config.model_dims * 4,
-                                use_bias=False,
-                                activation=jax.nn.swish,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.mlp.linear,
-                                ),
-                                name='ffn_layer1',
-                            ),
-                            sl.Dense.Config(
-                                self.config.model_dims,
-                                use_bias=False,
-                                compute_dtype=self.config.compute_dtype,
-                                param_dtype=self.config.param_dtype,
-                                einsum_factory=prepare_einsum_factory(
-                                    self.config.einsum_factories.mlp.linear,
-                                ),
-                                name='ffn_layer2',
-                            ),
-                            sl.RMSNormalization.Config(
-                                param_dtype=self.config.param_dtype,
-                                reductions_in_at_least_fp32=True,
-                                name='post_layer_norm',
-                            ),
-                            sl.Scale.Config(self.config.ffn_residual_weight),
-                        ],
-                        name='fflayer_end',
+                    sl.Relu.Config(),
+                    # Introduce a delay in step mode so that the accumulated
+                    # latency is divisible by the stride.
+                    sl.Delay.Config(1, delay_layer_output=False),
+                    sl.Conv2D.Config(
+                        filters=32,
+                        kernel_size=3,
+                        strides=conv_stride,
+                        time_padding='reverse_causal',
+                        spatial_padding='same',
+                        use_bias=False,
+                        compute_dtype=self.compute_dtype,
+                        param_dtype=self.param_dtype,
+                        name='subsampling_1',
                     ),
-                    sl.RMSNormalization.Config(
-                        param_dtype=self.config.param_dtype,
-                        reductions_in_at_least_fp32=True,
-                        name='final_ln',
+                    sl.GroupNormalization.Config(
+                        num_groups=1,
+                        epsilon=1e-3,
+                        cumulative=True,
+                        use_bias=False,
+                        name='norm_1',
+                    ),
+                    sl.Relu.Config(),
+                    sl.DenseShaped.Config(
+                        [self.model_dims],
+                        use_bias=False,
+                        compute_dtype=None,
+                        param_dtype=self.param_dtype,
+                        name='input_proj',
                     ),
                 ],
-                name='stacked_layers',
+                name='feature',
             ),
-            num_repeats=self.config.num_layers,
-            remat=True,
-            name='conformer',
-        ).make(),
-        sl.Delay.Config(2, delay_layer_output=False).make(),
-        UniformReducer.Config(
-            reduction_factor=4,
-            name='reducer',
-        ).make(),
-        sl.MaskInvalid.Config().make(),
-    ]
+            sl.Repeat.Config(
+                sl.Serial.Config(
+                    [
+                        sl.Residual.Config(
+                            [
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='pre_layer_norm',
+                                ),
+                                sl.Dense.Config(
+                                    self.model_dims * 4,
+                                    use_bias=False,
+                                    activation=jax.nn.swish,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.mlp.linear,
+                                    ),
+                                    name='ffn_layer1',
+                                ),
+                                sl.Dense.Config(
+                                    self.model_dims,
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.mlp.linear,
+                                    ),
+                                    name='ffn_layer2',
+                                ),
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='post_layer_norm',
+                                ),
+                                sl.Scale.Config(self.ffn_residual_weight),
+                            ],
+                            name='fflayer_start',
+                        ),
+                        # Attention with residual connection.
+                        sl.Residual.Config(
+                            [
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='pre_norm',
+                                ),
+                                sl.LocalDotProductSelfAttention.Config(
+                                    input_projection=sl.CombinedQueryKeyValueProjection(
+                                        einsum_factory=prepare_einsum_factory(
+                                            self.einsum_factories.attention.qkv_einsum,
+                                        ),
+                                    ),
+                                    num_heads=self.atten_num_heads,
+                                    units_per_head=self.model_dims
+                                    // self.atten_num_heads,
+                                    use_bias=False,
+                                    block_size=12,
+                                    max_past_horizon=self.atten_left_context
+                                    - 1,
+                                    max_future_horizon=0,
+                                    attention_logits_soft_cap=50.0,
+                                    relative_position_embedding=sl.TransformerXLRelativePositionEmbedding.Config(
+                                        num_heads=self.atten_num_heads,
+                                        units_per_head=self.model_dims
+                                        // self.atten_num_heads,
+                                        max_backward=self.atten_left_context
+                                        - 1,
+                                        max_forward=0,
+                                        position_bias_dim=self.model_dims,
+                                        use_bias=False,
+                                        param_dtype=self.param_dtype,
+                                        einsum_factory=prepare_einsum_factory(
+                                            self.einsum_factories.attention.position_embedding,
+                                        ),
+                                    ),
+                                    attention_probabilities_dropout_rate=0.0,
+                                    per_dim_scale=True,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    name='self_atten',
+                                ),
+                                sl.DenseShaped.Config(
+                                    [self.model_dims],
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    name='post',
+                                ),
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='post_norm',
+                                ),
+                            ],
+                            name='trans_atten',
+                        ),
+                        sl.Residual.Config(
+                            [
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='ln',
+                                ),
+                                sl.Dense.Config(
+                                    2 * self.model_dims,
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.conv.linear,
+                                    ),
+                                    name='linear_start',
+                                ),
+                                sl.GatedLinearUnit.Config(name='glu'),
+                                sl.DepthwiseConv1D.Config(
+                                    kernel_size=5,
+                                    strides=1,
+                                    depth_multiplier=1,
+                                    padding='causal',
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    name='depthwise_conv1d',
+                                ),
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='conv_norm',
+                                ),
+                                sl.Swish.Config(name='conv_activation'),
+                                sl.Dense.Config(
+                                    self.model_dims,
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.conv.linear,
+                                    ),
+                                    name='linear_end',
+                                ),
+                            ],
+                            name='lconv',
+                        ),
+                        sl.Residual.Config(
+                            [
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='pre_layer_norm',
+                                ),
+                                sl.Dense.Config(
+                                    self.model_dims * 4,
+                                    use_bias=False,
+                                    activation=jax.nn.swish,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.mlp.linear,
+                                    ),
+                                    name='ffn_layer1',
+                                ),
+                                sl.Dense.Config(
+                                    self.model_dims,
+                                    use_bias=False,
+                                    compute_dtype=self.compute_dtype,
+                                    param_dtype=self.param_dtype,
+                                    einsum_factory=prepare_einsum_factory(
+                                        self.einsum_factories.mlp.linear,
+                                    ),
+                                    name='ffn_layer2',
+                                ),
+                                sl.RMSNormalization.Config(
+                                    param_dtype=self.param_dtype,
+                                    reductions_in_at_least_fp32=True,
+                                    name='post_layer_norm',
+                                ),
+                                sl.Scale.Config(self.ffn_residual_weight),
+                            ],
+                            name='fflayer_end',
+                        ),
+                        sl.RMSNormalization.Config(
+                            param_dtype=self.param_dtype,
+                            reductions_in_at_least_fp32=True,
+                            name='final_ln',
+                        ),
+                    ],
+                    name='stacked_layers',
+                ),
+                num_repeats=self.num_layers,
+                remat=True,
+                name='conformer',
+            ),
+            sl.Delay.Config(2, delay_layer_output=False),
+            UniformReducer.Config(
+                reduction_factor=4,
+                name='reducer',
+            ),
+            sl.MaskInvalid.Config(),
+        ],
+        name=self.name,
+    ).make()
