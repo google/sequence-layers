@@ -216,7 +216,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                             [
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='pre_layer_norm',
                                 ),
                                 sl.Dense.Config(
@@ -242,7 +241,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                 ),
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='post_layer_norm',
                                 ),
                                 sl.Scale.Config(self.ffn_residual_weight),
@@ -254,7 +252,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                             [
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='pre_norm',
                                 ),
                                 sl.LocalDotProductSelfAttention.Config(
@@ -286,7 +283,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                             self.einsum_factories.attention.position_embedding,
                                         ),
                                     ),
-                                    attention_probabilities_dropout_rate=0.0,
                                     per_dim_scale=True,
                                     compute_dtype=self.compute_dtype,
                                     param_dtype=self.param_dtype,
@@ -301,7 +297,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                 ),
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='post_norm',
                                 ),
                             ],
@@ -311,7 +306,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                             [
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='ln',
                                 ),
                                 sl.Dense.Config(
@@ -327,8 +321,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                 sl.GatedLinearUnit.Config(name='glu'),
                                 sl.DepthwiseConv1D.Config(
                                     kernel_size=5,
-                                    strides=1,
-                                    depth_multiplier=1,
                                     padding='causal',
                                     use_bias=False,
                                     compute_dtype=self.compute_dtype,
@@ -337,7 +329,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                 ),
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='conv_norm',
                                 ),
                                 sl.Swish.Config(name='conv_activation'),
@@ -358,7 +349,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                             [
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='pre_layer_norm',
                                 ),
                                 sl.Dense.Config(
@@ -384,7 +374,6 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                                 ),
                                 sl.RMSNormalization.Config(
                                     param_dtype=self.param_dtype,
-                                    reductions_in_at_least_fp32=True,
                                     name='post_layer_norm',
                                 ),
                                 sl.Scale.Config(self.ffn_residual_weight),
@@ -393,14 +382,12 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                         ),
                         sl.RMSNormalization.Config(
                             param_dtype=self.param_dtype,
-                            reductions_in_at_least_fp32=True,
                             name='final_ln',
                         ),
                     ],
                     name='stacked_layers',
                 ),
                 num_repeats=self.num_layers,
-                remat=True,
                 name='conformer',
             ),
             sl.Delay.Config(2, delay_layer_output=False),
