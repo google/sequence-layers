@@ -38,6 +38,7 @@ __all__ = (
     'ChannelSpec',
     'Constants',
     'DType',
+    'EinsumFactoryT',
     'Emits',
     'Emitting',
     'ExpandedMaskT',

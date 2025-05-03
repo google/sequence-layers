@@ -15,7 +15,6 @@
 import chex
 import flax
 import jax
-import jax._src.ad_checkpoint
 import jax.numpy as jnp
 from sequence_layers.jax import test_utils
 from sequence_layers.jax.examples import gemma3n_audio_encoder
@@ -28,7 +27,7 @@ class Gemma3nEncoderTest(test_utils.SequenceLayerTest):
     model_dim = 5
     atten_num_heads = 2
     num_layers = 3
-    l = gemma3n_audio_encoder.Gemma3nAudioEncoder.Config(
+    l = gemma3n_audio_encoder.Gemma3nAudioEncoderConfig(
         model_dims=model_dim,
         num_layers=num_layers,
         atten_num_heads=atten_num_heads,
