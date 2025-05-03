@@ -1754,6 +1754,25 @@ class CheckpointNameTest(test_utils.SequenceLayerTest):
     )
 
 
+class Downsample1DTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(((2, 3, 5), 2), ((2, 3, 5, 9), 3))
+  def test_downsample1d(self, shape, rate):
+    l = simple.Downsample1D.Config(rate, name='downsample_1d').make().bind({})
+
+    self.assertEqual(l.block_size, rate)
+    self.assertEqual(1/l.output_ratio, rate)
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.name, 'downsample_1d')
+    self.assertEmpty(l.variables)
+
+    x = test_utils.random_sequence(*shape)
+    self.assertEqual(l.get_output_shape_for_sequence(x), x.channel_shape)
+    y = self.verify_contract(l, x, training=False)
+    self.assertAllEqual(x.values[:, ::rate], y.values)
+    self.assertAllEqual(x.mask[:, ::rate], y.mask)
+
+
 class Upsample1DTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(((2, 3, 5), 2), ((2, 3, 5, 9), 3))
@@ -1768,8 +1787,7 @@ class Upsample1DTest(test_utils.SequenceLayerTest):
 
     x = test_utils.random_sequence(*shape)
     self.assertEqual(l.get_output_shape_for_sequence(x), x.channel_shape)
-    self.verify_contract(l, x, training=False)
-    y = l.layer(x, training=False)
+    y = self.verify_contract(l, x, training=False)
     for i in range(rate):
       self.assertAllEqual(x.values, y.values[:, i::rate])
 
@@ -1792,8 +1810,7 @@ class Upsample2DTest(test_utils.SequenceLayerTest):
     self.assertEqual(
         l.get_output_shape_for_sequence(x), (x.shape[2] * rate[1], x.shape[3])
     )
-    self.verify_contract(l, x, training=False)
-    y = l.layer(x, training=False)
+    y = self.verify_contract(l, x, training=False)
     for i, j in itertools.product(range(rate[0]), range(rate[1])):
       self.assertAllEqual(x.values, y.values[:, i :: rate[0], j :: rate[1], :])
 

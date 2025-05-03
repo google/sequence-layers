@@ -15,7 +15,6 @@
 
 import dataclasses
 import enum
-import fractions
 
 import jax
 import jax.numpy as jnp
@@ -78,45 +77,6 @@ def prepare_einsum_factory(
       rhs_quant_mode=QuantMode.TRAIN,
       rhs_init=quant_w_init,
   )
-
-
-class UniformReducer(sl.PreservesType, sl.PreservesShape, sl.Stateless):
-  """Select every N'th vector."""
-
-  @dataclasses.dataclass(frozen=True)
-  class Config(sl.SequenceLayerConfig):
-    reduction_factor: int
-    name: str | None = None
-
-    def make(self) -> 'UniformReducer':
-      return UniformReducer(self, name=self.name)
-
-  config: Config
-
-  @property
-  def block_size(self) -> int:
-    return self.config.reduction_factor
-
-  @property
-  def output_ratio(self) -> fractions.Fraction:
-    """The number of output frames for one input frame."""
-    return fractions.Fraction(1, self.config.reduction_factor)
-
-  @property
-  def input_latency(self) -> int:
-    return self.config.reduction_factor - 1
-
-  @sl.check_layer
-  def layer(
-      self,
-      x: sl.Sequence,
-      *,
-      training: bool,
-      constants: sl.Constants | None = None,
-  ) -> sl.Sequence:
-    values = x.values[:, :: self.config.reduction_factor]
-    mask = x.mask[:, :: self.config.reduction_factor]
-    return sl.Sequence(values, mask)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -391,10 +351,7 @@ class Gemma3nAudioEncoderConfig(sl.SequenceLayerConfig):
                 name='conformer',
             ),
             sl.Delay.Config(2, delay_layer_output=False),
-            UniformReducer.Config(
-                reduction_factor=4,
-                name='reducer',
-            ),
+            sl.Downsample1D.Config(rate=4, name='reducer'),
             sl.MaskInvalid.Config(),
         ],
         name=self.name,
