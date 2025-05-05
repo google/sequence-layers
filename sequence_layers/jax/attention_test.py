@@ -3124,6 +3124,526 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(context_vectors, expected_context_vectors)
 
 
+class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      # max_past_horizon > 0, max_future_horizon == 0
+      (1, 2, 3, 0, 0),
+      (3, 5, 3, 0, 0),
+      # max_past_horizon > 0, max_future_horizon > 0
+      (3, 5, 3, 2, 0),
+      (3, 5, 3, 5, 0),
+      # max_past_horizon > 0, max_future_horizon > 0, with attention sinks.
+      (3, 5, 3, 5, 1),
+  )
+  def test_streaming_local_dot_product_attention(
+      self,
+      num_heads,
+      units_per_head,
+      max_past_horizon,
+      max_future_horizon,
+      num_sink_embeddings,
+  ):
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_channels = 2, 2
+    source_name = 'source'
+
+    l = attention.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        per_dim_scale=True,
+        precision=jax.lax.Precision.HIGHEST,
+        name='streaming_dot_product_attention',
+        num_sink_embeddings=num_sink_embeddings,
+    ).make()
+
+    source = test_utils.random_sequence(batch_size, 1, source_channels)
+    constants = {source_name: source}
+    channels = 3
+    x = test_utils.random_sequence(batch_size, 1, channels)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'streaming_dot_product_attention')
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.input_latency, max_future_horizon)
+
+    assert_param_dtypes_inits_shapes(
+        l,
+        x,
+        constants=constants,
+        num_sink_embeddings=num_sink_embeddings,
+        input_projection=l.config.input_projection,
+    )
+
+    channels = 3
+    for time in range(21, 23):
+      # Source and x must be the same length.
+      x = test_utils.random_sequence(
+          batch_size, time, channels, low_length=time // 2
+      )
+      # Re-use x's random mask.
+      source = types.Sequence(
+          test_utils.random_sequence(
+              batch_size, time, source_channels, random_lengths=False
+          ).values,
+          x.mask,
+      ).mask_invalid()
+      constants = {source_name: source}
+      self.assertEqual(
+          l.get_output_shape_for_sequence(x, constants=constants),
+          (num_heads, units_per_head),
+      )
+      self.verify_contract(
+          l,
+          x,
+          training=False,
+          constants=constants,
+          stream_constants=True,
+          pad_constants=True,
+      )
+
+  @parameterized.product(
+      test_utils.standard_dtype_configs(),
+      config=(
+          dict(per_dim_scale=True),
+          dict(attention_logits_soft_cap=50.0),
+          dict(
+              query_network=position.ApplyRotaryPositionalEncoding.Config(
+                  max_wavelength=10000
+              ),
+              key_network=position.ApplyRotaryPositionalEncoding.Config(
+                  max_wavelength=10000
+              ),
+          ),
+      ),
+  )
+  def test_streaming_local_dot_product_attention_dtypes(
+      self, param_dtype, input_dtype, compute_dtype, config
+  ):
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_channels = 2, 2
+    random_mask = True
+    source_name = 'source'
+    num_heads, units_per_head = 5, 2
+    config = (
+        dict(
+            source_name='source',
+            num_heads=num_heads,
+            units_per_head=units_per_head,
+            max_past_horizon=1,
+            max_future_horizon=3,
+            precision=jax.lax.Precision.HIGHEST,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+        )
+        | config
+    )
+    l = attention.StreamingDotProductAttention.Config(**config).make()
+
+    source = test_utils.random_sequence(
+        batch_size,
+        1,
+        source_channels,
+        random_mask=random_mask,
+        dtype=input_dtype,
+    )
+    constants = {source_name: source}
+    channels = 4
+    x = test_utils.random_sequence(
+        batch_size, 1, channels, random_mask=random_mask, dtype=input_dtype
+    )
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    assert_param_dtypes_inits_shapes(
+        l, x, constants=constants, input_projection=l.config.input_projection
+    )
+
+    time = 3
+    # Source and x must be the same length.
+    x = test_utils.random_sequence(
+        batch_size,
+        time,
+        channels,
+        random_mask=random_mask,
+        low_length=time // 2,
+        dtype=input_dtype,
+    )
+    # Re-use x's random mask.
+    source = types.Sequence(
+        test_utils.random_sequence(
+            batch_size,
+            time,
+            source_channels,
+            random_lengths=False,
+            dtype=input_dtype,
+        ).values,
+        x.mask,
+    ).mask_invalid()
+    constants = {source_name: source}
+    self.assertEqual(
+        l.get_output_shape_for_sequence(x, constants=constants),
+        (num_heads, units_per_head),
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=True,
+        pad_constants=True,
+        **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
+    )
+
+  @parameterized.product(
+      config=(
+          dict(per_dim_scale=True),
+          dict(attention_logits_soft_cap=50.0),
+          dict(
+              query_network=position.ApplyRotaryPositionalEncoding.Config(
+                  max_wavelength=10000
+              ),
+              key_network=position.ApplyRotaryPositionalEncoding.Config(
+                  max_wavelength=10000
+              ),
+          ),
+      ),
+  )
+  def test_bf16_mode(self, config):
+    """Tests that when inputs / params are bfloat16, the output is bfloat16."""
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_channels = 3, 4
+    random_mask = True
+    source_name = 'source'
+    num_heads, units_per_head = 2, 6
+    config = (
+        dict(
+            source_name='source',
+            num_heads=num_heads,
+            units_per_head=units_per_head,
+            max_past_horizon=1,
+            max_future_horizon=3,
+            precision=jax.lax.Precision.HIGHEST,
+        )
+        | config
+    )
+    l = attention.StreamingDotProductAttention.Config(**config).make()
+
+    time, channels = 5, 2
+    source = test_utils.random_sequence(
+        batch_size,
+        time,
+        source_channels,
+        random_mask=random_mask,
+        dtype=jnp.bfloat16,
+    )
+    constants = {source_name: source}
+    x = test_utils.random_sequence(
+        batch_size, time, channels, random_mask=random_mask, dtype=jnp.bfloat16
+    )
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    bf16_params = test_utils.cast_from_to(
+        l.variables, jnp.float32, jnp.bfloat16
+    )
+    l = l.bind(bf16_params)
+    y = l.layer(x, training=False, constants=constants)
+    self.assertEqual(y.dtype, jnp.bfloat16)
+
+  def test_no_query_delay_buffer(self):
+    key = jax.random.PRNGKey(1234)
+    max_past_horizon, max_future_horizon = 2, 3
+    batch_size, source_channels = 2, 2
+    source_name = 'source'
+
+    l = attention.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        use_query_delay_buffer=False,
+        name='streaming_dot_product_attention',
+    ).make()
+
+    source = test_utils.random_sequence(batch_size, 1, source_channels)
+    constants = {source_name: source}
+    channels = 3
+    x = test_utils.random_sequence(batch_size, 1, channels)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertTrue(l.supports_step)
+
+    # When not using a query delay buffer, the layer has no input or output
+    # latency.
+    self.assertEqual(l.input_latency, 0)
+    self.assertEqual(int(l.output_latency), 0)
+
+    time, channels = 30, 3
+    # Source and x must be the same length.
+    x = test_utils.random_sequence(
+        batch_size, time, channels, low_length=time // 2
+    )
+    # Re-use x's random mask.
+    source = types.Sequence(
+        test_utils.random_sequence(
+            batch_size, time, source_channels, random_lengths=False
+        ).values,
+        x.mask,
+    ).mask_invalid()
+    constants = {source_name: source}
+
+    y_layer = l.layer(x, training=False, constants=constants)
+
+    # Delay the input by max_future_horizon, and pad the constants at the end so
+    # we can process the entire sequence.
+    x = x.pad_time(max_future_horizon, 0, valid=False)
+    constants = {
+        source_name: source.pad_time(0, max_future_horizon, valid=False)
+    }
+
+    y_step, _, _ = utils.step_by_step_static(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        with_emits=False,
+        stream_constants=True,
+    )
+
+    self.assertSequencesClose(
+        y_layer.mask_invalid(), y_step[:, max_future_horizon:].mask_invalid()
+    )
+
+  def test_query_key_value_network_supports_step(self):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 1, 3)
+    source = test_utils.random_sequence(2, 1, 5)
+    constants = {'source': source}
+    l = attention.StreamingDotProductAttention.Config(
+        'source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=position.AddTimingSignal.Config(),
+        key_network=position.AddTimingSignal.Config(),
+        value_network=position.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    self.assertTrue(l.supports_step)
+
+    l = attention.StreamingDotProductAttention.Config(
+        'source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=test_utils.NonSteppableLayer.Config(),
+        key_network=position.AddTimingSignal.Config(),
+        value_network=position.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    self.assertFalse(l.supports_step)
+
+    l = attention.StreamingDotProductAttention.Config(
+        'source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=position.AddTimingSignal.Config(),
+        key_network=test_utils.NonSteppableLayer.Config(),
+        value_network=position.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    # The key/value network must be steppable for streaming.
+    self.assertFalse(l.supports_step)
+
+    l = attention.StreamingDotProductAttention.Config(
+        'source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=position.AddTimingSignal.Config(),
+        key_network=position.AddTimingSignal.Config(),
+        value_network=test_utils.NonSteppableLayer.Config(),
+    ).make()
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    # The key/value network must be steppable for streaming.
+    self.assertFalse(l.supports_step)
+
+  @parameterized.product(
+      (
+          {
+              'input_projection': attention.SeparateQueryKeyValueProjection(),
+              'num_heads': 3,
+          },
+          {
+              'input_projection': attention.QueryAndKeyValueProjection(),
+              'num_heads': 3,
+          },
+          {
+              'input_projection': attention.QueryAndSharedKeyValueProjection(),
+              'num_heads': 3,
+          },
+      ),
+      use_attention_sink=(False, True),
+  )
+  def test_projection_config(
+      self,
+      input_projection: (
+          attention.SeparateQueryKeyValueProjection
+          | attention.QueryAndKeyValueProjection
+          | attention.QueryAndSharedKeyValueProjection
+      ),
+      num_heads: int,
+      use_attention_sink: bool,
+  ):
+    key = jax.random.PRNGKey(1234)
+    batch_size, time, channels, source_channels = 2, 11, 3, 2
+    source_name = 'source'
+    units_per_head = 5
+    max_past_horizon = 3
+    max_future_horizon = 3
+    num_sink_embeddings = 2 if use_attention_sink else 0
+    l = attention.StreamingDotProductAttention.Config(
+        source_name,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        num_heads=num_heads,
+        input_projection=input_projection,
+        per_dim_scale=True,
+        name='streaming_dot_product_attention',
+        num_sink_embeddings=num_sink_embeddings,
+    ).make()
+
+    x = test_utils.random_sequence(batch_size, time, channels)
+    # Re-use x's random mask.
+    source = types.Sequence(
+        test_utils.random_sequence(
+            batch_size, time, source_channels, random_lengths=False
+        ).values,
+        x.mask,
+    ).mask_invalid()
+    constants = {source_name: source}
+
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'streaming_dot_product_attention')
+
+    assert_param_dtypes_inits_shapes(
+        l,
+        x,
+        constants=constants,
+        num_sink_embeddings=num_sink_embeddings,
+        input_projection=l.config.input_projection,
+    )
+
+    self.assertEqual(
+        l.get_output_shape_for_sequence(x, constants=constants),
+        (num_heads, units_per_head),
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=True,
+        pad_constants=True,
+    )
+
+  @parameterized.parameters(
+      # max_past_horizon > 0, max_future_horizon == 0
+      (1, 2, 3, 0),
+      (3, 5, 3, 0),
+      # max_past_horizon > 0, max_future_horizon > 0
+      (3, 5, 3, 2),
+      (3, 5, 3, 5),
+  )
+  def test_use_kv_cache_ringbuffer(
+      self,
+      num_heads,
+      units_per_head,
+      max_past_horizon,
+      max_future_horizon,
+  ):
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_channels = 2, 2
+    source_name = 'source'
+    l = attention.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        per_dim_scale=True,
+        precision=jax.lax.Precision.HIGHEST,
+        name='streaming_dot_product_attention',
+        use_kv_cache_ringbuffer=True,
+    ).make()
+
+    source = test_utils.random_sequence(batch_size, 1, source_channels)
+    constants = {source_name: source}
+    channels = 3
+    x = test_utils.random_sequence(batch_size, 1, channels)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'streaming_dot_product_attention')
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.input_latency, max_future_horizon)
+
+    assert_param_dtypes_inits_shapes(
+        l,
+        x,
+        constants=constants,
+        num_sink_embeddings=0,
+        input_projection=l.config.input_projection,
+    )
+
+    channels = 3
+    for time in range(21, 23):
+      # Source and x must be the same length.
+      x = test_utils.random_sequence(
+          batch_size, time, channels, low_length=time // 2
+      )
+      # Re-use x's random mask.
+      source = types.Sequence(
+          test_utils.random_sequence(
+              batch_size, time, source_channels, random_lengths=False
+          ).values,
+          x.mask,
+      ).mask_invalid()
+      constants = {source_name: source}
+      self.assertEqual(
+          l.get_output_shape_for_sequence(x, constants=constants),
+          (num_heads, units_per_head),
+      )
+      self.verify_contract(
+          l,
+          x,
+          training=False,
+          constants=constants,
+          stream_constants=True,
+          pad_constants=True,
+          test_2x_step=False,
+          grad_atol=1e-5,
+          grad_rtol=1e-5,
+      )
+
+
 class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
