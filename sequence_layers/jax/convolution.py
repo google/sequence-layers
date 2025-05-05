@@ -453,7 +453,7 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
         return 0
 
   @property
-  def output_latency(self) -> fractions.Fraction:
+  def output_latency(self) -> int:
     """Returns the output latency of this layer.
 
     Output latency is defined as the number of output timesteps before the
@@ -465,7 +465,7 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
         # requires a different output_latency for correct operations.
         # It only requires to wait for strides[0] - 1 samples, and the
         # output_ratio is also strides[0], which means the latency is 0.
-        return fractions.Fraction(0)
+        return 0
       case _:
         # Other cases are handled in the parent class.
         return super().output_latency

@@ -3395,7 +3395,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
     # When not using a query delay buffer, the layer has no input or output
     # latency.
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
 
     time, channels = 30, 3
     # Source and x must be the same length.

@@ -153,7 +153,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
         return 0
 
   @property
-  def output_latency(self) -> fractions.Fraction:
+  def output_latency(self) -> int:
     """Returns the output latency of this layer.
 
     Output latency is defined as the number of output timesteps before the
@@ -165,7 +165,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
         # requires a different output_latency for correct operations.
         # It only requires to wait for strides[0] - 1 samples, and the
         # output_ratio is also strides[0], which means the latency is 0.
-        return fractions.Fraction(0)
+        return 0
       case _:
         # Other cases are handled in the parent class.
         return super().output_latency
@@ -1338,16 +1338,16 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     return self.config.length
 
   @property
-  def output_latency(self) -> fractions.Fraction:
+  def output_latency(self) -> int:
     # The current definitions of input and output latency are very confusing.
     # Output latency is defined as the number of output timesteps before the
     # step-wise output of the layer matches its layer-wise output. Since delay
     # is added in both layer() and step(), the layer-wise and step-wise outputs
     # match immediately and therefore have 0 output latency.
     if self.config.delay_layer_output:
-      return fractions.Fraction(0)
+      return 0
     else:
-      return fractions.Fraction(self.config.length)
+      return self.config.length
 
   def setup(self) -> None:
     if self.config.length < 0:
@@ -1433,8 +1433,8 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     return 0
 
   @property
-  def output_latency(self) -> fractions.Fraction:
-    return fractions.Fraction(self.config.length)
+  def output_latency(self) -> int:
+    return self.config.length
 
   def setup(self) -> None:
     if self.config.length < 0:

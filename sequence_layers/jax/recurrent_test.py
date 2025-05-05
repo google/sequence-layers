@@ -45,7 +45,7 @@ class LSTMTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'lstm')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -89,7 +89,7 @@ class LSTMTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'lstm')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -180,7 +180,7 @@ class RGLRUTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'rglru')
 
     variables = flax.core.meta.unbox(l.variables)

@@ -384,9 +384,7 @@ class FrameTest(test_utils.SequenceLayerTest, parameterized.TestCase):
         # Unsupported defaults to zero.
         expected_input_latency = 0
     self.assertEqual(l.input_latency, expected_input_latency)
-    self.assertEqual(
-        int(l.output_latency), expected_input_latency // frame_step
-    )
+    self.assertEqual(l.output_latency, expected_input_latency // frame_step)
     self.assertEqual(l.name, 'frame')
     self.assertEqual(
         l.get_output_shape_for_sequence(x),
@@ -464,9 +462,7 @@ class STFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
         # Unsupported defaults to zero.
         expected_input_latency = 0
     self.assertEqual(l.input_latency, expected_input_latency)
-    self.assertEqual(
-        int(l.output_latency), expected_input_latency // frame_step
-    )
+    self.assertEqual(l.output_latency, expected_input_latency // frame_step)
     self.assertEqual(l.name, 'stft')
     self.assertEqual(l.get_output_shape_for_sequence(x), (fft_length // 2 + 1,))
     y = self.verify_contract(l, x, training=False)
@@ -860,7 +856,7 @@ class DelayTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     )
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, length)
-    self.assertEqual(int(l.output_latency), 0 if delay_layer_output else length)
+    self.assertEqual(l.output_latency, 0 if delay_layer_output else length)
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'delay')
@@ -887,7 +883,7 @@ class LookaheadTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     l = dsp.Lookahead.Config(length=length, name='lookahead').make().bind({})
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), length)
+    self.assertEqual(l.output_latency, length)
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'lookahead')

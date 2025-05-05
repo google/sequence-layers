@@ -691,8 +691,8 @@ class SequenceLayerTest(parameterized.TestCase):
 
     x_spec = x.channel_spec
     y_spec = l.get_output_spec(x_spec, constants=constants)
-    output_latency = int(l.output_latency)
-    input_latency = int(output_latency / l.output_ratio)
+    output_latency = l.output_latency
+    input_latency = l.input_latency
 
     def get_initial_state_fn(
         l: types.SequenceLayer, batch_size: int, constants: types.Constants

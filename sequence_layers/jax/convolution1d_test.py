@@ -13,6 +13,8 @@
 # limitations under the License.
 """Tests for 1D convolution layers."""
 
+import fractions
+
 import chex
 import flax
 import flax.linen as nn
@@ -22,7 +24,6 @@ import numpy as np
 from sequence_layers.jax import combinators
 from sequence_layers.jax import convolution
 from sequence_layers.jax import dsp
-from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
@@ -34,13 +35,12 @@ from google3.testing.pybase import parameterized
 class LatencyTest(test_utils.SequenceLayerTest):
 
   @parameterized.product(
-      kernel_size=[1, 2, 3, 4],
+      kernel_size=[1, 2, 3, 4, 7],
       stride=[1, 2, 3, 4],
-      dilation_rate=[1, 2],
-      padding=['causal', 'semicausal'],
+      padding=['causal', 'semicausal', 'reverse_causal'],
   )
-  def test_serial_latency_causal(
-      self, kernel_size: int, stride: int, dilation_rate: int, padding
+  def test_serial_downsample_delay(
+      self, kernel_size: int, stride: int, padding
   ):
     key = jax.random.PRNGKey(1234)
     l = combinators.Serial.Config([
@@ -48,7 +48,37 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
+            padding=padding,
+            name='conv1',
+        ),
+        dsp.Delay.Config(1, delay_layer_output=False),
+    ]).make()
+
+    x = test_utils.random_sequence(1, 64, 1, random_lengths=False)
+
+    l = self.init_and_bind_layer(key, l, x)
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        rtol=1e-6,
+        atol=1e-6,
+        grad_atol=1e-5,
+        grad_rtol=1e-5,
+    )
+
+  @parameterized.product(
+      kernel_size=[1, 2, 3, 4, 7],
+      stride=[1, 2, 3, 4],
+      padding=['causal', 'semicausal'],
+  )
+  def test_serial_latency_causal(self, kernel_size: int, stride: int, padding):
+    key = jax.random.PRNGKey(1234)
+    l = combinators.Serial.Config([
+        convolution.Conv1D.Config(
+            filters=1,
+            kernel_size=kernel_size,
+            strides=stride,
             padding=padding,
             name='conv1',
         ),
@@ -56,7 +86,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding=padding,
             name='conv2',
         ),
@@ -66,7 +95,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
 
     l = self.init_and_bind_layer(key, l, x)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
 
     self.verify_contract(
         l,
@@ -79,20 +108,18 @@ class LatencyTest(test_utils.SequenceLayerTest):
     )
 
   @parameterized.product(
-      kernel_size=[1, 2, 3, 4],
+      kernel_size=[1, 2, 3, 4, 7],
       stride=[1, 2, 3, 4],
-      dilation_rate=[1, 2],
   )
   def test_serial_latency_reverse_causal(
-      self, kernel_size: int, stride: int, dilation_rate: int
+      self,
+      kernel_size: int,
+      stride: int,
   ):
     key = jax.random.PRNGKey(1234)
 
-    input_latency = (
-        utils.convolution_effective_kernel_size(kernel_size, dilation_rate) - 1
-    )
+    input_latency = kernel_size - 1
     output_latency = input_latency // stride
-
     delay_amount = -output_latency % stride
 
     l = combinators.Serial.Config([
@@ -100,7 +127,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding='reverse_causal',
             use_bias=False,
             precision='highest',
@@ -111,7 +137,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding='reverse_causal',
             use_bias=False,
             precision='highest',
@@ -120,14 +145,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     ]).make()
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
-
     l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.input_latency, 2 * input_latency + delay_amount)
-    expected_output_latency = int(
-        ((input_latency / stride) + delay_amount + input_latency) / stride
-    )
-    self.assertEqual(int(l.output_latency), expected_output_latency)
-
     self.verify_contract(
         l,
         x,
@@ -139,38 +157,66 @@ class LatencyTest(test_utils.SequenceLayerTest):
     )
 
   @parameterized.product(
-      kernel_size=[1, 2, 3, 4],
+      kernel_size=[1, 2, 3, 4, 7],
       stride=[1, 2, 3, 4],
-      dilation_rate=[1, 2],
+      delays=[
+          (0, 0),
+          (1, 0),
+          (0, 1),
+          (2, 3),
+          (3, 2),
+      ],
   )
   def test_serial_latency_upsample_downsample(
-      self, kernel_size: int, stride: int, dilation_rate: int
+      self,
+      kernel_size: int,
+      stride: int,
+      delays: tuple[int, int],
   ):
     key = jax.random.PRNGKey(1234)
 
+    pre_delay, post_delay = delays
+    upsample_input_latency = 0
+    upsample_output_ratio = fractions.Fraction(stride, 1)
+    upsample_output_latency = upsample_input_latency * upsample_output_ratio
+    conv_output_ratio = fractions.Fraction(1, stride)
+
+    middle_delay = int(
+        -int((pre_delay * upsample_output_ratio + upsample_output_latency))
+        % (1 / conv_output_ratio)
+    )
     l = combinators.Serial.Config([
-        simple.Upsample1D.Config(stride),
+        # Input/output latency is pre_delay.
+        dsp.Delay.Config(pre_delay, delay_layer_output=False),
+        # Input/output latency is 0.
+        convolution.Conv1DTranspose.Config(
+            filters=1,
+            kernel_size=kernel_size,
+            strides=stride,
+            padding='causal',
+            use_bias=False,
+            precision='highest',
+            name='conv1',
+        ),
+        # Input/output latency is middle_delay.
+        dsp.Delay.Config(middle_delay, delay_layer_output=False),
+        # Input latency is effective_kernel_size - 1.
+        # Output latency is input_latency // stride.
         convolution.Conv1D.Config(
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding='reverse_causal',
             use_bias=False,
             precision='highest',
             name='conv2',
         ),
+        # Input/output latency is post_delay.
+        dsp.Delay.Config(post_delay, delay_layer_output=False),
     ]).make()
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
-
     l = self.init_and_bind_layer(key, l, x)
-    expected_input_latency = (
-        utils.convolution_effective_kernel_size(kernel_size, dilation_rate) - 1
-    )
-    self.assertEqual(l.input_latency, expected_input_latency)
-    expected_output_latency = expected_input_latency // stride
-    self.assertEqual(int(l.output_latency), expected_output_latency)
 
     self.verify_contract(
         l,
@@ -183,20 +229,81 @@ class LatencyTest(test_utils.SequenceLayerTest):
     )
 
   @parameterized.product(
-      kernel_size=[1, 2, 3, 4],
+      kernel_size=[1, 2, 3, 4, 7],
       stride=[1, 2, 3, 4],
-      dilation_rate=[1, 2],
+      delays=[
+          (0, 0),
+          (1, 0),
+          (0, 1),
+          (2, 3),
+          (3, 2),
+      ],
   )
-  def test_serial_latency_mixed(
-      self, kernel_size: int, stride: int, dilation_rate: int
+  def test_serial_latency_downsample_upsample(
+      self, kernel_size: int, stride: int, delays: tuple[int, int]
   ):
     key = jax.random.PRNGKey(1234)
 
-    input_latency = (
-        utils.convolution_effective_kernel_size(kernel_size, dilation_rate) - 1
-    )
-    output_latency = input_latency // stride
+    pre_delay, post_delay = delays
+    conv_output_ratio = fractions.Fraction(1, stride)
 
+    # The additional delay on top of pre_delay required to achieve layer/step
+    # equivalence.
+    extra_pre_delay = int(-int(pre_delay) % (1 / conv_output_ratio))
+    middle_delay = 5
+
+    l = combinators.Serial.Config([
+        # Input/output latency is pre_delay.
+        dsp.Delay.Config(pre_delay, delay_layer_output=False),
+        dsp.Delay.Config(extra_pre_delay, delay_layer_output=False),
+        # Input latency is effective_kernel_size - 1.
+        # Output latency is input_latency // stride.
+        convolution.Conv1D.Config(
+            filters=1,
+            kernel_size=kernel_size,
+            strides=stride,
+            padding='reverse_causal',
+            use_bias=False,
+            precision='highest',
+            name='conv1',
+        ),
+        # Input/output latency is middle_delay.
+        dsp.Delay.Config(middle_delay, delay_layer_output=False),
+        # Input/output latency is 0.
+        convolution.Conv1DTranspose.Config(
+            filters=1,
+            kernel_size=kernel_size,
+            strides=stride,
+            padding='causal',
+            use_bias=False,
+            precision='highest',
+            name='conv2',
+        ),
+        # Input/output latency is post_delay.
+        dsp.Delay.Config(post_delay, delay_layer_output=False),
+    ]).make()
+
+    x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
+    l = self.init_and_bind_layer(key, l, x)
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+    )
+
+  @parameterized.product(
+      kernel_size=[1, 2, 3, 4, 5],
+      stride=[1, 2, 3, 4],
+  )
+  def test_serial_latency_mixed(
+      self,
+      kernel_size: int,
+      stride: int,
+  ):
+    key = jax.random.PRNGKey(1234)
+
+    input_latency = kernel_size - 1
+    output_latency = input_latency // stride
     delay_amount = -output_latency % stride
 
     l = combinators.Serial.Config([
@@ -204,7 +311,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding='reverse_causal',
             use_bias=False,
             precision='highest',
@@ -215,7 +321,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            dilation_rate=dilation_rate,
             padding='reverse_causal',
             use_bias=False,
             precision='highest',
@@ -225,7 +330,6 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=1,
-            dilation_rate=dilation_rate,
             padding='causal',
             use_bias=False,
             precision='highest',
@@ -234,14 +338,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     ]).make()
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
-
     l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.input_latency, 2 * input_latency + delay_amount)
-    expected_output_latency = int(
-        ((input_latency / stride) + delay_amount + input_latency) / stride
-    )
-    self.assertEqual(int(l.output_latency), expected_output_latency)
-
     self.verify_contract(
         l,
         x,
@@ -252,7 +349,8 @@ class LatencyTest(test_utils.SequenceLayerTest):
         grad_atol=1e-5,
     )
 
-  def test_serial_usm(self):
+  @parameterized.product(take_every_n=[2, 3, 4])
+  def test_serial_usm(self, take_every_n: int):
     key = jax.random.PRNGKey(1234)
 
     frame_kernel_size = 513
@@ -262,16 +360,39 @@ class LatencyTest(test_utils.SequenceLayerTest):
 
     conv_kernel_size = 3
     conv_stride = 2
-    post_frame_delay = -frame_output_latency % conv_stride
+
     conv_dilation_rate = 1
-    conv_input_latency = (
+    conv1_input_latency = (
         utils.convolution_effective_kernel_size(
             conv_kernel_size, conv_dilation_rate
         )
         - 1
     )
-    conv_output_latency = conv_input_latency // conv_stride
-    post_conv_delay = -conv_output_latency % conv_stride
+    conv2_input_latency = conv1_input_latency
+    conv1_output_latency = conv1_input_latency // conv_stride
+    conv2_output_latency = conv2_input_latency // conv_stride
+    conv3_output_latency = 0
+
+    pre_conv1_accumulated_latency = frame_output_latency
+    pre_conv1_delay = -pre_conv1_accumulated_latency % conv_stride
+
+    assert (pre_conv1_accumulated_latency + pre_conv1_delay) % conv_stride == 0
+    pre_conv2_accumulated_latency = (
+        pre_conv1_accumulated_latency + pre_conv1_delay
+    ) // conv_stride + conv1_output_latency
+    pre_conv2_delay = -pre_conv2_accumulated_latency % conv_stride
+
+    assert (pre_conv2_accumulated_latency + pre_conv2_delay) % conv_stride == 0
+    pre_conv3_accumulated_latency = (
+        pre_conv2_accumulated_latency + pre_conv2_delay
+    ) // conv_stride + conv2_output_latency
+    pre_conv3_delay = -pre_conv3_accumulated_latency % 1
+
+    assert (pre_conv3_accumulated_latency + pre_conv3_delay) % 1 == 0
+    pre_conv4_accumulated_latency = (
+        pre_conv3_accumulated_latency + pre_conv3_delay
+    ) // 1 + conv3_output_latency
+    pre_conv4_delay = -pre_conv4_accumulated_latency % take_every_n
 
     l = combinators.Serial.Config([
         convolution.Conv1D.Config(
@@ -284,7 +405,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             precision='highest',
             name='frame',
         ),
-        dsp.Delay.Config(post_frame_delay, delay_layer_output=False),
+        dsp.Delay.Config(pre_conv1_delay, delay_layer_output=False),
         convolution.Conv1D.Config(
             filters=1,
             kernel_size=conv_kernel_size,
@@ -295,7 +416,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             precision='highest',
             name='conv1',
         ),
-        dsp.Delay.Config(post_conv_delay, delay_layer_output=False),
+        dsp.Delay.Config(pre_conv2_delay, delay_layer_output=False),
         convolution.Conv1D.Config(
             filters=1,
             kernel_size=conv_kernel_size,
@@ -306,6 +427,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             precision='highest',
             name='conv2',
         ),
+        dsp.Delay.Config(pre_conv3_delay, delay_layer_output=False),
         convolution.Conv1D.Config(
             filters=1,
             kernel_size=conv_kernel_size,
@@ -316,35 +438,23 @@ class LatencyTest(test_utils.SequenceLayerTest):
             precision='highest',
             name='conv3',
         ),
+        # A reducer-like convolution.
+        dsp.Delay.Config(pre_conv4_delay, delay_layer_output=False),
+        convolution.Conv1D.Config(
+            filters=1,
+            kernel_size=1,
+            strides=take_every_n,
+            dilation_rate=1,
+            use_bias=False,
+            precision='highest',
+            padding='causal',
+            name='conv4',
+        ),
     ]).make()
 
     x = test_utils.random_sequence(1, 16000, 1, random_lengths=False)
 
     l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(
-        l.input_latency,
-        frame_input_latency
-        + post_frame_delay
-        + 2 * conv_input_latency
-        + post_conv_delay,
-    )
-    expected_output_latency = int(
-        (
-            (
-                (
-                    frame_input_latency / frame_stride
-                    + post_frame_delay
-                    + conv_input_latency
-                )
-                / conv_stride
-            )
-            + post_conv_delay
-            + conv_input_latency
-        )
-        / conv_stride
-    )
-    self.assertEqual(int(l.output_latency), expected_output_latency)
-
     self.verify_contract(
         l,
         x,
@@ -429,7 +539,7 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         l.input_latency,
         expected_input_latency,
     )
-    self.assertEqual(int(l.output_latency), expected_input_latency // stride)
+    self.assertEqual(l.output_latency, expected_input_latency // stride)
 
     batch_size, channels = 2, 3
 
@@ -606,7 +716,7 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         l.input_latency,
         expected_input_latency,
     )
-    self.assertEqual(int(l.output_latency), expected_input_latency // stride)
+    self.assertEqual(l.output_latency, expected_input_latency // stride)
 
     batch_size, channels = 2, 3
     x = test_utils.random_sequence(batch_size, 1, channels)
