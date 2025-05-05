@@ -62,21 +62,21 @@ class SerialTest(test_utils.SequenceLayerTest):
                 filters=1,
                 kernel_size=2,
                 strides=2,
-                padding='causal_valid',
+                padding='causal',
                 name='conv1',
             ),
             convolution.Conv1D.Config(
                 filters=1,
                 kernel_size=2,
                 strides=2,
-                padding='reverse_causal_valid',
+                padding='causal',
                 name='conv2',
             ),
             convolution.Conv1D.Config(
                 filters=1,
                 kernel_size=2,
                 strides=2,
-                padding='causal_valid',
+                padding='causal',
                 name='conv3',
             ),
         ],
@@ -90,8 +90,8 @@ class SerialTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 8)
     self.assertEqual(1 / l.output_ratio, 8)
     self.assertTrue(l.supports_step)
-    self.assertEqual(l.input_latency, 1)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.input_latency, 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'serial')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -130,19 +130,19 @@ class SerialTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=2,
             strides=2,
-            padding='causal_valid',
+            padding='causal',
         ).make()
         self.conv2 = convolution.Conv1D.Config(
             filters=1,
             kernel_size=2,
             strides=2,
-            padding='reverse_causal_valid',
+            padding='causal',
         ).make()
         self.conv3 = convolution.Conv1D.Config(
             filters=1,
             kernel_size=2,
             strides=2,
-            padding='causal_valid',
+            padding='causal',
         ).make()
         self.layers = [self.conv1, self.conv2, self.conv3]
 
@@ -154,8 +154,8 @@ class SerialTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 8)
     self.assertEqual(1 / l.output_ratio, 8)
     self.assertTrue(l.supports_step)
-    self.assertEqual(l.input_latency, 1)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.input_latency, 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'serial')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -278,14 +278,14 @@ class SerialTest(test_utils.SequenceLayerTest):
                 filters=1,
                 kernel_size=2,
                 strides=2,
-                padding='causal_valid',
+                padding='causal',
                 name='conv1',
             ),
             convolution.Conv1D.Config(
                 filters=1,
                 kernel_size=2,
                 strides=2,
-                padding='reverse_causal_valid',
+                padding='causal',
                 name='conv2',
             ),
             combinators.Serial.Config(
@@ -294,7 +294,7 @@ class SerialTest(test_utils.SequenceLayerTest):
                         filters=1,
                         kernel_size=2,
                         strides=2,
-                        padding='causal_valid',
+                        padding='causal',
                         name='conv3',
                     ),
                     dense.Dense.Config(1, name='dense'),
@@ -312,8 +312,8 @@ class SerialTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 8)
     self.assertEqual(1 / l.output_ratio, 8)
     self.assertTrue(l.supports_step)
-    self.assertEqual(l.input_latency, 1)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.input_latency, 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'serial')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -646,7 +646,7 @@ class ParallelTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'parallel')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -738,7 +738,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.get_output_shape(x.channel_shape), (1,))
     self.verify_contract(l, x, training=False)
     self.assertEmpty(jax.tree_util.tree_leaves(l.variables))
@@ -789,7 +789,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
     self.assertEqual(1 / l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'residual')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -918,7 +918,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
     ).make()
     l = self.init_and_bind_layer(key, l, x)
     self.assertEqual(l.input_latency, 4)
-    self.assertEqual(int(l.output_latency), 1)
+    self.assertEqual(l.output_latency, 1)
 
     l = combinators.Residual.Config(
         [
@@ -1075,7 +1075,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'residual')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -1178,7 +1178,7 @@ class BidirectionalTest(test_utils.SequenceLayerTest):
     self.assertEqual(1 / l.output_ratio, 1)
     self.assertFalse(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'bidirectional')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -1348,7 +1348,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1409,7 +1409,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 4)
-    self.assertEqual(int(l.output_latency), 4)
+    self.assertEqual(l.output_latency, 4)
     self.assertEqual(l.name, 'repeat')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1475,7 +1475,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1542,7 +1542,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1677,7 +1677,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat')
     self.assertEmpty(l.variables)
 
@@ -1739,7 +1739,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat_outer')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1845,7 +1845,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'repeat')
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1918,7 +1918,7 @@ class CheckpointGradientTest(test_utils.SequenceLayerTest):
 
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 4)
-    self.assertEqual(int(l.output_latency), 2)
+    self.assertEqual(l.output_latency, 2)
     self.assertEqual(l.block_size, 2)
     self.assertEqual(l.output_ratio, 1 / 2)
 
@@ -2082,7 +2082,7 @@ class ParallelChannelsTest(
     self.assertEqual(l.supports_step, padding == 'reverse_causal')
     if padding == 'reverse_causal':
       self.assertEqual(l.input_latency, 2)
-      self.assertEqual(int(l.output_latency), 1)
+      self.assertEqual(l.output_latency, 1)
     self.assertEqual(l.name, 'parallel_channels')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
@@ -2132,7 +2132,7 @@ class ParallelChannelsTest(
     self.assertEqual(l.output_ratio, 1)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
     self.assertEqual(l.name, 'parallel_channels')
 
     chex.assert_trees_all_equal_shapes_and_dtypes(

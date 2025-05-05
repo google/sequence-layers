@@ -155,11 +155,8 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
         if padding in ('reverse_causal_valid', 'reverse_causal')
         else 0
     )
-    self.assertEqual(
-        l.input_latency,
-        expected_input_latency,
-    )
-    self.assertEqual(int(l.output_latency), expected_input_latency // stride)
+    self.assertEqual(l.input_latency, expected_input_latency)
+    self.assertEqual(l.output_latency, expected_input_latency // stride)
 
     batch_size = 2
 
@@ -394,11 +391,8 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         if time_padding in ('reverse_causal_valid', 'reverse_causal')
         else 0
     )
-    self.assertEqual(
-        l.input_latency,
-        expected_input_latency,
-    )
-    self.assertEqual(int(l.output_latency), expected_input_latency // stride)
+    self.assertEqual(l.input_latency, expected_input_latency)
+    self.assertEqual(l.output_latency, expected_input_latency // stride)
 
     batch_size = 2
 

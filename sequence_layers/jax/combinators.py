@@ -16,7 +16,7 @@
 import dataclasses
 import fractions
 import functools
-from typing import Any, Callable, Sequence as TypingSequence
+from typing import Callable, Sequence as TypingSequence, TypeVar
 
 import flax
 import flax.linen as nn
@@ -50,6 +50,7 @@ __all__ = (
 )
 
 
+T = TypeVar('T')
 SequenceLayerConfigOrList = (
     types.SequenceLayerConfig | TypingSequence[types.SequenceLayerConfig]
 )
@@ -80,8 +81,14 @@ class WrapperMixin:
     return self.child_layer.input_latency
 
   @property
-  def output_latency(self) -> fractions.Fraction:
+  def output_latency(self) -> int:
     return self.child_layer.output_latency
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    return self.child_layer.get_accumulated_input_latency(input_latency)
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    return self.child_layer.get_accumulated_output_latency(output_latency)
 
   @property
   def block_size(self) -> int:
@@ -167,6 +174,8 @@ class SerialCombinatorMixin:
   layers: tuple[types.SequenceLayer, ...]
   # Provided by nn.Module.path.
   path: tuple[str, ...]
+  # Provided by nn.Module.name.
+  name: str
 
   @property
   def supports_step(self) -> bool:
@@ -174,42 +183,26 @@ class SerialCombinatorMixin:
 
   @property
   def input_latency(self) -> int:
-    """Latency of a serial is a sum of the child latencies."""
-    return sum(child_layer.input_latency for child_layer in self.layers)
+    return self.get_accumulated_input_latency(0)
 
   @property
-  def output_latency(self) -> fractions.Fraction:
-    """Accumulates output latencies for layers, accounting for output ratios."""
-    output_latency = fractions.Fraction(0)
-    for child_layer in self.layers:
-      output_latency = (
-          output_latency * child_layer.output_ratio + child_layer.output_latency
-      )
-    return output_latency
+  def output_latency(self) -> int:
+    return self.get_accumulated_output_latency(0)
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    return utils.serial_input_latency(self.layers, input_latency)
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    return utils.serial_output_latency(self.layers, output_latency)
 
   @property
   def block_size(self) -> int:
     """The block size of the layer."""
-    block_size = fractions.Fraction(1)
-    output_ratio = fractions.Fraction(1)
-
-    for child_layer in self.layers:
-      layer_output_ratio = child_layer.output_ratio
-      layer_block_size = child_layer.block_size
-      block_size = (
-          np.lcm(block_size * output_ratio, layer_block_size) / output_ratio
-      )
-      output_ratio *= layer_output_ratio
-
-    assert block_size.denominator == 1
-    return block_size.numerator
+    return utils.serial_block_size(self.layers)
 
   @property
   def output_ratio(self) -> fractions.Fraction:
-    output_ratio = fractions.Fraction(1)
-    for child_layer in self.layers:
-      output_ratio *= child_layer.output_ratio
-    return output_ratio
+    return utils.serial_output_ratio(self.layers)
 
   def get_initial_state(
       self,
@@ -393,15 +386,28 @@ class Parallel(types.Emitting):
 
     if not self.layers:
       self._output_ratio = fractions.Fraction(1)
-    else:
-      self._output_ratio = self.layers[0].output_ratio
-      for child_layer in self.layers:
-        if child_layer.output_ratio != self._output_ratio:
-          raise ValueError(
-              'Output ratios must be equal for all layers:'
-              f' {self._output_ratio} != {child_layer.output_ratio} for'
-              f' {child_layer}'
-          )
+      return
+
+    first, *rest = self.layers
+    self._output_ratio = first.output_ratio
+    for child_layer in rest:
+      if child_layer.output_ratio != self._output_ratio:
+        raise ValueError(
+            'Output ratios must be equal for all layers:'
+            f' {self._output_ratio} != {child_layer.output_ratio} for'
+            f' {child_layer}'
+        )
+
+    input_latency = first.input_latency
+    for child_layer in rest:
+      if (child_input_latency := child_layer.input_latency) != input_latency:
+        raise ValueError(
+            f'{self.name}: Parallel layers must have the same'
+            f' input latency. Child layer {child_layer.name} has'
+            f' input_latency={child_input_latency} which is not equal to the'
+            " first layer's input latency"
+            f' ({input_latency=}). ({self.layers=}'
+        )
 
   @property
   def supports_step(self) -> bool:
@@ -409,10 +415,46 @@ class Parallel(types.Emitting):
 
   @property
   def input_latency(self) -> int:
-    """Latency of a parallel is the maximum of the child latencies."""
+    return self.get_accumulated_input_latency(0)
+
+  @property
+  def output_latency(self) -> int:
+    return self.get_accumulated_output_latency(0)
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    """Latency of a parallel is the same for all layers."""
     if not self.layers:
-      return 0
-    return max(child_layer.input_latency for child_layer in self.layers)
+      return input_latency
+
+    child_latencies = [
+        layer.get_accumulated_input_latency(input_latency)
+        for layer in self.layers
+    ]
+
+    if len(set(child_latencies)) > 1:
+      raise ValueError(
+          f'{self.name}: Parallel layers must have the same accumulated input'
+          f' latency. Got: {child_latencies} for {input_latency=}.'
+      )
+
+    return child_latencies[0]
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    """Latency of a parallel is the same for all layers."""
+    if not self.layers:
+      return output_latency
+
+    child_latencies = [
+        layer.get_accumulated_output_latency(output_latency)
+        for layer in self.layers
+    ]
+
+    if len(set(child_latencies)) > 1:
+      raise ValueError(
+          f'{self.name}: Parallel layers must have the same accumulated output'
+          f' latency. Got: {child_latencies} for {output_latency=}.'
+      )
+    return child_latencies[0]
 
   @property
   def block_size(self) -> int:
@@ -758,6 +800,40 @@ class Residual(SerialCombinatorMixin, types.Emitting):
     return super().supports_step and self.shortcut_layer.supports_step
 
   @property
+  def input_latency(self) -> int:
+    return self.get_accumulated_input_latency(0)
+
+  @property
+  def output_latency(self) -> int:
+    return self.get_accumulated_output_latency(0)
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    latency = super().get_accumulated_input_latency(input_latency)
+    shortcut_latency = self.shortcut_layer.get_accumulated_input_latency(
+        input_latency
+    )
+    if latency != shortcut_latency:
+      raise ValueError(
+          'Residual layers and shortcut_layers must have the same input'
+          f' latency {latency} != {shortcut_latency}. ({self.layers=},'
+          f' {self.shortcut_layer=})'
+      )
+    return latency
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    latency = super().get_accumulated_output_latency(output_latency)
+    shortcut_latency = self.shortcut_layer.get_accumulated_output_latency(
+        output_latency
+    )
+    if latency != shortcut_latency:
+      raise ValueError(
+          'Residual layers and shortcut_layers must have the same output'
+          f' latency {latency} != {shortcut_latency}. ({self.layers=},'
+          f' {self.shortcut_layer=})'
+      )
+    return latency
+
+  @property
   def block_size(self) -> int:
     if self.shortcut_layer:
       return int(np.lcm(super().block_size, self.shortcut_layer.block_size))
@@ -904,8 +980,8 @@ class Repeat(types.Emitting):
     self.child_layer = self.config.layer.make()
 
   def _get_child_property(
-      self, property_fn: Callable[[types.SequenceLayer], Any]
-  ) -> list[Any]:
+      self, property_fn: Callable[[types.SequenceLayer], T]
+  ) -> T:
     results = []
 
     def scan_fn(
@@ -938,25 +1014,101 @@ class Repeat(types.Emitting):
 
     # No inputs or outputs.
     repeat(self.child_layer, (), ())
-
-    return results
+    if len(set(results)) != 1:
+      raise ValueError(
+          'Repeat._get_child_property expected all results to be equal:'
+          f' {results=}'
+      )
+    return results[0]
 
   @property
   def supports_step(self) -> bool:
-    return all(self._get_child_property(lambda l: l.supports_step))
+    return self._get_child_property(lambda l: l.supports_step)
 
   @property
   def input_latency(self) -> int:
-    """Latency increases by child_layer.input_latency for each repetition."""
-    return self.child_layer.input_latency * self.config.num_repeats
+    return self.get_accumulated_input_latency(0)
+
+  @property
+  def output_latency(self) -> int:
+    return self.get_accumulated_output_latency(0)
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    result = [input_latency]
+
+    def scan_fn(
+        child_layer: types.SequenceLayer,
+        scan_carry,
+        scan_input,
+    ):
+      result[0] = child_layer.get_accumulated_input_latency(result[0])
+      return scan_carry, scan_input
+
+    repeat = nn.scan(
+        scan_fn,
+        variable_axes={True: 0},  # Slice all variables on axis 0.
+        variable_broadcast=False,
+        in_axes=0,  # No input.
+        out_axes=0,  # No output.
+        split_rngs={
+            'params': self.is_initializing(),
+            nn.DenyList(('params',)): True,
+        },
+        length=self.config.num_repeats,
+        metadata_params={
+            # For params we replicate along this scan-over-layers axis.
+            meta.MESH_AXIS: None,
+            # For optimizers mark this axis in params as 'independent'.
+            meta.AXIS_TYPE: meta.AxisType.STACKED,
+        },
+    )
+
+    repeat(self.child_layer, (), ())
+    input_latency = result[0]
+    return input_latency
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    result = [output_latency]
+
+    def scan_fn(
+        child_layer: types.SequenceLayer,
+        scan_carry,
+        scan_input,
+    ):
+      result[0] = child_layer.get_accumulated_output_latency(result[0])
+      return scan_carry, scan_input
+
+    repeat = nn.scan(
+        scan_fn,
+        variable_axes={True: 0},  # Slice all variables on axis 0.
+        variable_broadcast=False,
+        in_axes=0,  # No input.
+        out_axes=0,  # No output.
+        split_rngs={
+            'params': self.is_initializing(),
+            nn.DenyList(('params',)): True,
+        },
+        length=self.config.num_repeats,
+        metadata_params={
+            # For params we replicate along this scan-over-layers axis.
+            meta.MESH_AXIS: None,
+            # For optimizers mark this axis in params as 'independent'.
+            meta.AXIS_TYPE: meta.AxisType.STACKED,
+        },
+    )
+
+    repeat(self.child_layer, (), ())
+    output_latency = result[0]
+    return output_latency
 
   @property
   def block_size(self) -> int:
     """The block size of the layer."""
     block_size = fractions.Fraction(1)
     output_ratio = fractions.Fraction(1)
-    layer_output_ratio = self.child_layer.output_ratio
-    layer_block_size = self.child_layer.block_size
+
+    layer_output_ratio = self._get_child_property(lambda l: l.output_ratio)
+    layer_block_size = self._get_child_property(lambda l: l.block_size)
 
     # TODO(rryan): Clean up logic.
     for _ in range(self.config.num_repeats):
@@ -972,7 +1124,7 @@ class Repeat(types.Emitting):
   def output_ratio(self) -> fractions.Fraction:
     output_ratio = fractions.Fraction(1)
     # TODO(rryan): Clean up logic.
-    layer_output_ratio = self.child_layer.output_ratio
+    layer_output_ratio = self._get_child_property(lambda l: l.output_ratio)
     for _ in range(self.config.num_repeats):
       output_ratio *= layer_output_ratio
     return output_ratio
@@ -999,7 +1151,7 @@ class Repeat(types.Emitting):
     del input_spec
     del constants
 
-    child_output_ratio = self._get_child_property(lambda l: l.output_ratio)[-1]
+    child_output_ratio = self._get_child_property(lambda l: l.output_ratio)
     if child_output_ratio != 1:
       raise ValueError(
           f'Repeat layer must have output ratio of 1: {child_output_ratio=}.'

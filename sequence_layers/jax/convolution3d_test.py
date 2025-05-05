@@ -115,7 +115,7 @@ class Conv3DTest(test_utils.SequenceLayerTest):
         l.input_latency,
         expected_input_latency,
     )
-    self.assertEqual(int(l.output_latency), expected_input_latency // strides)
+    self.assertEqual(l.output_latency, expected_input_latency // strides)
 
     batch_size, spatial1, spatial2, channels = 2, 7, 11, 3
     x = test_utils.random_sequence(batch_size, 1, spatial1, spatial2, channels)

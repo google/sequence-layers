@@ -18,6 +18,7 @@ import dataclasses
 import enum
 import fractions
 import functools
+import math
 import typing
 from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Self, Sequence as TypingSequence, TypeVar
 
@@ -723,11 +724,12 @@ class Steppable(metaclass=abc.ABCMeta):
   and step-wise output:
 
   ```
-  y_layer = l.layer(x, ...)
+  y_layer = l.layer(x, training=training)
 
   # Pad x with input_latency timesteps to process the entire sequence:
   x = x.pad_time(0, l.input_latency, valid=False)
-  y_step = utils.step_by_step_dynamic(l, x, ...)
+
+  y_step, _, _ = utils.step_by_step_dynamic(l, x, training=training)
   ```
 
   The step-wise output is equivalent to the layer-wise output after dropping the
@@ -737,6 +739,8 @@ class Steppable(metaclass=abc.ABCMeta):
   y_layer == y_step[:, l.output_latency:]
   ```
   """
+
+  path: str  # Provided by nn.Module.
 
   @property
   def block_size(self) -> int:
@@ -770,13 +774,36 @@ class Steppable(metaclass=abc.ABCMeta):
     return 0
 
   @property
-  def output_latency(self) -> fractions.Fraction:
+  def output_latency(self) -> int:
     """Returns the output latency of this layer.
 
     Output latency is defined as the number of output timesteps before the
     step-wise output of the layer matches its layer-wise output.
     """
-    return self.input_latency * self.output_ratio
+    # Layers can only produce discrete delays, so truncate the output latency
+    # to integer here.
+    return int(self.input_latency * self.output_ratio)
+
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    """Returns the accumulated input latency of this layer."""
+    return math.ceil(input_latency / self.output_ratio) + self.input_latency
+
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    """Returns the accumulated output latency of this layer."""
+    output_ratio = self.output_ratio
+    if required_delay := -output_latency % (1 / output_ratio):
+      path = '/'.join(self.path)
+      raise ValueError(
+          f'Input to {self.__class__.__name__}(path={path!r}) has a step-wise'
+          f' incoming {output_latency=} which is not divisible'
+          f" by the layer's {output_ratio=}. Insert a delay of"
+          f' -output_latency % (1/output_ratio)={required_delay} before the'
+          ' layer to compensate.'
+      )
+
+    # After the above check, we know the accumulated output latency is divisible
+    # by the output ratio.
+    return int(output_latency * output_ratio) + self.output_latency
 
   @abc.abstractmethod
   def layer(

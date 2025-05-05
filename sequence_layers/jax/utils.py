@@ -1503,15 +1503,81 @@ def ones_matrix_band_part(
   return band
 
 
-def get_output_latency(layer: types.SequenceLayerConfig) -> fractions.Fraction:
+def get_input_latency(
+    config: types.SequenceLayerConfig, accumulated_input_latency: int = 0
+) -> int:
+  """Returns the input latency of the provided SequenceLayerConfig."""
+
+  def fn():
+    layer = config.make()
+
+    def init_fn(layer: types.SequenceLayer):
+      return layer.get_accumulated_input_latency(accumulated_input_latency)
+
+    result, _ = layer.init_with_output(jax.random.PRNGKey(0), method=init_fn)
+    return jnp.zeros((result,))
+
+  (result,) = jax.eval_shape(fn).shape
+  return result
+
+
+def get_output_latency(
+    config: types.SequenceLayerConfig, accumulated_output_latency: int = 0
+) -> int:
   """Returns the output latency of the provided SequenceLayerConfig."""
-  layer = layer.make()
 
-  def init_fn(layer: types.SequenceLayer):
-    return layer.output_latency
+  def fn():
+    layer = config.make()
 
-  output, _ = layer.init_with_output(jax.random.PRNGKey(0), method=init_fn)
-  return output
+    def init_fn(layer: types.SequenceLayer):
+      return layer.get_accumulated_output_latency(accumulated_output_latency)
+
+    result, _ = layer.init_with_output(jax.random.PRNGKey(0), method=init_fn)
+    return jnp.zeros((result,))
+
+  (result,) = jax.eval_shape(fn).shape
+  return result
+
+
+def get_required_stepwise_delay(
+    output_ratio: fractions.Fraction, input_latency: int
+) -> int:
+  """Returns the delay required so input_latency is divisible by 1/output_ratio.
+
+  b/372530075 - When combining upsampling and downsampling layers with latency,
+  layer/step equivalence requires inserting delays. This function returns the
+  correct amount of step-wise delay to insert.
+
+  Args:
+    output_ratio: The output ratio of the layer.
+    input_latency: The accumulated input latency of layers preceding the layer.
+
+  Returns:
+    The amount of delay required to ensure input latency is divisible by
+    output_ratio.
+  """
+  if 1 not in output_ratio.as_integer_ratio():
+    raise NotImplementedError(
+        'get_required_stepwise_delay expects integer upsampling or'
+        f' downsampling, got {output_ratio=}'
+    )
+  return int(-input_latency % (1 / output_ratio))
+
+
+def get_output_ratio(config: types.SequenceLayerConfig) -> fractions.Fraction:
+  """Returns the output ratio of the provided SequenceLayerConfig."""
+
+  def fn():
+    layer = config.make()
+
+    def init_fn(layer: types.SequenceLayer):
+      return layer.output_ratio
+
+    output, _ = layer.init_with_output(jax.random.PRNGKey(0), method=init_fn)
+    return jnp.zeros((output.numerator, output.denominator))
+
+  numerator, denominator = jax.eval_shape(fn).shape
+  return fractions.Fraction(numerator, denominator)
 
 
 @jt.typed
@@ -1758,3 +1824,49 @@ def get_step_with_emits_output_spec(
 
   step_fn = functools.partial(nn.jit(step_fn), layer)
   return jax.eval_shape(step_fn, x, state, constants)
+
+
+def serial_block_size(layers: TypingSequence[types.SequenceLayer]) -> int:
+  """Returns the block size of a serial combination of layers."""
+  block_size = fractions.Fraction(1)
+  output_ratio = fractions.Fraction(1)
+
+  for child_layer in layers:
+    layer_output_ratio = child_layer.output_ratio
+    layer_block_size = child_layer.block_size
+    block_size = (
+        np.lcm(block_size * output_ratio, layer_block_size) / output_ratio
+    )
+    assert block_size.denominator == 1
+    output_ratio *= layer_output_ratio
+
+  return block_size.numerator
+
+
+def serial_output_ratio(
+    layers: TypingSequence[types.SequenceLayer],
+) -> fractions.Fraction:
+  """Returns the output ratio of a serial combination of layers."""
+  output_ratio = fractions.Fraction(1)
+  for child_layer in layers:
+    output_ratio *= child_layer.output_ratio
+  return output_ratio
+
+
+def serial_input_latency(
+    layers: TypingSequence[types.SequenceLayer],
+    input_latency: int = 0,
+) -> int:
+  """Returns the input latency of a serial combination of layers."""
+  for child_layer in reversed(layers):
+    input_latency = child_layer.get_accumulated_input_latency(input_latency)
+  return input_latency
+
+
+def serial_output_latency(
+    layers: TypingSequence[types.SequenceLayer], output_latency: int = 0
+) -> int:
+  """Returns the output latency of a serial combination of layers."""
+  for child_layer in layers:
+    output_latency = child_layer.get_accumulated_output_latency(output_latency)
+  return output_latency
