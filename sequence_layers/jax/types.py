@@ -27,10 +27,10 @@ from flax import linen as nn
 from flax import struct
 import jax
 from jax import numpy as jnp
+import jaxtyping
 import numpy as np
+from sequence_layers.jax import typing as jt
 import typeguard
-
-from google3.learning.deepmind.jax.typing import typing as jt
 
 
 __all__ = (
@@ -297,13 +297,13 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     #   inherits from it.
     bad_types = (int, list, set, Sequence, MaskedSequence)
     if isinstance(self.values, bad_types) or isinstance(self.mask, bad_types):
-      raise jt.JaxTypeCheckError(
+      raise jaxtyping.TypeCheckError(
           'Sequence values and mask must be array-like. Got values:'
           f' {type(self.values)} and mask: {type(self.mask)}'
       )
 
     if isinstance(self.values, ShapeDType) != isinstance(self.mask, ShapeDType):
-      raise jt.JaxTypeCheckError(
+      raise jaxtyping.TypeCheckError(
           'Either Sequence values and mask must be either both ShapeDType or'
           f' neither of them. Got values: {type(self.values)} and mask:'
           f' {type(self.mask)}'
@@ -320,12 +320,12 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     # Allow JAX float0 types, which are used in jvp/linearization of booleans.
     # go/jax-integer-autodiff
     if self.mask.dtype not in (MASK_DTYPE, jax.dtypes.float0):
-      raise jt.JaxTypeCheckError(
+      raise jaxtyping.TypeCheckError(
           f'Sequence mask dtype ({self.mask.dtype}) is not {MASK_DTYPE}.'
       )
 
     if self.mask.ndim < 2 or self.values.ndim < 2:
-      raise jt.JaxTypeCheckError(
+      raise jaxtyping.TypeCheckError(
           f'Expected values rank ({self.values.ndim}) and mask rank'
           f' ({self.mask.ndim}) to be at least 2.'
       )
@@ -337,7 +337,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     # shape).
     # TODO(rryan): We may want to allow broadcastable shapes at some point.
     if self.values.shape[: self.mask.ndim] != self.mask.shape:
-      raise jt.JaxTypeCheckError(
+      raise jaxtyping.TypeCheckError(
           f'Sequence values shape ({self.values.shape}) does not match mask'
           f' shape ({self.mask.shape}).'
       )
@@ -1418,6 +1418,6 @@ class SequenceLayerConfig(metaclass=abc.ABCMeta):
     except TypeError as type_error:
       raise AttributeError(
           'Failed to copy SequenceLayerConfig. Make sure that the kwargs keys '
-          f'({list(kwargs.keys())}) you\'re passing to copy() are all fields '
+          f"({list(kwargs.keys())}) you're passing to copy() are all fields "
           f'in the SequenceLayerConfig being copied: {self}, {kwargs=}'
       ) from type_error

@@ -24,10 +24,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
-from google3.learning.deepmind.jax.typing import typing as jt
 from google3.learning.gemini.gemax.core.models import meta
+
 
 __all__ = (
     # go/keep-sorted start

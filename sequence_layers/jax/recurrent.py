@@ -25,9 +25,8 @@ from recurrentgemma._src.jax import complex_lib
 from recurrentgemma._src.jax import layers
 from recurrentgemma._src.jax import scan
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-
-from google3.learning.deepmind.jax.typing import typing as jt
 
 
 __all__ = (
