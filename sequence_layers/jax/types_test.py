@@ -21,12 +21,13 @@ import chex
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import jaxtyping
 import numpy as np
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 
-from google3.learning.deepmind.jax.typing import typing as jt
 from google3.testing.pybase import parameterized
 
 
@@ -38,6 +39,7 @@ class Foo(nn.Module):
 
 
 class SequenceTest(test_utils.SequenceLayerTest):
+  """Tests for the Sequence class."""
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""
@@ -61,17 +63,17 @@ class SequenceTest(test_utils.SequenceLayerTest):
     )
 
     # Disallowed: Only one ShapeDType.
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(jnp.zeros((2, 3, 5)), types.ShapeDType([], jnp.bool_))
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(
           types.ShapeDType([], jnp.float32), jnp.zeros((2, 3), dtype=jnp.bool_)
       )
 
-    # Disallowed: Values or mask less than rank 2.
-    with self.assertRaises(jt.JaxTypeCheckError):
+    # Disallowed: Values less than rank 2.
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(jnp.zeros((2, 3, 5)), jnp.zeros((3,), dtype=jnp.bool_))
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(
           jnp.zeros((2,)),
           jnp.zeros(
@@ -82,15 +84,17 @@ class SequenceTest(test_utils.SequenceLayerTest):
               dtype=jnp.bool_,
           ),
       )
-    with self.assertRaises(jt.JaxTypeCheckError):
+
+    # Disallowed: Mask less than rank 2.
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(jnp.zeros((3, 5)), jnp.zeros((3,), dtype=jnp.bool_))
 
     # Disallowed: Mask shape is not a prefix of values shape.
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(jnp.zeros((2, 4, 5)), jnp.zeros((2, 3), dtype=jnp.bool_))
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(np.zeros((2, 3, 5)), np.zeros((2, 4), dtype=jnp.bool_))
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(np.zeros((2, 3, 5)), np.zeros((1, 3), dtype=jnp.bool_))
 
   @parameterized.parameters(None, 0.0, -1.0)
@@ -289,20 +293,20 @@ class SequenceTest(test_utils.SequenceLayerTest):
     # Works with Sequence.
     f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.Sequence(
           jnp.zeros((2, 3, 5)), jnp.zeros((3, 3), dtype=jnp.bool_)
       )
       f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.Sequence(
           jnp.zeros((2, 3, 5)).astype(jnp.int32),
           jnp.zeros((2, 3), dtype=jnp.bool_),
       )
       f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.Sequence(jnp.zeros((2, 3)), jnp.zeros((2, 3), dtype=jnp.bool_))
       f(x)
 
@@ -319,20 +323,20 @@ class SequenceTest(test_utils.SequenceLayerTest):
 
     f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.MaskedSequence(
           jnp.zeros((2, 3, 5)), jnp.zeros((3, 3), dtype=jnp.bool_)
       )
       f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.MaskedSequence(
           jnp.zeros((2, 3, 5)).astype(jnp.int32),
           jnp.zeros((2, 3), dtype=jnp.bool_),
       )
       f(x)
 
-    with self.assertRaises(jt.JaxTypeCheckError):
+    with self.assertRaises(jaxtyping.TypeCheckError):
       x = types.MaskedSequence(
           jnp.zeros((2, 3)), jnp.zeros((2, 3), dtype=jnp.bool_)
       )

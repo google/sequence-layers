@@ -21,9 +21,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
-from google3.learning.deepmind.jax.typing import typing as jt
 from google3.learning.gemini.cms.core.models import labels
 
 __all__ = (
@@ -875,9 +875,7 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
 
         return grouped_values, (should_zero_gradient,)
 
-      grouped_values = _zero_gradient_helper(
-          forward_fn, grouped_x
-      )
+      grouped_values = _zero_gradient_helper(forward_fn, grouped_x)
 
       # Combine num_groups and group_size.
       values = jnp.reshape(grouped_values, x.values.shape)
