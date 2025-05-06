@@ -108,24 +108,25 @@ class AdditiveAttentionTest(
   def test_additive_attention_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    batch_size, source_time, source_channels = 2, 11, 2
-    source_name = 'source'
-    with tf.name_scope('test'):
-      l = sl.AdditiveAttention(source_name, num_heads=3, units_per_head=5)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      batch_size, source_time, source_channels = 2, 11, 2
+      source_name = 'source'
+      with tf.name_scope('test'):
+        l = sl.AdditiveAttention(source_name, num_heads=3, units_per_head=5)
 
-    source = self.random_sequence(
-        batch_size, source_time, source_channels, dtype=utils.compute_dtype()
-    )
-    constants = {source_name: source}
+      source = self.random_sequence(
+          batch_size, source_time, source_channels, dtype=utils.compute_dtype()
+      )
+      constants = {source_name: source}
 
-    x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True, constants=constants)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(
+          l, x, training=True, constants=constants, rtol=rtol, atol=atol
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class GmmAttentionTest(test_util.SequenceLayerTest, parameterized.TestCase):
@@ -227,30 +228,31 @@ class GmmAttentionTest(test_util.SequenceLayerTest, parameterized.TestCase):
   def test_gmm_attention_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    batch_size, source_time, source_channels = 2, 11, 2
-    source_name = 'source'
-    with tf.name_scope('test'):
-      l = sl.GmmAttention(
-          source_name,
-          num_heads=3,
-          units_per_head=5,
-          num_components=5,
-          monotonic=True,
+    with test_util.keras_precision_policy_scope(precision_policy):
+      batch_size, source_time, source_channels = 2, 11, 2
+      source_name = 'source'
+      with tf.name_scope('test'):
+        l = sl.GmmAttention(
+            source_name,
+            num_heads=3,
+            units_per_head=5,
+            num_components=5,
+            monotonic=True,
+        )
+
+      source = self.random_sequence(
+          batch_size, source_time, source_channels, dtype=utils.compute_dtype()
       )
+      constants = {source_name: source}
 
-    source = self.random_sequence(
-        batch_size, source_time, source_channels, dtype=utils.compute_dtype()
-    )
-    constants = {source_name: source}
-
-    x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True, constants=constants)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(
+          l, x, training=True, constants=constants, rtol=rtol, atol=atol
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class DotProductAttentionTest(
@@ -400,27 +402,25 @@ class DotProductAttentionTest(
   def test_dot_product_attention_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    batch_size, source_time, source_channels = 2, 11, 2
-    source_name = 'source'
-    with tf.name_scope('test'):
-      l = sl.DotProductAttention(source_name, num_heads=3, units_per_head=5)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      batch_size, source_time, source_channels = 2, 11, 2
+      source_name = 'source'
+      with tf.name_scope('test'):
+        l = sl.DotProductAttention(source_name, num_heads=3, units_per_head=5)
 
-    source = self.random_sequence(
-        batch_size, source_time, source_channels, dtype=utils.compute_dtype()
-    )
-    constants = {source_name: source}
+      source = self.random_sequence(
+          batch_size, source_time, source_channels, dtype=utils.compute_dtype()
+      )
+      constants = {source_name: source}
 
-    x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
-    rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
-    _, y_np = self.verify_contract(
-        l, x, training=True, constants=constants, rtol=rtol, atol=atol
-    )
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(
+          l, x, training=True, constants=constants, rtol=rtol, atol=atol
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
   @parameterized.parameters(
       itertools.product(
@@ -1037,20 +1037,18 @@ class DotProductSelfAttentionTest(
   def test_dot_product_self_attention_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    with tf.name_scope('test'):
-      l = sl.DotProductSelfAttention(
-          num_heads=3, units_per_head=5, max_horizon=12
-      )
+    with test_util.keras_precision_policy_scope(precision_policy):
+      with tf.name_scope('test'):
+        l = sl.DotProductSelfAttention(
+            num_heads=3, units_per_head=5, max_horizon=12
+        )
 
-    x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
-    rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
-    _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class LocationSensitiveAttentionTest(
@@ -1161,30 +1159,31 @@ class LocationSensitiveAttentionTest(
   ):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    batch_size, source_time, source_channels = 2, 11, 2
-    source_name = 'source'
-    with tf.name_scope('test'):
-      l = sl.LocationSensitiveAttention(
-          source_name,
-          num_heads=3,
-          units_per_head=5,
-          location_num_filters=3,
-          location_filter_size=7,
+    with test_util.keras_precision_policy_scope(precision_policy):
+      batch_size, source_time, source_channels = 2, 11, 2
+      source_name = 'source'
+      with tf.name_scope('test'):
+        l = sl.LocationSensitiveAttention(
+            source_name,
+            num_heads=3,
+            units_per_head=5,
+            location_num_filters=3,
+            location_filter_size=7,
+        )
+
+      source = self.random_sequence(
+          batch_size, source_time, source_channels, dtype=utils.compute_dtype()
       )
+      constants = {source_name: source}
 
-    source = self.random_sequence(
-        batch_size, source_time, source_channels, dtype=utils.compute_dtype()
-    )
-    constants = {source_name: source}
-
-    x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True, constants=constants)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(
+          l, x, training=True, constants=constants, rtol=rtol, atol=atol
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class DynamicConvolutionAttentionTest(
@@ -1247,35 +1246,33 @@ class DynamicConvolutionAttentionTest(
   ):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    batch_size, source_time, source_channels = 2, 11, 2
-    source_name = 'source'
-    with tf.name_scope('test'):
-      l = sl.DynamicConvolutionAttention(
-          source_name,
-          max_forward_step=3,
-          prior_alpha=1.0,
-          prior_beta=1.0,
-          num_static_filters=4,
-          num_dynamic_filters=8,
-          dynamic_filter_hidden_dim=2,
+    with test_util.keras_precision_policy_scope(precision_policy):
+      batch_size, source_time, source_channels = 2, 11, 2
+      source_name = 'source'
+      with tf.name_scope('test'):
+        l = sl.DynamicConvolutionAttention(
+            source_name,
+            max_forward_step=3,
+            prior_alpha=1.0,
+            prior_beta=1.0,
+            num_static_filters=4,
+            num_dynamic_filters=8,
+            dynamic_filter_hidden_dim=2,
+        )
+
+      source = self.random_sequence(
+          batch_size, source_time, source_channels, dtype=utils.compute_dtype()
       )
+      constants = {source_name: source}
 
-    source = self.random_sequence(
-        batch_size, source_time, source_channels, dtype=utils.compute_dtype()
-    )
-    constants = {source_name: source}
-
-    x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
-    rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
-    _, y_np = self.verify_contract(
-        l, x, training=True, constants=constants, rtol=rtol, atol=atol
-    )
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(batch_size, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(
+          l, x, training=True, constants=constants, rtol=rtol, atol=atol
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 if __name__ == '__main__':
