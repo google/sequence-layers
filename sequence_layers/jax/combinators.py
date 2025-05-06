@@ -1159,8 +1159,8 @@ class Repeat(types.Emitting):
 
     # TODO(rryan): Check that child layer's output dtype matches the input
     # dtype. We cannot accurately compute child_layer's output type using
-    # SequenceLayer.get_output_dtype, since the Gemax trainer might have
-    # replaced our weights with donwcasted versions when bf16_mode != NOWHERE.
+    # SequenceLayer.get_output_dtype, since our weights might have
+    # been replaced with donwcasted versions.
 
   @types.check_layer
   def layer(
@@ -1205,8 +1205,6 @@ class Repeat(types.Emitting):
 
       scan_output = emits
       # Unmask the sequence so that scan's type checks pass.
-      # TODO(rryan): Remove the type distinction between masked and unmasked
-      # sequences.
       scan_carry_output = y.unmask()
       return scan_carry_output, scan_output
 
@@ -1258,8 +1256,6 @@ class Repeat(types.Emitting):
 
     # repeat(module, carry, *xs)
     # Unmask the sequence so that scan's type checks pass.
-    # TODO(rryan): Remove the type distinction between masked and unmasked
-    # sequences.
     scan_carry = x.unmask()
     scan_input = ()
     scan_carry_output, scan_output = repeat(
@@ -1407,8 +1403,6 @@ class Repeat(types.Emitting):
 
       scan_output = (state, emits)
       # Unmask the sequence so that scan's type checks pass.
-      # TODO(rryan): Remove the type distinction between masked and unmasked
-      # sequences.
       scan_carry_output = y.unmask()
       return scan_carry_output, scan_output
 
@@ -1459,8 +1453,6 @@ class Repeat(types.Emitting):
     )
 
     # Unmask the sequence so that scan's type checks pass.
-    # TODO(rryan): Remove the type distinction between masked and unmasked
-    # sequences.
     scan_carry = x.unmask()
     scan_input = state
     scan_carry_output, scan_output = repeat(

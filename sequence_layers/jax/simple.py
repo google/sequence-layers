@@ -2032,10 +2032,7 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Sequence]:
-    # To match the emit spec above, we need to unmask x if it is masked.
-    # TODO(rryan): Remove the type distinction between masked and unmasked
-    # sequences.
-    return x, x.unmask()
+    return x, x
 
 
 class Dropout(types.PreservesType, types.StatelessPointwise):
