@@ -77,17 +77,16 @@ class AddTimingSignalTest(test_util.SequenceLayerTest, parameterized.TestCase):
   def test_add_timing_signal_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    with tf.name_scope('test'):
-      l = sl.AddTimingSignal()
+    with test_util.keras_precision_policy_scope(precision_policy):
+      with tf.name_scope('test'):
+        l = sl.AddTimingSignal()
 
-    x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class ConcatTimingSignalTest(
@@ -125,17 +124,16 @@ class ConcatTimingSignalTest(
   def test_concat_timing_signal_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    with tf.name_scope('test'):
-      l = sl.ConcatTimingSignal()
+    with test_util.keras_precision_policy_scope(precision_policy):
+      with tf.name_scope('test'):
+        l = sl.ConcatTimingSignal()
 
-    x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class ConcatPositionEmbeddingTest(
@@ -177,17 +175,16 @@ class ConcatPositionEmbeddingTest(
   def test_concat_position_embedding_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    with tf.name_scope('test'):
-      l = sl.ConcatPositionEmbedding(timesteps=12, channels=2)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      with tf.name_scope('test'):
+        l = sl.ConcatPositionEmbedding(timesteps=12, channels=2)
 
-    x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(2, 5, 3, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class ApplyRotaryPositionalEncodingTest(
@@ -219,16 +216,15 @@ class ApplyRotaryPositionalEncodingTest(
   def test_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    with tf.name_scope('test'):
-      l = sl.ApplyRotaryPositionalEncoding(1.0e4)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      with tf.name_scope('test'):
+        l = sl.ApplyRotaryPositionalEncoding(1.0e4)
 
-    x = self.random_sequence(2, 5, 4, dtype=utils.compute_dtype())
-    _, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    self.assertEmpty(l.variables)
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      x = self.random_sequence(2, 5, 4, dtype=utils.compute_dtype())
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      _, y_np = self.verify_contract(l, x, training=True, rtol=rtol, atol=atol)
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      self.assertEmpty(l.variables)
 
 
 if __name__ == '__main__':

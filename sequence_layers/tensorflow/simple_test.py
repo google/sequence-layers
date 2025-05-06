@@ -42,17 +42,18 @@ class ScaleTest(test_util.SequenceLayerTest, parameterized.TestCase):
   def test_scale_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
-    with tf.name_scope('test'):
-      l = sl.Scale(2.0)
-    x_np, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(x_np.dtype, utils.compute_dtype())
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
+      with tf.name_scope('test'):
+        l = sl.Scale(2.0)
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      x_np, y_np = self.verify_contract(
+          l, x, training=True, rtol=rtol, atol=atol
+      )
+      self.assertEqual(x_np.dtype, utils.compute_dtype())
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class TranslateTest(test_util.SequenceLayerTest, parameterized.TestCase):
@@ -74,17 +75,15 @@ class TranslateTest(test_util.SequenceLayerTest, parameterized.TestCase):
   def test_translate_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
-    with tf.name_scope('test'):
-      l = sl.Translate(-2.0)
-    x_np, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(x_np.dtype, utils.compute_dtype())
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
+      with tf.name_scope('test'):
+        l = sl.Translate(-2.0)
+      x_np, y_np = self.verify_contract(l, x, training=True)
+      self.assertEqual(x_np.dtype, utils.compute_dtype())
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class DropoutTest(test_util.SequenceLayerTest, parameterized.TestCase):
@@ -545,23 +544,21 @@ class OneHotTest(test_util.SequenceLayerTest, parameterized.TestCase):
     depth = 10
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(2, 3, 5, low=0, high=depth - 1, dtype=tf.int32)
-    with tf.name_scope('test'):
-      l = sl.OneHot(depth)
-    _, y_np = self.verify_contract(
-        l,
-        x,
-        training=True,
-        pad_nan=False,
-        # Integer tensors have no gradient to test.
-        test_gradients=False,
-    )
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(2, 3, 5, low=0, high=depth - 1, dtype=tf.int32)
+      with tf.name_scope('test'):
+        l = sl.OneHot(depth)
+      _, y_np = self.verify_contract(
+          l,
+          x,
+          training=True,
+          pad_nan=False,
+          # Integer tensors have no gradient to test.
+          test_gradients=False,
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class EmbeddingTest(test_util.SequenceLayerTest, parameterized.TestCase):
@@ -605,25 +602,23 @@ class EmbeddingTest(test_util.SequenceLayerTest, parameterized.TestCase):
     num_embeddings = 10
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(
-        2, 3, 5, low=0, high=num_embeddings - 1, dtype=tf.int32
-    )
-    with tf.name_scope('test'):
-      l = sl.Embedding(dimension=5, num_embeddings=num_embeddings)
-    _, y_np = self.verify_contract(
-        l,
-        x,
-        training=True,
-        test_causality=False,
-        # Integer tensors have no gradient to test.
-        test_gradients=False,
-    )
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(
+          2, 3, 5, low=0, high=num_embeddings - 1, dtype=tf.int32
+      )
+      with tf.name_scope('test'):
+        l = sl.Embedding(dimension=5, num_embeddings=num_embeddings)
+      _, y_np = self.verify_contract(
+          l,
+          x,
+          training=True,
+          test_causality=False,
+          # Integer tensors have no gradient to test.
+          test_gradients=False,
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class StyleTokenTest(test_util.SequenceLayerTest, parameterized.TestCase):

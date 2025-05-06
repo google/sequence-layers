@@ -169,17 +169,18 @@ class EinsumDenseTest(test_util.SequenceLayerTest, parameterized.TestCase):
   def test_einsum_dense_precision_policy(self, precision_policy):
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
-    with tf.name_scope('test'):
-      l = sl.EinsumDense('...a,ab->...b', output_shape=[2])
-    x_np, y_np = self.verify_contract(l, x, training=True)
-    self.assertEqual(x_np.dtype, utils.compute_dtype())
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(2, 3, 5, dtype=utils.compute_dtype())
+      with tf.name_scope('test'):
+        l = sl.EinsumDense('...a,ab->...b', output_shape=[2])
+      rtol, atol = test_util.rtol_atol_for_dtype(x.values.dtype)
+      x_np, y_np = self.verify_contract(
+          l, x, training=True, rtol=rtol, atol=atol
+      )
+      self.assertEqual(x_np.dtype, utils.compute_dtype())
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 if __name__ == '__main__':

@@ -66,27 +66,28 @@ class SequenceEmbeddingTest(
     num_embeddings = 10
     if not tf.executing_eagerly():
       self.skipTest('Mixed precision is TF2 only.')
-    default_policy = tf.keras.mixed_precision.global_policy()
-    tf.keras.mixed_precision.set_global_policy(precision_policy)
-    x = self.random_sequence(
-        2, 3, 5, low=0, high=num_embeddings - 1, dtype=tf.int32
-    )
-    with tf.name_scope('test'):
-      l = sl.SequenceEmbedding(
-          dimension=5, num_embeddings=num_embeddings, num_groups=4
+    with test_util.keras_precision_policy_scope(precision_policy):
+      x = self.random_sequence(
+          2, 3, 5, low=0, high=num_embeddings - 1, dtype=tf.int32
       )
-    _, y_np = self.verify_contract(
-        l,
-        x,
-        training=True,
-        test_causality=False,
-        # Integer tensors have no gradient to test.
-        test_gradients=False,
-    )
-    self.assertEqual(y_np.dtype, utils.compute_dtype())
-    for variable in l.variables:
-      self.assertEqual(variable.dtype, utils.variable_dtype())
-    tf.keras.mixed_precision.set_global_policy(default_policy)
+      with tf.name_scope('test'):
+        l = sl.SequenceEmbedding(
+            dimension=5, num_embeddings=num_embeddings, num_groups=4
+        )
+      rtol, atol = test_util.rtol_atol_for_dtype(utils.compute_dtype())
+      _, y_np = self.verify_contract(
+          l,
+          x,
+          training=True,
+          test_causality=False,
+          # Integer tensors have no gradient to test.
+          test_gradients=False,
+          rtol=rtol,
+          atol=atol,
+      )
+      self.assertEqual(y_np.dtype, utils.compute_dtype())
+      for variable in l.variables:
+        self.assertEqual(variable.dtype, utils.variable_dtype())
 
 
 class SequenceDenseTest(test_util.SequenceLayerTest):
