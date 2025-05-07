@@ -27,6 +27,7 @@ import jax
 import jax._src.ad_checkpoint
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -1604,19 +1605,40 @@ class ApplyShardingTest(test_utils.SequenceLayerTest):
 
   def test_basic(self):
     key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5)
+    x_original = test_utils.random_sequence(2, 3, 5)
+
+    # Run with a mesh and under jit to verify that sharding annotations are
+    # correctly applied.
+    mesh = jax.sharding.Mesh(
+        jax.experimental.mesh_utils.create_device_mesh(
+            (1, 1, 1, 1),
+            devices=jax.local_devices(),
+        ),
+        ('replica', 'data', 'seq', 'model'),
+    )
+    replicated_sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec()
+    )
+
+    # Replicate x_original on all shards of the mesh.
+    x_values_sharded = jax.device_put(x_original.values, replicated_sharding)
+    x_mask_sharded = jax.device_put(x_original.mask, replicated_sharding)
+    x_sharded = type(x_original)(values=x_values_sharded, mask=x_mask_sharded)
+
     l = simple.ApplySharding.Config(
         (None, 'data', 'model'), name='apply_sharding'
     ).make()
-    l = self.init_and_bind_layer(key, l, x)
+    with sharding_lib.use_mesh(mesh):
+      l = self.init_and_bind_layer(key, l, x_sharded)
 
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5,))
-    self.assertEqual(l.name, 'apply_sharding')
-    self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    # TODO(rryan): Test sharding was applied.
+      self.assertEqual(l.block_size, 1)
+      self.assertEqual(l.output_ratio, 1)
+      self.assertEqual(l.get_output_shape_for_sequence(x_sharded), (5,))
+      self.assertEqual(l.name, 'apply_sharding')
+
+      self.verify_contract(l, x_sharded, training=False)
+      self.assertEmpty(l.variables)
+      # TODO(rryan): Test sharding was applied.
 
 
 class LambdaTest(test_utils.SequenceLayerTest):

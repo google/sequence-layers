@@ -28,12 +28,12 @@ from sequence_layers.jax import convolution
 from sequence_layers.jax import dense
 from sequence_layers.jax import normalization
 from sequence_layers.jax import recurrent
+from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 
-from google3.learning.gemini.gemax.core.models import sharding as sharding_lib
 from google3.testing.pybase import parameterized
 
 
@@ -1865,35 +1865,36 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
         },
     )
 
-    # Run with a mesh and under jit to verify that sharding annotations are
-    # correctly modified when unrolling.
-    mesh = jax.sharding.Mesh(
-        jax.experimental.mesh_utils.create_device_mesh(
-            (1, 1, 1, 1),
-            devices=jax.local_devices(),
-        ),
-        ('replica', 'data', 'seq', 'model'),
-    )
-    with sharding_lib.set_global_mesh(mesh):
-      y = self.verify_contract(
-          l, x, training=False, constants=constants, jit=True
+    with self.subTest('with_mesh'):
+      # Run with a mesh and under jit to verify that sharding annotations are
+      # correctly modified when unrolling.
+      mesh = jax.sharding.Mesh(
+          jax.experimental.mesh_utils.create_device_mesh(
+              (1, 1, 1, 1),
+              devices=jax.local_devices(),
+          ),
+          ('replica', 'data', 'seq', 'model'),
       )
+      with sharding_lib.use_mesh(mesh):
+        y = self.verify_contract(
+            l, x, training=False, constants=constants, jit=True
+        )
 
-    # Construct layer manually and verify that execution is the same as running
-    # it serially with sliced variables.
-    child = l.config.layer.make()
-    y_manual = x
-    child_params = {'params': variables['params']['serial']}
-    for i in range(l.config.num_repeats):
-      vars_i = jax.tree_util.tree_map(lambda v: v[i], child_params)  # pylint: disable=cell-var-from-loop
-      y_manual = child.apply(
-          vars_i,
-          y_manual,
-          training=False,
-          constants=constants,
-          method=child.layer,
-      )
-    self.assertSequencesClose(y, y_manual.mask_invalid())
+      # Construct layer manually and verify that execution is the same as
+      # running it serially with sliced variables.
+      child = l.config.layer.make()
+      y_manual = x
+      child_params = {'params': variables['params']['serial']}
+      for i in range(l.config.num_repeats):
+        vars_i = jax.tree_util.tree_map(lambda v: v[i], child_params)  # pylint: disable=cell-var-from-loop
+        y_manual = child.apply(
+            vars_i,
+            y_manual,
+            training=False,
+            constants=constants,
+            method=child.layer,
+        )
+      self.assertSequencesClose(y, y_manual.mask_invalid())
 
 
 class CheckpointGradientTest(test_utils.SequenceLayerTest):

@@ -28,11 +28,10 @@ import jax
 import jax.ad_checkpoint
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from typing_extensions import override
-
-from google3.learning.gemini.gemax.core.models import sharding as sharding_lib
 
 # pylint: disable=logging-fstring-interpolation
 
