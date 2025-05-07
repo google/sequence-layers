@@ -29,6 +29,7 @@ import jax
 from jax import numpy as jnp
 import jaxtyping
 import numpy as np
+from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import typing as jt
 import typeguard
 
@@ -73,11 +74,11 @@ __all__ = (
     # go/keep-sorted end
 )
 
-UNCONSTRAINED = jax.sharding.PartitionSpec.UNCONSTRAINED
-DimSharding = str | TypingSequence[str] | None | type(UNCONSTRAINED)
+UNCONSTRAINED = sharding_lib.UNCONSTRAINED
+DimSharding = sharding_lib.DimSharding
 
 # Sharding is the *args to jax.sharding.PartitionSpec.
-Sharding = TypingSequence[DimSharding] | None
+Sharding = sharding_lib.Sharding
 
 # Sequence type aliases:
 MASK_DTYPE = np.bool_
