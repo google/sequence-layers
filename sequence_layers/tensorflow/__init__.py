@@ -13,6 +13,12 @@
 # limitations under the License.
 """Streaming Sequence Layers."""
 
+# This must be set before importing any TF/Keras modules so that tf_keras uses
+# Keras V2.
+import os
+
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+
 # TODO(dthkao): Remove the module imports when users are migrated to new deps.
 # Alias the module names as well, so that the redirect that exists for legacy
 # module imports functions correctly.

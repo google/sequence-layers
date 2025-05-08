@@ -21,6 +21,7 @@ from sequence_layers.tensorflow import types
 from sequence_layers.tensorflow import utils
 import tensorflow as tf
 import tensorflow.compat.v2 as tf
+import tf_keras
 
 
 def compute_conv_mask(
@@ -804,7 +805,7 @@ class _NormalizedDepthwiseConv1D(tf.keras.layers.Conv2D):
 
     return outputs
 
-  @tf._keras_internal.utils.tf_utils.shape_type_conversion
+  @tf_keras.src.utils.tf_utils.shape_type_conversion
   def compute_output_shape(self, input_shape):
     if self.data_format == 'channels_first':
       rows = input_shape[2]
@@ -815,14 +816,14 @@ class _NormalizedDepthwiseConv1D(tf.keras.layers.Conv2D):
       cols = input_shape[2]
       out_filters = input_shape[3] * self.depth_multiplier
 
-    rows = tf._keras_internal.utils.conv_utils.conv_output_length(
+    rows = tf_keras.src.utils.conv_utils.conv_output_length(
         rows,
         self.kernel_size[0],
         self.padding,
         self.strides[0],
         self.dilation_rate[0],
     )
-    cols = tf._keras_internal.utils.conv_utils.conv_output_length(
+    cols = tf_keras.src.utils.conv_utils.conv_output_length(
         cols,
         self.kernel_size[1],
         self.padding,
