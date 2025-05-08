@@ -22,6 +22,7 @@ import numpy as np
 from sequence_layers.internal import types as internal
 import tensorflow.compat.v1 as tf1
 import tensorflow.compat.v2 as tf
+import tf_keras
 
 from tensorflow.python.framework import type_spec
 
@@ -472,7 +473,7 @@ class SequenceLayer(tf.Module, internal.SequenceLayer, metaclass=abc.ABCMeta):
     # Imitate how Keras layers work by creating a unique name from the class
     # name when no layer name is provided.
     if not name:
-      name = tf._keras_internal.backend.unique_object_name(
+      name = tf_keras.src.backend.unique_object_name(
           self._default_name(),
           zero_based=True,
           namespace='audio_hearing_tensorflow_python_sequence_layers',
