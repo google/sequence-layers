@@ -21,10 +21,9 @@ import jax
 from jax.experimental import checkify
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.learning.gemini.gemax.core.models import meta
 
 __all__ = (
     # go/keep-sorted start

@@ -23,11 +23,10 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import meta
 from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.learning.gemini.gemax.core.models import meta
 
 
 CombinationMode = utils.CombinationMode
