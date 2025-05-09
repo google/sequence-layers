@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for convolution helpers."""
 
+import flax
 import jax
 import jax.numpy as jnp
 from praxis import pax_fiddle
@@ -611,7 +612,7 @@ class WeightNormTest(test_utils.SequenceLayerTest):
     }
     seq_out = seq_conv.apply(seq_params, x, training=False)
     praxis_values, praxis_padding = praxis_conv.apply(
-        pax_params, x.values, 1.0 - x.mask
+        flax.core.meta.unbox(pax_params), x.values, 1.0 - x.mask
     )
     self.assertSequencesClose(
         seq_out, types.Sequence(praxis_values, praxis_padding == 0.0)

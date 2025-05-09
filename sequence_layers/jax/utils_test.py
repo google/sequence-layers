@@ -20,11 +20,11 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import meta
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 
-from google3.learning.gemini.gemax.core.models import meta
 from google3.testing.pybase import parameterized
 
 
@@ -62,6 +62,7 @@ class FlaxEinsumDenseTest(test_utils.SequenceLayerTest):
     def einsum_factory() -> types.JnpEinsumT:
       def custom_einsum(equation, *args, **kwargs):
         return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+
       return custom_einsum
 
     key = jax.random.PRNGKey(1234)
@@ -259,8 +260,11 @@ class ShardInitializerTest(test_utils.SequenceLayerTest):
         nn.initializers.normal(), ('data', None, 'model')
     )
     init = initializer(key, (2, 3, 5), jnp.float32)
-    self.assertIsInstance(init, meta.CMSMeta)
-    self.assertEqual(init.mesh_axes, ('data', None, 'model'))
+    self.assertIsInstance(init, meta.Partitioned)
+    self.assertEqual(
+        init.get_partition_spec(),
+        jax.sharding.PartitionSpec('data', None, 'model'),
+    )
 
   def test_axes_types_no_sharding(self):
     key = jax.random.PRNGKey(1234)
@@ -271,9 +275,7 @@ class ShardInitializerTest(test_utils.SequenceLayerTest):
         axes_types=(meta.AxisType.FANIN, None, None),
     )
     init = initializer(key, (2, 3, 5), jnp.float32)
-    self.assertIsInstance(init, meta.CMSMeta)
-    self.assertTrue(init.projectable)
-    self.assertEqual(init.axes_types, (meta.AxisType.FANIN, None, None))
+    self.assertIsInstance(init, meta.Partitioned)
 
 
 class SequenceBroadcastTest(test_utils.SequenceLayerTest):
