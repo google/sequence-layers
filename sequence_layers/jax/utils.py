@@ -34,8 +34,8 @@ from sequence_layers.jax import typing as jt
 
 @jt.typed
 def combine_mask(
-    *masks: TypingSequence[jt.Bool[jt.ArrayT, 'B #T']]
-) -> jt.Bool[jt.ArrayT, 'B #T']:
+    *masks: TypingSequence[jt.Bool[jt.ArrayT, '#B #T']]
+) -> jt.Bool[jt.ArrayT, '#B #T']:
   """Combines masks with logical AND or a shortcut when reference equal."""
   if all(x is masks[0] for x in masks[1:]):
     return masks[0]
@@ -423,9 +423,6 @@ def _reshape_for_broadcast(
     *seqs: types.Sequence,
 ) -> tuple[types.Sequence, ...]:
   """Reshapes channel dims of many sequences to be broadcastable to each other."""
-  # The time dimensions may not match if we are broadcasting over time.
-  for y in seqs[1:]:
-    assert_is_compatible_with(seqs[0].shape[:1], y.shape[:1])
 
   max_dims = max(x.ndim for x in seqs)
 
@@ -445,7 +442,25 @@ def _reshape_for_broadcast(
 
 
 def sequence_broadcast_add(*seqs: types.Sequence) -> types.Sequence:
-  """Broadcast-add sequences."""
+  """Broadcast-add sequences.
+
+  This follows NumPy "right-to-left" broadcasting semantics in the case of
+  mismatched channels (i.e., assume sequences with fewer dimensions are dim=1
+  in the extra dimensions). Separately, batch and time dimensions broadcast as
+  usual (equal or 1 over all sequences).
+
+          b   t   channels
+  X:      2 x 3 x 4 x 1 x 5
+  Y:      1 x 3 x     2 x 1
+  Result: 2 x 3 x 4 x 2 x 5
+
+  Args:
+    *seqs: The sequences to broadcast.
+
+  Returns:
+    A new Sequence with the sum of the broadcasted values and the logical-and of
+    the broadcasted combine masks.
+  """
   seqs = _reshape_for_broadcast(*seqs)
   return types.Sequence(
       sum(x.values for x in seqs), combine_mask(*(x.mask for x in seqs))
@@ -453,16 +468,50 @@ def sequence_broadcast_add(*seqs: types.Sequence) -> types.Sequence:
 
 
 def sequence_broadcast_mean(*seqs: types.Sequence) -> types.Sequence:
-  """Broadcast-average sequences."""
-  seqs = _reshape_for_broadcast(*seqs)
-  return types.Sequence(
-      sum(x.values for x in seqs) / len(seqs),
-      combine_mask(*(x.mask for x in seqs)),
+  """Broadcast-average sequences.
+
+  This follows NumPy "right-to-left" broadcasting semantics in the case of
+  mismatched channels (i.e., assume sequences with fewer dimensions are dim=1
+  in the extra dimensions). Separately, batch and time dimensions broadcast as
+  usual (equal or 1 over all sequences).
+
+          b   t   channels
+  X:      2 x 3 x 4 x 1 x 5
+  Y:      1 x 3 x     2 x 1
+  Result: 2 x 3 x 4 x 2 x 5
+
+  Args:
+    *seqs: The sequences to broadcast.
+
+  Returns:
+    A new Sequence with the average of the broadcasted values and the
+    logical-and of the broadcasted combine masks.
+  """
+  return sequence_broadcast_add(*seqs).apply_values_masked(
+      lambda x: x / len(seqs)
   )
 
 
 def sequence_broadcast_product(*seqs: types.Sequence) -> types.Sequence:
-  """Broadcast-multiply sequences."""
+  """Broadcast-multiply sequences.
+
+  This follows NumPy "right-to-left" broadcasting semantics in the case of
+  mismatched channels (i.e., assume sequences with fewer dimensions are dim=1
+  in the extra dimensions). Separately, batch and time dimensions broadcast as
+  usual (equal or 1 over all sequences).
+
+          b   t   channels
+  X:      2 x 3 x 4 x 1 x 5
+  Y:      1 x 3 x     2 x 1
+  Result: 2 x 3 x 4 x 2 x 5
+
+  Args:
+    *seqs: The sequences to broadcast.
+
+  Returns:
+    A new Sequence with the product of the broadcasted values and the
+    logical-and of the broadcasted combine masks.
+  """
   seqs = _reshape_for_broadcast(*seqs)
   return types.Sequence(
       functools.reduce(operator.mul, (x.values for x in seqs)),
@@ -471,13 +520,33 @@ def sequence_broadcast_product(*seqs: types.Sequence) -> types.Sequence:
 
 
 def sequence_broadcast_stack(*seqs: types.Sequence) -> types.Sequence:
-  """Broadcast-stack sequences."""
+  """Broadcast-stack sequences into a new first channel.
+
+  This follows NumPy "right-to-left" broadcasting semantics in the case of
+  mismatched channels (i.e., assume sequences with fewer dimensions are dim=1
+  in the extra dimensions). Separately, batch and time dimensions broadcast as
+  usual (equal or 1 over all sequences).
+
+          b   t       channels
+  X:      2 x 3 x     4 x 1 x 5
+  Y:      1 x 3 x         2 x 1
+  Z:      2 x 1 x         1 x 1
+  Result: 2 x 3 x 3 x 4 x 2 x 5
+
+  Args:
+    *seqs: The sequences to broadcast.
+
+  Returns:
+    A new Sequence stacked on the new first channel of the broadcasted values.
+  """
   seqs = _reshape_for_broadcast(*seqs)
   broadcasted_channel_shape = jnp.broadcast_shapes(
       *(x.channel_shape for x in seqs)
   )
 
-  batch_size, time = seqs[0].shape[:2]
+  # Also broadcast batch and time. Callers can impose further constraints.
+  batch_size = max(x.shape[0] for x in seqs)
+  time = max(x.shape[1] for x in seqs)
 
   def _broadcast_channel_shape(values):
     shape = (batch_size, time) + broadcasted_channel_shape
@@ -490,13 +559,34 @@ def sequence_broadcast_stack(*seqs: types.Sequence) -> types.Sequence:
 
 
 def sequence_broadcast_concat(*seqs: types.Sequence) -> types.Sequence:
-  """Broadcast-concatenate sequences on their final axis."""
+  """Broadcast-concatenate sequences on their final axis.
+
+  This follows NumPy "right-to-left" broadcasting semantics in the case of
+  mismatched channels (i.e., assume sequences with fewer dimensions are dim=1
+  in the extra dimensions). Separately, batch and time dimensions broadcast as
+  usual (equal or 1 over all sequences).
+
+          b   t   channels
+  X:      2 x 3 x 4 x 1 x 5
+  Y:      1 x 3 x     2 x 1
+  Z:      2 x 1 x     1 x 1
+  Result: 2 x 3 x 4 x 2 x 7
+
+  Args:
+    *seqs: The sequences to broadcast.
+
+  Returns:
+    A new Sequence broadcasting on all but the last channel, then concatenating
+    on the last channel.
+  """
   seqs = _reshape_for_broadcast(*seqs)
   channel_outer_dims_broadcast_shape = jnp.broadcast_shapes(
       *(x.channel_shape[:-1] for x in seqs)
   )
 
-  batch_size, time = seqs[0].shape[:2]
+  # Also broadcast batch and time. Callers can impose further constraints.
+  batch_size = max(x.shape[0] for x in seqs)
+  time = max(x.shape[1] for x in seqs)
 
   def _broadcast_channel_outer_dims(values):
     # Expand dim 2D tensors for concatenation.
