@@ -13,6 +13,7 @@
 # limitations under the License.
 """Conditioning tests."""
 
+from absl.testing import parameterized
 import chex
 import flax
 import jax
@@ -21,8 +22,6 @@ import numpy as np
 from sequence_layers.jax import conditioning
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
-
-from google3.testing.pybase import parameterized
 
 
 IDENTITY = conditioning.Conditioning.Projection.IDENTITY

@@ -15,9 +15,8 @@
 
 from unittest import mock
 
+from absl.testing import parameterized
 from sequence_layers.jax import test_utils
-
-from google3.testing.pybase import parameterized
 
 
 class StandardDtypeConfigsTest(test_utils.SequenceLayerTest):

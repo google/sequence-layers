@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for convolution helpers."""
 
+from absl.testing import parameterized
 import flax
 import jax
 import jax.numpy as jnp
@@ -24,8 +25,6 @@ from sequence_layers.jax import convolution
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import parameterized
 
 
 def _expected_conv_mask(

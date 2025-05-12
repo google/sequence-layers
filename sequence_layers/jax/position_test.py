@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for position layers."""
 
+from absl.testing import parameterized
 import chex
 import flax
 import jax
@@ -21,8 +22,6 @@ import numpy as np
 from sequence_layers.jax import position as position_lib
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
-
-from google3.testing.pybase import parameterized
 
 
 class AddTimingSignalTest(test_utils.SequenceLayerTest):

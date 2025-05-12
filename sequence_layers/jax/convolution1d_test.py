@@ -15,6 +15,7 @@
 
 import fractions
 
+from absl.testing import parameterized
 import chex
 import flax
 import flax.linen as nn
@@ -28,8 +29,6 @@ from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 import tensorflow as tf
-
-from google3.testing.pybase import parameterized
 
 
 class LatencyTest(test_utils.SequenceLayerTest):

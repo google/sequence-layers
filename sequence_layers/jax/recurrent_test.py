@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for recurrent layers."""
 
+from absl.testing import parameterized
 import chex
 import flax
 import jax
@@ -22,8 +23,6 @@ from sequence_layers.jax import recurrent
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 import tensorflow.compat.v2 as tf
-
-from google3.testing.pybase import parameterized
 
 
 class LSTMTest(test_utils.SequenceLayerTest):

@@ -18,6 +18,8 @@ import itertools
 import random
 from typing import Any, Callable, Iterable, Mapping, Sequence as TypingSequence, TypeVar
 
+from absl.testing import absltest
+from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -25,9 +27,6 @@ import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import googletest
-from google3.testing.pybase import parameterized
 
 
 _SequenceLayerT = TypeVar('_SequenceLayerT', bound=types.SequenceLayer)
@@ -1032,4 +1031,4 @@ class NonSteppableLayer(types.PreservesType, types.StatelessPointwise):
 
 
 # Forward main for convenience.
-main = googletest.main
+main = absltest.main

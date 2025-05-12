@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for 3D convolution layers."""
 
+from absl.testing import parameterized
 import chex
 import flax
 import flax.linen as nn
@@ -22,8 +23,6 @@ import numpy as np
 from sequence_layers.jax import convolution
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import parameterized
 
 
 class Conv3DTest(test_utils.SequenceLayerTest):

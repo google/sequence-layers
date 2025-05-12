@@ -16,6 +16,7 @@
 import itertools
 import math
 
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -26,8 +27,6 @@ from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 import tensorflow as tf
-
-from google3.testing.pybase import parameterized
 
 
 def _pad_or_truncate_for_fft(values, padding, axis, required_input_length):

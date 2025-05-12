@@ -15,6 +15,7 @@
 
 from typing import Any
 
+from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -24,8 +25,6 @@ from sequence_layers.jax import meta
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import parameterized
 
 
 class FlaxEinsumDenseTest(test_utils.SequenceLayerTest):
