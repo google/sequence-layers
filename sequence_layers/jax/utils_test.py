@@ -280,143 +280,273 @@ class ShardInitializerTest(test_utils.SequenceLayerTest):
 
 class SequenceBroadcastTest(test_utils.SequenceLayerTest):
 
-  @parameterized.parameters(
-      (tuple(), tuple(), tuple()),
-      (tuple(), (5,), (5,)),
-      (tuple(), (2, 5), (2, 5)),
-      ((2,), tuple(), (2,)),
-      ((2, 5), tuple(), (2, 5)),
-      ((5,), (5,), (5,)),
-      ((5,), (2, 5), (2, 5)),
-      ((2, 5), (5,), (2, 5)),
-      ((3, 1, 5), (2, 5), (3, 2, 5)),
-      ((2, 5), (3, 1, 5), (3, 2, 5)),
+  @parameterized.product(
+      [
+          dict(bt_shapes=((2, 4), (2, 4), (1, 1)), expected_bt_shape=(2, 4)),
+          dict(bt_shapes=((1, 2), (3, 1), (1, 2)), expected_bt_shape=(3, 2)),
+      ],
+      [
+          dict(channels=(tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=(tuple(), (5,)), expected_channels=(5,)),
+          dict(channels=(tuple(), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2,), tuple()), expected_channels=(2,)),
+          dict(channels=((2, 5), tuple()), expected_channels=(2, 5)),
+          dict(channels=((5,), (5,)), expected_channels=(5,)),
+          dict(channels=((5,), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2, 5), (5,)), expected_channels=(2, 5)),
+          dict(channels=((3, 1, 5), (2, 5)), expected_channels=(3, 2, 5)),
+          dict(channels=((2, 5), (3, 1, 5)), expected_channels=(3, 2, 5)),
+          dict(channels=(tuple(), tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=((5,), (1, 5), (2, 1, 1)), expected_channels=(2, 1, 5)),
+          dict(
+              channels=((3, 1, 2), (1, 4, 2), (3, 1, 1)),
+              expected_channels=(3, 4, 2),
+          ),
+      ],
   )
   def test_sequence_broadcast_add(
-      self, x_channel_shape, y_channel_shape, expected_channel_shape
+      self,
+      bt_shapes,
+      expected_bt_shape,
+      channels,
+      expected_channels,
   ):
-    batch_size, time = 2, 4
-    x = test_utils.random_sequence(batch_size, time, *x_channel_shape)
-    y = test_utils.random_sequence(batch_size, time, *y_channel_shape)
-    output = utils.sequence_broadcast_add(x, y)
+    x_bt, y_bt, z_bt = bt_shapes
+    x_ch = channels[0]
+    y_ch = channels[1]
+    z_ch = channels[2] if len(channels) == 3 else None
 
-    self.assertEqual(output.channel_shape, expected_channel_shape)
+    seqs = []
+    seqs.append(test_utils.random_sequence(*x_bt, *x_ch))
+    seqs.append(test_utils.random_sequence(*y_bt, *y_ch))
+    if z_ch is not None:
+      seqs.append(test_utils.random_sequence(*z_bt, *z_ch))
+
+    output = utils.sequence_broadcast_add(*seqs)
+    self.assertEqual(output.shape[:2], expected_bt_shape)
+    self.assertEqual(output.channel_shape, expected_channels)
+
     self.assertEqual(
         utils.sequence_broadcast_combine_output_channel_shape(
-            utils.CombinationMode.ADD, x.channel_shape, y.channel_shape
+            utils.CombinationMode.ADD, *(seq.channel_shape for seq in seqs)
         ),
-        expected_channel_shape,
+        expected_channels,
     )
 
-  @parameterized.parameters(
-      (tuple(), tuple(), tuple()),
-      (tuple(), (5,), (5,)),
-      (tuple(), (2, 5), (2, 5)),
-      ((2,), tuple(), (2,)),
-      ((2, 5), tuple(), (2, 5)),
-      ((5,), (5,), (5,)),
-      ((5,), (2, 5), (2, 5)),
-      ((2, 5), (5,), (2, 5)),
-      ((3, 1, 5), (2, 5), (3, 2, 5)),
-      ((2, 5), (3, 1, 5), (3, 2, 5)),
+  @parameterized.product(
+      [
+          dict(bt_shapes=((2, 4), (2, 4), (1, 1)), expected_bt_shape=(2, 4)),
+          dict(bt_shapes=((1, 2), (3, 1), (1, 2)), expected_bt_shape=(3, 2)),
+      ],
+      [
+          dict(channels=(tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=(tuple(), (5,)), expected_channels=(5,)),
+          dict(channels=(tuple(), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2,), tuple()), expected_channels=(2,)),
+          dict(channels=((2, 5), tuple()), expected_channels=(2, 5)),
+          dict(channels=((5,), (5,)), expected_channels=(5,)),
+          dict(channels=((5,), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2, 5), (5,)), expected_channels=(2, 5)),
+          dict(channels=((3, 1, 5), (2, 5)), expected_channels=(3, 2, 5)),
+          dict(channels=((2, 5), (3, 1, 5)), expected_channels=(3, 2, 5)),
+          # 3-input cases
+          dict(channels=(tuple(), tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=((5,), (1, 5), (2, 1, 1)), expected_channels=(2, 1, 5)),
+          dict(
+              channels=((3, 1, 2), (1, 4, 2), (3, 1, 1)),
+              expected_channels=(3, 4, 2),
+          ),
+      ],
   )
   def test_sequence_broadcast_mean(
-      self, x_channel_shape, y_channel_shape, expected_channel_shape
+      self,
+      bt_shapes,
+      expected_bt_shape,
+      channels,
+      expected_channels,
   ):
-    batch_size, time = 2, 4
-    x = test_utils.random_sequence(batch_size, time, *x_channel_shape)
-    y = test_utils.random_sequence(batch_size, time, *y_channel_shape)
-    output = utils.sequence_broadcast_mean(x, y)
+    x_bt, y_bt, z_bt = bt_shapes
+    x_ch = channels[0]
+    y_ch = channels[1]
+    z_ch = channels[2] if len(channels) == 3 else None
 
-    self.assertEqual(output.channel_shape, expected_channel_shape)
+    seqs = []
+    seqs.append(test_utils.random_sequence(*x_bt, *x_ch))
+    seqs.append(test_utils.random_sequence(*y_bt, *y_ch))
+    if z_ch is not None:
+      seqs.append(test_utils.random_sequence(*z_bt, *z_ch))
+
+    output = utils.sequence_broadcast_mean(*seqs)
+    self.assertEqual(output.shape[:2], expected_bt_shape)
+    self.assertEqual(output.channel_shape, expected_channels)
+
     self.assertEqual(
         utils.sequence_broadcast_combine_output_channel_shape(
-            utils.CombinationMode.MEAN, x.channel_shape, y.channel_shape
+            utils.CombinationMode.MEAN, *(seq.channel_shape for seq in seqs)
         ),
-        expected_channel_shape,
+        expected_channels,
     )
 
-  @parameterized.parameters(
-      (tuple(), tuple(), (2,)),
-      (tuple(), (5,), (6,)),
-      (tuple(), (2, 5), (2, 6)),
-      ((2,), tuple(), (3,)),
-      ((2, 5), tuple(), (2, 6)),
-      ((5,), (7,), (12,)),
-      ((5,), (2, 7), (2, 12)),
-      ((2, 5), (7,), (2, 12)),
-      ((3, 1, 5), (2, 7), (3, 2, 12)),
-      ((2, 5), (3, 1, 7), (3, 2, 12)),
+  @parameterized.product(
+      [
+          dict(bt_shapes=((2, 4), (2, 4), (1, 1)), expected_bt_shape=(2, 4)),
+          dict(bt_shapes=((1, 2), (3, 1), (1, 2)), expected_bt_shape=(3, 2)),
+      ],
+      [
+          dict(channels=(tuple(), tuple()), expected_channels=(2,)),
+          dict(channels=(tuple(), (5,)), expected_channels=(6,)),
+          dict(channels=(tuple(), (2, 5)), expected_channels=(2, 6)),
+          dict(channels=((2,), tuple()), expected_channels=(3,)),
+          dict(channels=((2, 5), tuple()), expected_channels=(2, 6)),
+          dict(channels=((5,), (7,)), expected_channels=(12,)),
+          dict(channels=((5,), (2, 7)), expected_channels=(2, 12)),
+          dict(channels=((2, 5), (7,)), expected_channels=(2, 12)),
+          dict(channels=((3, 1, 5), (2, 7)), expected_channels=(3, 2, 12)),
+          dict(channels=((2, 5), (3, 1, 7)), expected_channels=(3, 2, 12)),
+          dict(channels=(tuple(), tuple(), tuple()), expected_channels=(3,)),
+          dict(channels=((5,), (1, 1), (2, 1, 2)), expected_channels=(2, 1, 8)),
+          dict(
+              channels=((3, 1, 2), (1, 4, 1), (3, 1, 3)),
+              expected_channels=(3, 4, 6),
+          ),
+      ],
   )
   def test_sequence_broadcast_concat(
-      self, x_channel_shape, y_channel_shape, expected_channel_shape
+      self,
+      bt_shapes,
+      expected_bt_shape,
+      channels,
+      expected_channels,
   ):
-    batch_size, time = 2, 4
-    x = test_utils.random_sequence(batch_size, time, *x_channel_shape)
-    y = test_utils.random_sequence(batch_size, time, *y_channel_shape)
-    output = utils.sequence_broadcast_concat(x, y)
+    x_bt, y_bt, z_bt = bt_shapes
+    x_ch = channels[0]
+    y_ch = channels[1]
+    z_ch = channels[2] if len(channels) == 3 else None
 
-    self.assertEqual(output.channel_shape, expected_channel_shape)
+    seqs = []
+    seqs.append(test_utils.random_sequence(*x_bt, *x_ch))
+    seqs.append(test_utils.random_sequence(*y_bt, *y_ch))
+    if z_ch is not None:
+      seqs.append(test_utils.random_sequence(*z_bt, *z_ch))
+
+    output = utils.sequence_broadcast_concat(*seqs)
+    self.assertEqual(output.shape[:2], expected_bt_shape)
+    self.assertEqual(output.channel_shape, expected_channels)
+
     self.assertEqual(
         utils.sequence_broadcast_combine_output_channel_shape(
-            utils.CombinationMode.CONCAT, x.channel_shape, y.channel_shape
+            utils.CombinationMode.CONCAT, *(seq.channel_shape for seq in seqs)
         ),
-        expected_channel_shape,
+        expected_channels,
     )
 
-  @parameterized.parameters(
-      (tuple(), tuple(), (2,)),
-      (tuple(), (5,), (2, 5)),
-      (tuple(), (2, 5), (2, 2, 5)),
-      ((2,), tuple(), (2, 2)),
-      ((2, 5), tuple(), (2, 2, 5)),
-      ((3, 5), (3, 5), (2, 3, 5)),
-      ((5, 1), (1, 7), (2, 5, 7)),
-      ((5,), (2, 5), (2, 2, 5)),
-      ((2, 5), (5,), (2, 2, 5)),
-      ((3, 1, 5), (2, 5), (2, 3, 2, 5)),
-      ((2, 5), (3, 1, 5), (2, 3, 2, 5)),
+  @parameterized.product(
+      [
+          dict(bt_shapes=((2, 4), (2, 4), (1, 1)), expected_bt_shape=(2, 4)),
+          dict(bt_shapes=((1, 2), (3, 1), (1, 2)), expected_bt_shape=(3, 2)),
+      ],
+      [
+          dict(channels=(tuple(), tuple()), expected_channels=(2,)),
+          dict(channels=(tuple(), (5,)), expected_channels=(2, 5)),
+          dict(channels=(tuple(), (2, 5)), expected_channels=(2, 2, 5)),
+          dict(channels=((2,), tuple()), expected_channels=(2, 2)),
+          dict(channels=((2, 5), tuple()), expected_channels=(2, 2, 5)),
+          dict(channels=((3, 5), (3, 5)), expected_channels=(2, 3, 5)),
+          dict(channels=((5, 1), (1, 7)), expected_channels=(2, 5, 7)),
+          dict(channels=((5,), (2, 5)), expected_channels=(2, 2, 5)),
+          dict(channels=((2, 5), (5,)), expected_channels=(2, 2, 5)),
+          dict(channels=((3, 1, 5), (2, 5)), expected_channels=(2, 3, 2, 5)),
+          dict(channels=((2, 5), (3, 1, 5)), expected_channels=(2, 3, 2, 5)),
+          dict(channels=(tuple(), tuple(), tuple()), expected_channels=(3,)),
+          dict(
+              channels=((5,), (1, 5), (2, 1, 1)), expected_channels=(3, 2, 1, 5)
+          ),
+          dict(
+              channels=((3, 1, 2), (1, 4, 2), (3, 1, 1)),
+              expected_channels=(3, 3, 4, 2),
+          ),
+      ],
   )
   def test_sequence_broadcast_stack(
-      self, x_channel_shape, y_channel_shape, expected_channel_shape
+      self,
+      bt_shapes,
+      expected_bt_shape,
+      channels,
+      expected_channels,
   ):
-    batch_size, time = 2, 4
-    x = test_utils.random_sequence(batch_size, time, *x_channel_shape)
-    y = test_utils.random_sequence(batch_size, time, *y_channel_shape)
-    output = utils.sequence_broadcast_stack(x, y).mask_invalid()
-    self.assertEqual(output.channel_shape, expected_channel_shape)
+    x_bt, y_bt, z_bt = bt_shapes
+    x_ch = channels[0]
+    y_ch = channels[1]
+    z_ch = channels[2] if len(channels) == 3 else None
+
+    seqs = []
+    seqs.append(test_utils.random_sequence(*x_bt, *x_ch))
+    seqs.append(test_utils.random_sequence(*y_bt, *y_ch))
+    if z_ch is not None:
+      seqs.append(test_utils.random_sequence(*z_bt, *z_ch))
+
+    output = utils.sequence_broadcast_stack(*seqs).mask_invalid()
+    self.assertEqual(output.shape[:2], expected_bt_shape)
+    self.assertEqual(output.channel_shape, expected_channels)
+
     self.assertEqual(
         utils.sequence_broadcast_combine_output_channel_shape(
-            utils.CombinationMode.STACK, x.channel_shape, y.channel_shape
+            utils.CombinationMode.STACK, *(seq.channel_shape for seq in seqs)
         ),
-        expected_channel_shape,
+        expected_channels,
     )
 
-  @parameterized.parameters(
-      (tuple(), tuple(), tuple()),
-      (tuple(), (5,), (5,)),
-      (tuple(), (2, 5), (2, 5)),
-      ((2,), tuple(), (2,)),
-      ((2, 5), tuple(), (2, 5)),
-      ((5,), (5,), (5,)),
-      ((5,), (2, 5), (2, 5)),
-      ((2, 5), (5,), (2, 5)),
-      ((3, 1, 5), (2, 5), (3, 2, 5)),
-      ((2, 5), (3, 1, 5), (3, 2, 5)),
+  @parameterized.product(
+      [
+          dict(bt_shapes=((2, 4), (2, 4), (1, 1)), expected_bt_shape=(2, 4)),
+          dict(bt_shapes=((1, 2), (3, 1), (1, 2)), expected_bt_shape=(3, 2)),
+      ],
+      [
+          dict(channels=(tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=(tuple(), (5,)), expected_channels=(5,)),
+          dict(channels=(tuple(), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2,), tuple()), expected_channels=(2,)),
+          dict(channels=((2, 5), tuple()), expected_channels=(2, 5)),
+          dict(channels=((5,), (5,)), expected_channels=(5,)),
+          dict(channels=((5,), (2, 5)), expected_channels=(2, 5)),
+          dict(channels=((2, 5), (5,)), expected_channels=(2, 5)),
+          dict(channels=((3, 1, 5), (2, 5)), expected_channels=(3, 2, 5)),
+          dict(channels=((2, 5), (3, 1, 5)), expected_channels=(3, 2, 5)),
+          dict(channels=(tuple(), tuple(), tuple()), expected_channels=tuple()),
+          dict(channels=((5,), (1, 5), (2, 1, 1)), expected_channels=(2, 1, 5)),
+          dict(
+              channels=((3, 1, 2), (1, 4, 2), (3, 1, 1)),
+              expected_channels=(3, 4, 2),
+          ),
+      ],
   )
   def test_sequence_broadcast_product(
-      self, x_channel_shape, y_channel_shape, expected_channel_shape
+      self,
+      bt_shapes,
+      expected_bt_shape,
+      channels,
+      expected_channels,
   ):
-    batch_size, time = 2, 4
-    x = test_utils.random_sequence(batch_size, time, *x_channel_shape)
-    y = test_utils.random_sequence(batch_size, time, *y_channel_shape)
-    output = utils.sequence_broadcast_product(x, y)
-    self.assertEqual(output.channel_shape, expected_channel_shape)
+    x_bt, y_bt, z_bt = bt_shapes
+    x_ch = channels[0]
+    y_ch = channels[1]
+    z_ch = channels[2] if len(channels) == 3 else None
+
+    seqs = []
+    seqs.append(test_utils.random_sequence(*x_bt, *x_ch))
+    seqs.append(test_utils.random_sequence(*y_bt, *y_ch))
+    if z_ch is not None:
+      seqs.append(test_utils.random_sequence(*z_bt, *z_ch))
+
+    output = utils.sequence_broadcast_product(*seqs)
+    self.assertEqual(output.shape[:2], expected_bt_shape)
+    self.assertEqual(output.channel_shape, expected_channels)
+
     self.assertEqual(
         utils.sequence_broadcast_combine_output_channel_shape(
-            utils.CombinationMode.PRODUCT, x.channel_shape, y.channel_shape
+            utils.CombinationMode.PRODUCT, *(seq.channel_shape for seq in seqs)
         ),
-        expected_channel_shape,
+        expected_channels,
     )
 
   @parameterized.parameters(
