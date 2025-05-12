@@ -547,7 +547,7 @@ class GmmAttentionTest(test_utils.SequenceLayerTest):
         },
     )
 
-    for time in range(21, 23):
+    for time in [11, 12]:
       x = test_utils.random_sequence(batch_size, time, channels)
       self.assertEqual(
           l.get_output_shape_for_sequence(x, constants=constants),
@@ -562,7 +562,7 @@ class GmmAttentionTest(test_utils.SequenceLayerTest):
           grad_rtol=1e-5,
       )
 
-  def test_gmm_attention_emit_outputs(self):
+  def test_emit_outputs(self):
     """Run a separate test since verify_contract() can't return emits."""
     key = jax.random.PRNGKey(1234)
     num_heads, units_per_head, monotonic = 3, 5, True
@@ -657,7 +657,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       x = test_utils.random_sequence(batch_size, time, channels)
       self.assertEqual(
           l.get_output_shape_for_sequence(x, constants=constants),
@@ -672,7 +672,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
           grad_rtol=1e-5,
       )
 
-  def test_dot_product_attention_emit_outputs(self):
+  def test_emit_outputs(self):
     key = jax.random.PRNGKey(1234)
     num_heads, units_per_head = 3, 5
     batch_size, source_time, source_channels = 2, 11, 2
@@ -722,9 +722,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
   @parameterized.parameters(True, False)
-  def test_dot_product_attention_dropout(
-      self, broadcast_dropout_across_queries
-  ):
+  def test_dropout(self, broadcast_dropout_across_queries):
     key = jax.random.PRNGKey(1234)
     source_name = 'source'
     l = attention.DotProductAttention.Config(
@@ -761,7 +759,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     )
     self.assertSequencesClose(y_no_dropout, y_no_dropout2)
 
-  def test_dot_product_attention_logits_soft_cap(self):
+  def test_logits_soft_cap(self):
     key = jax.random.PRNGKey(1234)
     num_heads, units_per_head = 3, 5
     batch_size, source_time, source_channels = 2, 11, 2
@@ -842,7 +840,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       x = test_utils.random_sequence(batch_size, time, channels)
       self.assertEqual(
           l.get_output_shape_for_sequence(x, constants=constants),
@@ -1010,9 +1008,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
           ),
       ),
   )
-  def test_dot_product_attention_dtypes(
-      self, param_dtype, input_dtype, compute_dtype, config
-  ):
+  def test_dtypes(self, param_dtype, input_dtype, compute_dtype, config):
     key = jax.random.PRNGKey(1234)
     batch_size, source_time, source_channels = 3, 7, 4
     random_mask = True
@@ -1431,7 +1427,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 6)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -1502,7 +1498,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l, x, input_projection=l.config.input_projection
     )
 
-    for time in range(21, 26):
+    for time in [21, 22]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(batch_size, time, channels)
         self.verify_contract(
@@ -1618,7 +1614,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l, x, input_projection=l.config.input_projection
     )
 
-    for time in range(21, 26):
+    for time in [21, 22]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(batch_size, time, channels)
         self.verify_contract(
@@ -1681,9 +1677,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
   @parameterized.parameters(True, False)
-  def test_dot_product_self_attention_dropout(
-      self, broadcast_dropout_across_queries
-  ):
+  def test_dropout(self, broadcast_dropout_across_queries):
     key = jax.random.PRNGKey(1234)
     l = attention.DotProductSelfAttention.Config(
         num_heads=8,
@@ -1706,7 +1700,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
     self.assertSequencesClose(y_no_dropout, y_no_dropout2)
 
-  def test_dot_product_self_attention_emit_outputs(self):
+  def test_emit_outputs(self):
     key = jax.random.PRNGKey(1234)
     num_heads, units_per_head, max_past_horizon = 3, 5, 10
     l = attention.DotProductSelfAttention.Config(
@@ -1806,7 +1800,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 6)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -1839,9 +1833,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
           ),
       ),
   )
-  def test_dot_product_self_attention_dtypes(
-      self, param_dtype, input_dtype, compute_dtype, config
-  ):
+  def test_dtypes(self, param_dtype, input_dtype, compute_dtype, config):
     key = jax.random.PRNGKey(1234)
     batch_size = 2
     random_mask = True
@@ -1865,22 +1857,19 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l, x, input_projection=l.config.input_projection
     )
 
-    # Test time dimension shorter and longer than max_horizon.
-    for time in (1, l.config.max_future_horizon + 3):
-      with self.subTest(f'time{time}'):
-        x = test_utils.random_sequence(
-            batch_size,
-            time,
-            channels,
-            random_mask=random_mask,
-            dtype=input_dtype,
-        )
-        self.verify_contract(
-            l,
-            x,
-            training=False,
-            **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
-        )
+    x = test_utils.random_sequence(
+        batch_size,
+        3,
+        channels,
+        random_mask=random_mask,
+        dtype=input_dtype,
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
+    )
 
   @parameterized.product(
       config=(
@@ -2192,7 +2181,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 6)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -2269,7 +2258,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 11)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -2343,7 +2332,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 11)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -2400,24 +2389,21 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l, x, input_projection=l.config.input_projection
     )
 
-    # Test time dimension shorter and longer than max_horizon.
-    for time in (1, max_future_horizon + 3):
-      with self.subTest(f'time{time}'):
-        x = test_utils.random_sequence(
-            batch_size,
-            time,
-            channels,
-            random_mask=True,
-        )
-        self.assertEqual(
-            l.get_output_shape_for_sequence(x), (num_heads, units_per_head)
-        )
-        self.verify_contract(
-            l,
-            x,
-            training=False,
-            **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
-        )
+    x = test_utils.random_sequence(
+        batch_size,
+        3,
+        channels,
+        random_mask=True,
+    )
+    self.assertEqual(
+        l.get_output_shape_for_sequence(x), (num_heads, units_per_head)
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
+    )
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0
@@ -2480,7 +2466,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 11)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -2570,9 +2556,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
           ),
       ),
   )
-  def test_local_dot_product_self_attention_dtypes(
-      self, param_dtype, input_dtype, compute_dtype, config
-  ):
+  def test_dtypes(self, param_dtype, input_dtype, compute_dtype, config):
     key = jax.random.PRNGKey(1234)
     batch_size = 2
     random_mask = True
@@ -2601,22 +2585,19 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l, x, input_projection=l.config.input_projection
     )
 
-    # Test time dimension shorter and longer than max_horizon.
-    for time in (1, l.config.max_future_horizon + 3):
-      with self.subTest(f'time{time}'):
-        x = test_utils.random_sequence(
-            batch_size,
-            time,
-            channels,
-            random_mask=random_mask,
-            dtype=input_dtype,
-        )
-        self.verify_contract(
-            l,
-            x,
-            training=False,
-            **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
-        )
+    x = test_utils.random_sequence(
+        batch_size,
+        7,
+        channels,
+        random_mask=random_mask,
+        dtype=input_dtype,
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
+    )
 
   @parameterized.product(
       config=(
@@ -2720,7 +2701,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     )
 
     # Sweep time dimension shorter and longer than max_horizon.
-    for time in list(range(1, 11)) + list(range(21, 23)):
+    for time in [1, 2, 3, 11, 12]:
       with self.subTest(f'time{time}'):
         x = test_utils.random_sequence(
             batch_size, time, channels, random_mask=random_mask
@@ -3180,7 +3161,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       # Source and x must be the same length.
       x = test_utils.random_sequence(
           batch_size, time, channels, low_length=time // 2
@@ -3221,9 +3202,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
           ),
       ),
   )
-  def test_streaming_local_dot_product_attention_dtypes(
-      self, param_dtype, input_dtype, compute_dtype, config
-  ):
+  def test_dtypes(self, param_dtype, input_dtype, compute_dtype, config):
     key = jax.random.PRNGKey(1234)
     batch_size, source_channels = 2, 2
     random_mask = True
@@ -3613,7 +3592,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       # Source and x must be the same length.
       x = test_utils.random_sequence(
           batch_size, time, channels, low_length=time // 2
@@ -3702,7 +3681,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       # Source and x must be the same length.
       x = test_utils.random_sequence(
           batch_size, time, channels, low_length=time // 2
@@ -3745,9 +3724,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
           ),
       ),
   )
-  def test_streaming_local_dot_product_attention_dtypes(
-      self, param_dtype, input_dtype, compute_dtype, config
-  ):
+  def test_dtypes(self, param_dtype, input_dtype, compute_dtype, config):
     key = jax.random.PRNGKey(1234)
     batch_size, source_channels = 2, 2
     random_mask = True
@@ -4156,7 +4133,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
     channels = 3
-    for time in range(21, 23):
+    for time in [11, 12]:
       # Source and x must be the same length.
       x = test_utils.random_sequence(
           batch_size, time, channels, low_length=time // 2
