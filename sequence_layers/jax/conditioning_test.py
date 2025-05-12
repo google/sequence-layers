@@ -33,6 +33,7 @@ AFFINE_SHIFT = conditioning.Conditioning.Combination.AFFINE_SHIFT
 AFFINE_SCALE = conditioning.Conditioning.Combination.AFFINE_SCALE
 MUL = conditioning.Conditioning.Combination.MUL
 CONCAT = conditioning.Conditioning.Combination.CONCAT
+CONCAT_BEFORE = conditioning.Conditioning.Combination.CONCAT_BEFORE
 AFFINE = conditioning.Conditioning.Combination.AFFINE
 
 
@@ -63,6 +64,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (IDENTITY, CONCAT, (2, 5), (7,), (2, 12)),
       (IDENTITY, CONCAT, (3, 1, 5), (2, 7), (3, 2, 12)),
       (IDENTITY, CONCAT, (2, 5), (3, 1, 7), (3, 2, 12)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), tuple(), (2,)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), (5,), (6,)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), (2, 5), (2, 6)),
+      (IDENTITY, CONCAT_BEFORE, (2,), tuple(), (3,)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), tuple(), (2, 6)),
+      (IDENTITY, CONCAT_BEFORE, (5,), (7,), (12,)),
+      (IDENTITY, CONCAT_BEFORE, (5,), (2, 7), (2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), (7,), (2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (3, 1, 5), (2, 7), (3, 2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), (3, 1, 7), (3, 2, 12)),
       (LINEAR, ADD, tuple(), tuple(), tuple()),
       (LINEAR, ADD, tuple(), (5,), tuple()),
       (LINEAR, ADD, tuple(), (2, 5), tuple()),
@@ -123,6 +134,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, CONCAT, (2, 5), (7,), (2, 10)),
       (LINEAR, CONCAT, (3, 1, 5), (2, 7), (3, 1, 10)),
       (LINEAR, CONCAT, (2, 7), (3, 1, 5), (2, 14)),
+      (LINEAR, CONCAT_BEFORE, tuple(), tuple(), (2,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (5,), (2,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (2, 5), (2,)),
+      (LINEAR, CONCAT_BEFORE, (2,), tuple(), (4,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), tuple(), (2, 10)),
+      (LINEAR, CONCAT_BEFORE, (5,), (7,), (10,)),
+      (LINEAR, CONCAT_BEFORE, (7,), (2, 5), (14,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), (7,), (2, 10)),
+      (LINEAR, CONCAT_BEFORE, (3, 1, 5), (2, 7), (3, 1, 10)),
+      (LINEAR, CONCAT_BEFORE, (2, 7), (3, 1, 5), (2, 14)),
   )
   def test_conditioning_sequence(
       self,
@@ -188,6 +209,7 @@ class ConditioningTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       (IDENTITY, CONCAT, (2, 5), tuple(), (2, 6)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), tuple(), (2, 6)),
       (LINEAR, ADD, (5,), (7,), (5,)),
       (LINEAR_AFFINE, AFFINE, (5,), (7,), (5,)),
       (LINEAR, AFFINE_SCALE, (5,), (7,), (5,)),
@@ -291,6 +313,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, CONCAT, (2, 5), (7,), (2, 1), (2, 6)),
       (LINEAR, CONCAT, (3, 1, 5), (2, 7), (3, 1, 1), (3, 1, 6)),
       (LINEAR, CONCAT, (2, 7), (3, 1, 5), (2, 1), (2, 8)),
+      (LINEAR, CONCAT_BEFORE, tuple(), tuple(), (2,), (3,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (5,), (2,), (3,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (2, 5), (2,), (3,)),
+      (LINEAR, CONCAT_BEFORE, (2,), tuple(), (1,), (3,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), tuple(), (2, 1), (2, 6)),
+      (LINEAR, CONCAT_BEFORE, (5,), (7,), (1,), (6,)),
+      (LINEAR, CONCAT_BEFORE, (7,), (2, 5), (1,), (8,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), (7,), (2, 1), (2, 6)),
+      (LINEAR, CONCAT_BEFORE, (3, 1, 5), (2, 7), (3, 1, 1), (3, 1, 6)),
+      (LINEAR, CONCAT_BEFORE, (2, 7), (3, 1, 5), (2, 1), (2, 8)),
       (LINEAR, AFFINE_SHIFT, tuple(), tuple(), tuple(), tuple()),
       (LINEAR, AFFINE_SHIFT, tuple(), (5,), tuple(), tuple()),
       (LINEAR, AFFINE_SHIFT, tuple(), (2, 5), tuple(), tuple()),
@@ -407,6 +439,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (IDENTITY, CONCAT, (2, 5), (7,), (2, 12)),
       (IDENTITY, CONCAT, (3, 1, 5), (2, 7), (3, 2, 12)),
       (IDENTITY, CONCAT, (2, 5), (3, 1, 7), (3, 2, 12)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), tuple(), (2,)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), (5,), (6,)),
+      (IDENTITY, CONCAT_BEFORE, tuple(), (2, 5), (2, 6)),
+      (IDENTITY, CONCAT_BEFORE, (2,), tuple(), (3,)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), tuple(), (2, 6)),
+      (IDENTITY, CONCAT_BEFORE, (5,), (7,), (12,)),
+      (IDENTITY, CONCAT_BEFORE, (5,), (2, 7), (2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), (7,), (2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (3, 1, 5), (2, 7), (3, 2, 12)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), (3, 1, 7), (3, 2, 12)),
       (LINEAR, ADD, tuple(), tuple(), tuple()),
       (LINEAR, ADD, tuple(), (5,), tuple()),
       (LINEAR, ADD, tuple(), (2, 5), tuple()),
@@ -437,6 +479,16 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (LINEAR, CONCAT, (2, 5), (7,), (2, 10)),
       (LINEAR, CONCAT, (3, 1, 5), (2, 7), (3, 1, 10)),
       (LINEAR, CONCAT, (2, 7), (3, 1, 5), (2, 14)),
+      (LINEAR, CONCAT_BEFORE, tuple(), tuple(), (2,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (5,), (2,)),
+      (LINEAR, CONCAT_BEFORE, tuple(), (2, 5), (2,)),
+      (LINEAR, CONCAT_BEFORE, (2,), tuple(), (4,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), tuple(), (2, 10)),
+      (LINEAR, CONCAT_BEFORE, (5,), (7,), (10,)),
+      (LINEAR, CONCAT_BEFORE, (7,), (2, 5), (14,)),
+      (LINEAR, CONCAT_BEFORE, (2, 5), (7,), (2, 10)),
+      (LINEAR, CONCAT_BEFORE, (3, 1, 5), (2, 7), (3, 1, 10)),
+      (LINEAR, CONCAT_BEFORE, (2, 7), (3, 1, 5), (2, 14)),
       (LINEAR, AFFINE_SHIFT, tuple(), tuple(), tuple()),
       (LINEAR, AFFINE_SHIFT, tuple(), (5,), tuple()),
       (LINEAR, AFFINE_SHIFT, tuple(), (2, 5), tuple()),
@@ -525,6 +577,7 @@ class ConditioningTest(test_utils.SequenceLayerTest):
       (IDENTITY, ADD, (5,), (6,)),
       (IDENTITY, ADD, (3, 4, 5), (2, 5)),
       (IDENTITY, CONCAT, (2, 5), (3, 7)),
+      (IDENTITY, CONCAT_BEFORE, (2, 5), (3, 7)),
   )
   def test_conditioning_invalid_shapes(
       self, projection, combination, x_channel_shape, c_channel_shape
@@ -711,6 +764,63 @@ class ConditioningTest(test_utils.SequenceLayerTest):
 
     self.assertSequencesClose(conditioned_x, expected_conditioned_x)
 
+  def test_condition_sequence_concat_before_combination(self):
+    # [2, 3, 2, 4]
+    x = types.Sequence(
+        _float_tensor([
+            [
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+                [[1, 2, 3, 4], [5, 6, 7, 8]],
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+            ],
+            [
+                [[4, 3, 2, 1], [8, 7, 6, 5]],
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+                [[2, 4, 6, 8], [1, 3, 5, 7]],
+            ],
+        ]),
+        jnp.asarray([[False, True, False], [True, False, True]]),
+    )
+
+    # [2, 3, 2]
+    c = types.Sequence(
+        _float_tensor([
+            [[-1, -2], [-3, -4], [-5, -6]],
+            [[-1, -3], [-3, -5], [-7, -9]],
+        ]),
+        jnp.asarray([[True, True, False], [False, True, True]]),
+    )
+
+    # [2, 3, 2, 6]
+    expected_conditioned_x = types.Sequence(
+        _float_tensor([
+            [
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+                [[-3, -4, 1, 2, 3, 4], [-3, -4, 5, 6, 7, 8]],
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+            ],
+            [
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+                [[-7, -9, 2, 4, 6, 8], [-7, -9, 1, 3, 5, 7]],
+            ],
+        ]),
+        jnp.asarray([[False, True, False], [False, False, True]]),
+    )
+
+    key = jax.random.PRNGKey(1234)
+    l = conditioning.Conditioning.Config(
+        'test', IDENTITY, CONCAT_BEFORE, name='conditioning_layer'
+    ).make()
+    constants = {'test': c}
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    conditioned_x = l.layer(
+        x, training=False, constants=constants
+    ).mask_invalid()
+
+    self.assertSequencesClose(conditioned_x, expected_conditioned_x)
+
   def test_condition_tensor_concat_combination(self):
     # [2, 3, 2, 4]
     x = types.Sequence(
@@ -752,6 +862,57 @@ class ConditioningTest(test_utils.SequenceLayerTest):
     key = jax.random.PRNGKey(1234)
     l = conditioning.Conditioning.Config(
         'test', IDENTITY, CONCAT, name='conditioning_layer'
+    ).make()
+    constants = {'test': c}
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    conditioned_x = l.layer(
+        x, training=False, constants=constants
+    ).mask_invalid()
+
+    self.assertSequencesClose(conditioned_x, expected_conditioned_x)
+
+  def test_condition_tensor_concat_before_combination(self):
+    # [2, 3, 2, 4]
+    x = types.Sequence(
+        _float_tensor([
+            [
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+                [[1, 2, 3, 4], [5, 6, 7, 8]],
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+            ],
+            [
+                [[4, 3, 2, 1], [8, 7, 6, 5]],
+                [[0, 0, 0, 0], [0, 0, 0, 0]],
+                [[2, 4, 6, 8], [1, 3, 5, 7]],
+            ],
+        ]),
+        jnp.asarray([[False, True, False], [True, False, True]]),
+    )
+
+    # [2, 2]
+    c = _float_tensor([[-1, -2], [-3, -4]])
+
+    # [2, 3, 2, 6]
+    expected_conditioned_x = types.Sequence(
+        _float_tensor([
+            [
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+                [[-1, -2, 1, 2, 3, 4], [-1, -2, 5, 6, 7, 8]],
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+            ],
+            [
+                [[-3, -4, 4, 3, 2, 1], [-3, -4, 8, 7, 6, 5]],
+                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],
+                [[-3, -4, 2, 4, 6, 8], [-3, -4, 1, 3, 5, 7]],
+            ],
+        ]),
+        jnp.asarray([[False, True, False], [True, False, True]]),
+    )
+
+    key = jax.random.PRNGKey(1234)
+    l = conditioning.Conditioning.Config(
+        'test', IDENTITY, CONCAT_BEFORE, name='conditioning_layer'
     ).make()
     constants = {'test': c}
     l = self.init_and_bind_layer(key, l, x, constants=constants)
@@ -833,6 +994,46 @@ class ConditioningTest(test_utils.SequenceLayerTest):
     key = jax.random.PRNGKey(1234)
     l = conditioning.Conditioning.Config(
         'test', IDENTITY, CONCAT, name='conditioning_layer'
+    ).make()
+    constants = {'test': c}
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+
+    conditioned_x = l.layer(
+        x, training=False, constants=constants
+    ).mask_invalid()
+    self.assertSequencesClose(conditioned_x, expected_conditioned_x)
+
+  def test_conditioned_values_concat_before_combination_2d_sequences(self):
+    # [2, 3]
+    x = types.Sequence(
+        _float_tensor([
+            [1, 2, 3],
+            [4, 5, 6],
+        ]),
+        jnp.asarray([[False, True, False], [True, False, True]]),
+    )
+
+    # [2, 3]
+    c = types.Sequence(
+        _float_tensor([
+            [2, 4, 6],
+            [3, 5, 7],
+        ]),
+        jnp.asarray([[True, True, False], [False, True, True]]),
+    )
+
+    # [2, 3, 2]
+    expected_conditioned_x = types.Sequence(
+        _float_tensor([
+            [[0, 0], [4, 2], [0, 0]],
+            [[0, 0], [0, 0], [7, 6]],
+        ]),
+        jnp.asarray([[False, True, False], [False, False, True]]),
+    )
+
+    key = jax.random.PRNGKey(1234)
+    l = conditioning.Conditioning.Config(
+        'test', IDENTITY, CONCAT_BEFORE, name='conditioning_layer'
     ).make()
     constants = {'test': c}
     l = self.init_and_bind_layer(key, l, x, constants=constants)
