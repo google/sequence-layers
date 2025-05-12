@@ -15,6 +15,7 @@
 
 import dataclasses
 
+from absl.testing import parameterized
 import chex
 import flax
 import flax.linen as nn
@@ -33,8 +34,6 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import parameterized
 
 
 class SerialTest(test_utils.SequenceLayerTest):

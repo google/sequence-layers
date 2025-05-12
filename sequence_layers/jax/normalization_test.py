@@ -15,6 +15,7 @@
 
 import itertools
 
+from absl.testing import parameterized
 import chex
 import flax
 import jax
@@ -25,8 +26,6 @@ from sequence_layers.jax import dense
 from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
-
-from google3.testing.pybase import parameterized
 
 
 class LayerNormalizationTest(test_utils.SequenceLayerTest):

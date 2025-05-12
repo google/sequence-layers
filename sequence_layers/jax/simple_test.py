@@ -19,6 +19,7 @@ import itertools
 from unittest import mock
 
 from absl import logging
+from absl.testing import parameterized
 import chex
 import einops
 import flax
@@ -32,7 +33,6 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 
-from google3.testing.pybase import parameterized
 from google3.testing.pymocks import matchers
 
 

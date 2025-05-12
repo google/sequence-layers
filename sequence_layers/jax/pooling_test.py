@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for pooling layers."""
 
+from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -23,8 +24,6 @@ from sequence_layers.jax import pooling
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
-from google3.testing.pybase import parameterized
 
 
 class Pooling1DTest(test_utils.SequenceLayerTest):

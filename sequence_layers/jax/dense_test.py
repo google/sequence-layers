@@ -13,6 +13,7 @@
 # limitations under the License.
 """Dense tests."""
 
+from absl.testing import parameterized
 import chex
 import flax
 import flax.linen as nn
@@ -21,8 +22,6 @@ import jax.numpy as jnp
 from sequence_layers.jax import dense
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
-
-from google3.testing.pybase import parameterized
 
 
 class DenseTest(test_utils.SequenceLayerTest):
@@ -75,17 +74,18 @@ class DenseTest(test_utils.SequenceLayerTest):
 
   def test_use_einsum_factory(self):
     """Check that einsum_factory produces is used for dense einsum."""
+
     def einsum_factory() -> types.JnpEinsumT:
       def custom_einsum(equation, *args, **kwargs):
         return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+
       return custom_einsum
+
     key = jax.random.PRNGKey(1234)
     l = dense.Dense.Config(3, einsum_factory=einsum_factory).make()
     x = test_utils.random_sequence(2, 3, 5)
     l = self.init_and_bind_layer(key, l, x)
-    self.assertCountEqual(
-        l.variables['params'], ['kernel', 'bias']
-    )
+    self.assertCountEqual(l.variables['params'], ['kernel', 'bias'])
 
     y = l(x, training=False)
     self.assertEqual(y.shape, (2, 3, 3))
@@ -126,10 +126,17 @@ class DenseTest(test_utils.SequenceLayerTest):
     chex.assert_trees_all_equal_shapes_and_dtypes(
         flax.core.meta.unbox(l.variables),
         {
-            'params': {
-                'kernel': jnp.zeros((channels_shape[-1], 2), dtype=param_dtype),
-            } | (
-                {'bias': jnp.zeros((2,), dtype=param_dtype)} if use_bias else {}
+            'params': (
+                {
+                    'kernel': jnp.zeros(
+                        (channels_shape[-1], 2), dtype=param_dtype
+                    ),
+                }
+                | (
+                    {'bias': jnp.zeros((2,), dtype=param_dtype)}
+                    if use_bias
+                    else {}
+                )
             )
         },
     )

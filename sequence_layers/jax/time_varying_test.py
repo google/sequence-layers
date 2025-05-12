@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from absl.testing import parameterized
 import chex
 import flax
 import flax.linen as nn
@@ -22,8 +23,6 @@ from sequence_layers.jax import time_varying
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 
-from google3.testing.pybase import parameterized
-
 
 def _round_up_to_multiple_of(x: int, multiple_of: int) -> int:
   return (x + multiple_of - 1) // multiple_of * multiple_of
@@ -34,12 +33,12 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
   @parameterized.product(
       shape=((3, 4), (1, 2, 3), (2, 3, 5, 9)),
       round_multiple=(None, 128),
-    )
+  )
   def test_constant_num_embeddings_per_step(
       self,
       shape: tuple[int, ...],
       round_multiple: int | None,
-    ):
+  ):
     key = jax.random.PRNGKey(1234)
     dimension, num_embeddings, num_steps = 8, 5, 7
     x = test_utils.random_sequence(
@@ -72,8 +71,7 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
     expected_num_embs = num_embeddings * num_steps
     if round_multiple:
       expected_num_embs = _round_up_to_multiple_of(
-          expected_num_embs,
-          round_multiple
+          expected_num_embs, round_multiple
       )
     chex.assert_trees_all_equal_shapes_and_dtypes(
         variables,
@@ -562,23 +560,26 @@ class MaskedDenseTest(test_utils.SequenceLayerTest):
     chex.assert_trees_all_equal_shapes_and_dtypes(
         flax.core.meta.unbox(l.variables),
         {
-            'params': {
-                'kernel': jnp.zeros(
-                    (num_steps, num_steps, input_dim, output_dim),
-                    dtype=param_dtype,
-                ),
-            } | (
+            'params': (
                 {
-                    'bias': jnp.zeros(
-                        (
-                            num_steps,
-                            output_dim,
-                        ),
+                    'kernel': jnp.zeros(
+                        (num_steps, num_steps, input_dim, output_dim),
                         dtype=param_dtype,
-                    )
+                    ),
                 }
-                if use_bias
-                else {}
+                | (
+                    {
+                        'bias': jnp.zeros(
+                            (
+                                num_steps,
+                                output_dim,
+                            ),
+                            dtype=param_dtype,
+                        )
+                    }
+                    if use_bias
+                    else {}
+                )
             )
         },
     )

@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for signal utilities."""
 
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -22,8 +23,6 @@ from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 import tensorflow as tf
-
-from google3.testing.pybase import parameterized
 
 
 def _tf_signal_frame(
