@@ -96,6 +96,8 @@ class BaseConditioning(
     AFFINE_SCALE = 5
     # Broadcast-multiply conditioning. Requires LINEAR or IDENTITY projection.
     MUL = 6
+    # Broadcast-concat conditioning via prepending.
+    CONCAT_BEFORE = 7
 
   def _projected_condition_shape(
       self, input_shape: types.Shape, condition_shape: types.Shape
@@ -220,7 +222,7 @@ class BaseConditioning(
           | self.Combination.AFFINE_SCALE
       ):
         return jnp.broadcast_shapes(input_shape, projected_conditioning_shape)
-      case self.Combination.CONCAT:
+      case self.Combination.CONCAT | self.Combination.CONCAT_BEFORE:
         input_inner_dim = input_shape[-1] if input_shape else 1
         projected_conditioning_inner_dim = (
             projected_conditioning_shape[-1]
@@ -307,6 +309,8 @@ class BaseConditioning(
         combine_fn = utils.sequence_broadcast_add
       case self.Combination.CONCAT:
         combine_fn = utils.sequence_broadcast_concat
+      case self.Combination.CONCAT_BEFORE:
+        combine_fn = lambda x, c: utils.sequence_broadcast_concat(c, x)
       case self.Combination.AFFINE:
         combine_fn = _affine_fn
       case self.Combination.AFFINE_SHIFT:
