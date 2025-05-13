@@ -34,8 +34,6 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 
-from google3.testing.pymocks import matchers
-
 
 class ScaleTest(test_utils.SequenceLayerTest):
 
@@ -549,9 +547,7 @@ class GlobalReshapeTest(test_utils.SequenceLayerTest):
       self.assertFalse(l.supports_step)
 
     with self.subTest('verify_contract'):
-      self.verify_contract(
-          l, x, training=False, test_padding_invariance=False
-      )
+      self.verify_contract(l, x, training=False, test_padding_invariance=False)
       self.assertEmpty(l.variables)
 
   @parameterized.parameters(
@@ -1784,7 +1780,7 @@ class Downsample1DTest(test_utils.SequenceLayerTest):
     l = simple.Downsample1D.Config(rate, name='downsample_1d').make().bind({})
 
     self.assertEqual(l.block_size, rate)
-    self.assertEqual(1/l.output_ratio, rate)
+    self.assertEqual(1 / l.output_ratio, rate)
     self.assertTrue(l.supports_step)
     self.assertEqual(l.name, 'downsample_1d')
     self.assertEmpty(l.variables)
@@ -1858,6 +1854,38 @@ class MaskInvalidTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(x.mask_invalid(), y)
 
 
+class Has:
+  """A simple `HAS(v)` matcher that tests whether something has `v` in it."""
+
+  def __init__(self, value):
+    self._v = value
+
+  def __eq__(self, o):
+    return self._v in o
+
+  def __ne__(self, o):
+    return not self == o
+
+  def __repr__(self):
+    return '<HAS(%r)>' % self._v
+
+
+class Not:
+  """Negates a matcher."""
+
+  def __init__(self, matcher):
+    self._matcher = matcher
+
+  def __eq__(self, o):
+    return self._matcher != o
+
+  def __ne__(self, o):
+    return not self == o
+
+  def __repr__(self):
+    return '<NOT(%r)>' % self._matcher
+
+
 class LoggingTest(test_utils.SequenceLayerTest):
 
   @mock.patch.object(logging, 'info', wraps=logging.info)
@@ -1873,17 +1901,17 @@ class LoggingTest(test_utils.SequenceLayerTest):
     with self.subTest('prefix'):
       l = simple.Logging.Config(prefix='test string').make().bind({})
       l.layer(x, training=training, constants=constants)
-      mock_logger.assert_called_with(matchers.HAS('test string'))
+      mock_logger.assert_called_with(Has('test string'))
 
     with self.subTest('specs_only'):
       l = simple.Logging.Config(dump_tensors=False).make().bind({})
       with self.subTest('layer'):
         l.layer(x, training=training, constants=constants)
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('1.414')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('3.14')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('4.2')))
-        mock_logger.assert_called_with(matchers.HAS('(1, 4)'))
-        mock_logger.assert_called_with(matchers.HAS('float32'))
+        mock_logger.assert_called_with(Not(Has('1.414')))
+        mock_logger.assert_called_with(Not(Has('3.14')))
+        mock_logger.assert_called_with(Not(Has('4.2')))
+        mock_logger.assert_called_with(Has('(1, 4)'))
+        mock_logger.assert_called_with(Has('float32'))
       with self.subTest('get_initial_state'):
         l.get_initial_state(
             batch_size=x.shape[0],
@@ -1891,26 +1919,26 @@ class LoggingTest(test_utils.SequenceLayerTest):
             training=training,
             constants=constants,
         )
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('3.14')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('4.2')))
-        mock_logger.assert_called_with(matchers.HAS('(1, 4)'))
-        mock_logger.assert_called_with(matchers.HAS('float32'))
+        mock_logger.assert_called_with(Not(Has('3.14')))
+        mock_logger.assert_called_with(Not(Has('4.2')))
+        mock_logger.assert_called_with(Has('(1, 4)'))
+        mock_logger.assert_called_with(Has('float32'))
       with self.subTest('step'):
         l.step(x, state, training=training, constants=constants)
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('1.414')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('2.718')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('3.14')))
-        mock_logger.assert_called_with(matchers.NOT(matchers.HAS('4.2')))
-        mock_logger.assert_called_with(matchers.HAS('(1, 4)'))
-        mock_logger.assert_called_with(matchers.HAS('float32'))
+        mock_logger.assert_called_with(Not(Has('1.414')))
+        mock_logger.assert_called_with(Not(Has('2.718')))
+        mock_logger.assert_called_with(Not(Has('3.14')))
+        mock_logger.assert_called_with(Not(Has('4.2')))
+        mock_logger.assert_called_with(Has('(1, 4)'))
+        mock_logger.assert_called_with(Has('float32'))
 
     with self.subTest('dumps_tensors'):
       l = simple.Logging.Config(dump_tensors=True).make().bind({})
       with self.subTest('layer'):
         l.layer(x, training=training, constants=constants)
-        mock_logger.assert_called_with(matchers.HAS('1.414'))
-        mock_logger.assert_called_with(matchers.HAS('3.14'))
-        mock_logger.assert_called_with(matchers.HAS('4.2'))
+        mock_logger.assert_called_with(Has('1.414'))
+        mock_logger.assert_called_with(Has('3.14'))
+        mock_logger.assert_called_with(Has('4.2'))
       with self.subTest('get_initial_state'):
         l.get_initial_state(
             batch_size=x.shape[0],
@@ -1918,14 +1946,14 @@ class LoggingTest(test_utils.SequenceLayerTest):
             training=training,
             constants=constants,
         )
-        mock_logger.assert_called_with(matchers.HAS('3.14'))
-        mock_logger.assert_called_with(matchers.HAS('4.2'))
+        mock_logger.assert_called_with(Has('3.14'))
+        mock_logger.assert_called_with(Has('4.2'))
       with self.subTest('step'):
         l.step(x, state, training=training, constants=constants)
-        mock_logger.assert_called_with(matchers.HAS('1.414'))
-        mock_logger.assert_called_with(matchers.HAS('2.718'))
-        mock_logger.assert_called_with(matchers.HAS('3.14'))
-        mock_logger.assert_called_with(matchers.HAS('4.2'))
+        mock_logger.assert_called_with(Has('1.414'))
+        mock_logger.assert_called_with(Has('2.718'))
+        mock_logger.assert_called_with(Has('3.14'))
+        mock_logger.assert_called_with(Has('4.2'))
 
 
 class ArgmaxTest(test_utils.SequenceLayerTest):
