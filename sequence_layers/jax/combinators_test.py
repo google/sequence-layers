@@ -21,6 +21,7 @@ import flax
 import flax.linen as nn
 import jax
 import jax._src.ad_checkpoint
+import jax.experimental.mesh_utils  # Required for OSS.
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import attention
