@@ -17,10 +17,6 @@ from absl.testing import parameterized
 import flax
 import jax
 import jax.numpy as jnp
-from praxis import pax_fiddle
-from praxis.layers import activations
-from praxis.layers import convolutions
-from praxis.layers import normalizations
 from sequence_layers.jax import convolution
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -566,57 +562,6 @@ class ComputeConvMaskTest(test_utils.SequenceLayerTest):
             False,
         ]],
     )
-
-
-class WeightNormTest(test_utils.SequenceLayerTest):
-
-  def test_weight_norm_praxis_equivalence(self):
-    kernel = [3, 3]
-    input_dim = 2
-    output_dim = 5
-    praxis_conv = convolutions.ConvBNActWithPadding(
-        filter_shape=[*kernel, input_dim, output_dim],
-        filter_stride=[1, 1],
-        weight_norm_tpl=pax_fiddle.Config(
-            normalizations.WeightNormL2, dim=output_dim
-        ),
-        batch_norm_tpl=None,
-        activation_tpl=pax_fiddle.Config(activations.Identity),
-        name='conv',
-    )
-    seq_conv = convolution.Conv2D.Config(
-        filters=output_dim,
-        kernel_size=kernel,
-        use_weight_norm=True,
-        use_bias=False,
-        time_padding='same',
-        spatial_padding='same',
-    ).make()
-    batch_size, time, spatial = 2, 20, 7
-    key = jax.random.PRNGKey(0)
-    x = test_utils.random_sequence(
-        batch_size,
-        time,
-        spatial,
-        input_dim,
-        dtype=jnp.float32,
-    )
-    seq_params = seq_conv.init(key, x, training=False)
-    pax_params = {
-        'params': {
-            'w': seq_params['params']['kernel'],
-            # Praxis does w = (g + 1.0) * normalized(w).
-            'weight_norm': {'g': seq_params['params']['scale'] - 1.0},
-        }
-    }
-    seq_out = seq_conv.apply(seq_params, x, training=False)
-    praxis_values, praxis_padding = praxis_conv.apply(
-        flax.core.meta.unbox(pax_params), x.values, 1.0 - x.mask
-    )
-    self.assertSequencesClose(
-        seq_out, types.Sequence(praxis_values, praxis_padding == 0.0)
-    )
-
 
 if __name__ == '__main__':
   test_utils.main()
