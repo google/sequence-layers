@@ -125,7 +125,10 @@ class LSTMTest(test_utils.SequenceLayerTest):
             mask=tf.convert_to_tensor(x.mask),
         ).numpy()
     )
-    kernel, recurrent_kernel, bias = l_keras.variables
+    kernel, recurrent_kernel, bias, *_ = l_keras.variables
+    assert 'kernel' in kernel.name
+    assert 'recurrent_kernel' in recurrent_kernel.name
+    assert 'bias' in bias.name
     kernel = jnp.asarray(kernel.numpy())
     recurrent_kernel = jnp.asarray(recurrent_kernel.numpy())
     bias = jnp.asarray(bias.numpy())
