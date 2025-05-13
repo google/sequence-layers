@@ -56,15 +56,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(1, 64, 1, random_lengths=False)
 
     l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=1e-6,
-        atol=1e-6,
-        grad_atol=1e-5,
-        grad_rtol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(
       kernel_size=[1, 2, 3, 4, 7],
@@ -96,15 +88,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.input_latency, 0)
     self.assertEqual(l.output_latency, 0)
 
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=1e-6,
-        atol=1e-6,
-        grad_atol=1e-5,
-        grad_rtol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(
       kernel_size=[1, 2, 3, 4, 7],
@@ -145,15 +129,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
     l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=5e-8,
-        atol=5e-7,
-        grad_rtol=1e-5,
-        grad_atol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(
       kernel_size=[1, 2, 3, 4, 7],
@@ -217,15 +193,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
     l = self.init_and_bind_layer(key, l, x)
 
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=5e-8,
-        atol=5e-7,
-        grad_rtol=1e-5,
-        grad_atol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(
       kernel_size=[1, 2, 3, 4, 7],
@@ -284,11 +252,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
     l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(
       kernel_size=[1, 2, 3, 4, 5],
@@ -338,15 +302,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
     l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=5e-8,
-        atol=5e-7,
-        grad_rtol=1e-5,
-        grad_atol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
   @parameterized.product(take_every_n=[2, 3, 4])
   def test_serial_usm(self, take_every_n: int):
@@ -454,15 +410,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(1, 16000, 1, random_lengths=False)
 
     l = self.init_and_bind_layer(key, l, x)
-    self.verify_contract(
-        l,
-        x,
-        training=False,
-        rtol=5e-8,
-        atol=5e-7,
-        grad_rtol=1e-5,
-        grad_atol=1e-5,
-    )
+    self.verify_contract(l, x, training=False)
 
 
 class Conv1DTest(test_utils.SequenceLayerTest):
