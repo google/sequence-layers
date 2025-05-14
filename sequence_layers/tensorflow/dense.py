@@ -13,7 +13,7 @@
 # limitations under the License.
 """Dense layers."""
 
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 from sequence_layers.tensorflow import types
 from sequence_layers.tensorflow import utils
@@ -87,7 +87,7 @@ class DenseShaped(types.Stateless):
 
   def __init__(
       self,
-      output_shape: Union[tf.TensorShape, List[int], Tuple[int]],
+      output_shape: Union[tf.TensorShape, List[int], tuple[int, ...]],
       activation=None,
       use_bias=True,
       kernel_initializer='glorot_uniform',

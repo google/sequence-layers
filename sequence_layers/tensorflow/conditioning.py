@@ -586,7 +586,7 @@ class NoiseConditioning(BaseConditioning):
 
   def __init__(
       self,
-      noise_channel_shape: tf.TensorShape | list[int] | tuple[int],
+      noise_channel_shape: tf.TensorShape | list[int] | tuple[int, ...],
       noise_sampler: simple.NoiseSampler,
       projection: BaseConditioning.Projection,
       combination: BaseConditioning.Combination,
