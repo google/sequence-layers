@@ -120,7 +120,7 @@ class RMSNormalization(types.PreservesShape, types.Stateless):
 
   def __init__(
       self,
-      axis: Union[int, tuple[int]] = -1,
+      axis: Union[int, tuple[int, ...]] = -1,
       epsilon: float = 0.001,
       scale: bool = True,
       gamma_initializer: tf.keras.initializers.Initializer = 'ones',
