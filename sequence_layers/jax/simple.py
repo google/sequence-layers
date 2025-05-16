@@ -18,6 +18,7 @@ from collections.abc import Mapping
 import dataclasses
 import fractions
 import functools
+import math
 import typing
 from typing import Any, Callable, Sequence as TypingSequence
 
@@ -58,6 +59,7 @@ __all__ = (
     'GatedTanhUnit',
     'GatedUnit',
     'Gelu',
+    'GlobalEinopsRearrange',
     'GlobalReshape',
     'GradientClipping',
     'Identity',
@@ -2441,11 +2443,11 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
   class Config(types.SequenceLayerConfig):
     """Config of EinopsRearrange."""
 
-    # Rearrangement pattern exluding the batch and time dimensions.
+    # Rearrangement pattern excluding the batch and time dimensions.
     pattern: str
-    # A dictionary of additional specifications for dimensions.
+    # A dictionary of additional length specifications for dimensions.
     axes_lengths: Mapping[str, int] | None = None
-    # Optional name for the module.
+    # Optional name of this layer.
     name: str | None = None
 
     def __post_init__(self):
@@ -2465,6 +2467,10 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
       return EinopsRearrange(self, name=self.name)
 
   config: Config
+
+  @property
+  def supports_step(self) -> bool:
+    return True
 
   def _get_rearrange_fn(self) -> Callable[[jax.Array], jax.Array]:
     before, after = self.config.pattern.split('->')
@@ -2494,6 +2500,100 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
     del constants
     rearrange_fn = self._get_rearrange_fn()
     output = jax.eval_shape(rearrange_fn, jnp.zeros((1, 1) + input_shape))
+    return tuple(output.shape[2:])
+
+
+class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
+  """A wrapper for einops.rearrange applied to the time and channel dimensions."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config of GlobalEinopsRearrange."""
+
+    # Rearrangement pattern excluding the batch dimension.
+    pattern: str
+    # A dictionary of additional length specifications for dimensions.
+    axes_lengths: Mapping[str, int] | None = None
+    # When ceil mode is False, the last frame is invalid if it contains any
+    # invalid steps. If ceil mode is True, then Then the last frame is valid if
+    # it contains at least one valid value.
+    ceil_mode: bool = False
+    # Optional name of this layer.
+    name: str | None = None
+
+    def __post_init__(self):
+      if '->' not in self.pattern:
+        raise ValueError(
+            f'The input pattern is not valid (got {self.pattern}).'
+        )
+
+      # Find all unique labels.
+      labels = set(self.pattern.replace('(', ' ').replace(')', ' ').split(' '))
+      if 'batch' in labels:
+        raise ValueError(
+            f'`batch` is a reserved axes labels (got {self.pattern}).'
+        )
+
+    def make(self) -> 'GlobalEinopsRearrange':
+      return GlobalEinopsRearrange(self, name=self.name)
+
+  config: Config
+
+  @property
+  def supports_step(self) -> bool:
+    return False
+
+  def _get_rearrange_fn(self) -> Callable[[jax.Array], jax.Array]:
+    before, after = self.config.pattern.split('->')
+    pattern = f'batch {before} -> batch {after}'
+    axes_lengths = self.config.axes_lengths if self.config.axes_lengths else {}
+    return functools.partial(einops.rearrange, pattern=pattern, **axes_lengths)
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    del training, constants
+    rearrange_fn = self._get_rearrange_fn()
+
+    values = rearrange_fn(x.mask_invalid().values)
+
+    # 1. Broadcast the mask to the full input shape, and then reshape it to the
+    # output shape.
+    mask = jnp.reshape(x.mask, x.shape[:2] + (1,) * len(x.channel_shape))
+    mask = jnp.broadcast_to(mask, x.shape)
+    # 2. EinopsRearrange the mask to the output shape, and then call jnp.all (in
+    # ceil_mode==False) to ensure that any timestep with *any* invalid input is
+    # invalid in the output).
+    mask = rearrange_fn(mask)
+
+    if self.config.ceil_mode:
+      mask = jnp.any(mask, axis=range(2, mask.ndim))
+    else:
+      mask = jnp.all(mask, axis=range(2, mask.ndim))
+
+    return types.Sequence(values, mask)
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    del constants
+    rearrange_fn = self._get_rearrange_fn()
+    if self.config.axes_lengths is not None:
+      time_dim = math.prod(self.config.axes_lengths.values())
+    else:
+      time_dim = 1
+    output = jax.eval_shape(
+        rearrange_fn, jnp.zeros((1, time_dim) + input_shape)
+    )
     return tuple(output.shape[2:])
 
 
