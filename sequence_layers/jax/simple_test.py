@@ -16,6 +16,7 @@
 import dataclasses
 import functools
 import itertools
+import math
 from unittest import mock
 
 from absl import logging
@@ -837,6 +838,77 @@ class EinopsRearrangeTest(test_utils.SequenceLayerTest):
   def test_einops_rearrange_error_make(self, pattern, axes_lengths):
     with self.assertRaises(ValueError):
       simple.EinopsRearrange.Config(
+          pattern, axes_lengths, name='rearrange'
+      ).make()
+
+
+class GlobalEinopsRearrangeTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      ((2, 3, 4, 5), 't c d -> (t c) d', None, (2, 12, 5)),
+      ((2, 12, 5), '(t c) d -> t (c d)', {'c': 4}, (2, 3, 20)),
+  )
+  def test_global_einops_rearrange(
+      self, input_shape, pattern, axes_lengths, output_shape
+  ):
+    key = jax.random.PRNGKey(1234)
+    values = jax.random.normal(key, shape=input_shape)
+    x = types.Sequence.from_values(values)
+    l = simple.GlobalEinopsRearrange.Config(
+        pattern, axes_lengths, name='rearrange'
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    y = self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    before, after = pattern.split('->')
+    pattern = f'batch {before} -> batch {after}'
+    if not axes_lengths:
+      axes_lengths = {}
+    y_expected = types.Sequence.from_values(
+        einops.rearrange(values, pattern, **axes_lengths)
+    )
+    self.assertSequencesEqual(y, y_expected)
+
+  @parameterized.parameters(
+      ((2, 6), [5, 6], '(t1 t2) -> t1 t2', {'t2': 3}, True, [2, 2]),
+      ((2, 6), [5, 6], '(t1 t2) -> t1 t2', {'t2': 3}, False, [1, 2]),
+      ((1, 4, 2), [3], '(a b) c -> a (b c)', {'b': 2}, False, [1]),
+      ((1, 4, 2), [3], '(a b) c -> a (b c)', {'b': 2}, True, [2]),
+  )
+  def test_global_einops_rearrange_ceil_mode(
+      self,
+      input_shape,
+      lengths,
+      pattern,
+      axes_lengths,
+      ceil_mode,
+      expected_lengths,
+  ):
+    key = jax.random.PRNGKey(1234)
+    values = jnp.arange(math.prod(input_shape)).reshape(input_shape)
+    x = types.Sequence.from_lengths(values, lengths)
+
+    l = simple.GlobalEinopsRearrange.Config(
+        pattern,
+        axes_lengths,
+        ceil_mode=ceil_mode,
+        name='rearrange',
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    y = l.layer(x, training=False)
+
+    self.assertSequenceEqual(y.lengths().tolist(), expected_lengths)
+
+  @parameterized.parameters(
+      ('(c d) batch ->  c d batch', {'c': 2}),
+      ('(c d) batch - c d batch', {'c': 2}),
+  )
+  def test_global_einops_rearrange_error_make(self, pattern, axes_lengths):
+    with self.assertRaises(ValueError):
+      simple.GlobalEinopsRearrange.Config(
           pattern, axes_lengths, name='rearrange'
       ).make()
 
