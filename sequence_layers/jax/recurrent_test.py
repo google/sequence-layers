@@ -18,7 +18,7 @@ import chex
 import flax
 import jax
 import jax.numpy as jnp
-from recurrentgemma._src.jax import layers as recurrentgemma_layers
+import recurrentgemma
 from sequence_layers.jax import recurrent
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -220,7 +220,7 @@ class RGLRUTest(test_utils.SequenceLayerTest):
         expected_variables,
     )
 
-    reference_layer = recurrentgemma_layers.RGLRU(
+    reference_layer = recurrentgemma.layers.RGLRU(
         width=units,
         num_heads=num_heads,
         scan_type=l._scan_type,

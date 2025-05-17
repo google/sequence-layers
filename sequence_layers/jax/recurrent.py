@@ -20,10 +20,7 @@ import einops
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from recurrentgemma._src import common
-from recurrentgemma._src.jax import complex_lib
-from recurrentgemma._src.jax import layers
-from recurrentgemma._src.jax import scan
+import recurrentgemma
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
@@ -354,16 +351,16 @@ class RGLRU(types.SequenceLayer):
   config: Config
 
   @property
-  def _scan_type(self) -> common.ScanType:
+  def _scan_type(self) -> recurrentgemma.common.ScanType:
     match self.config.scan_type:
       case 'auto':
-        return common.ScanType.AUTO
+        return recurrentgemma.common.ScanType.AUTO
       case 'linear_native':
-        return common.ScanType.LINEAR_NATIVE
+        return recurrentgemma.common.ScanType.LINEAR_NATIVE
       case 'associative_native':
-        return common.ScanType.ASSOCIATIVE_NATIVE
+        return recurrentgemma.common.ScanType.ASSOCIATIVE_NATIVE
       case 'linear_pallas':
-        return common.ScanType.LINEAR_PALLAS
+        return recurrentgemma.common.ScanType.LINEAR_PALLAS
       case _:
         raise ValueError(f'Unknown scan type: {self.config.scan_type}')
 
@@ -389,7 +386,7 @@ class RGLRU(types.SequenceLayer):
   def merged_to_complex(
       self,
       x: jt.Float[jt.ArrayT, '*b'],
-  ) -> complex_lib.RealOrComplex:
+  ) -> recurrentgemma.complex_lib.RealOrComplex:
     """Returns a (complex) array from a merged array.
 
     A merged array is one where the first half over the last axis represents the
@@ -413,7 +410,7 @@ class RGLRU(types.SequenceLayer):
       self,
       real: jt.Float[jt.ArrayT, '*b'],
       imag: jt.Float[jt.ArrayT, '*b'] | None,
-  ) -> complex_lib.RealOrComplex:
+  ) -> recurrentgemma.complex_lib.RealOrComplex:
     """Based on the settings, creates a (complex) number in the correct format.
 
     Args:
@@ -431,20 +428,20 @@ class RGLRU(types.SequenceLayer):
       return real
 
     if self.use_custom_complex(real.dtype):
-      return complex_lib.Complex(real, imag)
+      return recurrentgemma.complex_lib.Complex(real, imag)
     else:
       return real + 1j * imag
 
   def use_custom_complex(self, real_dtype: jnp.dtype) -> bool:
     return (
         real_dtype in (jnp.bfloat16, jnp.float16)
-        or self._scan_type == common.ScanType.LINEAR_PALLAS
+        or self._scan_type == recurrentgemma.common.ScanType.LINEAR_PALLAS
     )
 
   @jt.typed
   def complex_to_merged(
       self,
-      x: complex_lib.RealOrComplex,
+      x: recurrentgemma.complex_lib.RealOrComplex,
   ) -> jt.Float[jt.ArrayT, '*b']:
     """Returns a merged array from a (complex) array.
 
@@ -459,7 +456,9 @@ class RGLRU(types.SequenceLayer):
       A merged array represented by `x`.
     """
     if self.config.only_real:
-      assert not isinstance(x, complex_lib.Complex) and not jnp.iscomplexobj(x)
+      assert not isinstance(
+          x, recurrentgemma.complex_lib.Complex
+      ) and not jnp.iscomplexobj(x)
       return x
     else:
       return jnp.concatenate([x.real, x.imag], axis=-1)
@@ -549,29 +548,31 @@ class RGLRU(types.SequenceLayer):
     )
 
     # Compute input and `A` gates.
-    gate_x = complex_lib.sigmoid(input_gate(x_heads))
+    gate_x = recurrentgemma.complex_lib.sigmoid(input_gate(x_heads))
     gate_x = einops.rearrange(
         gate_x, '... h j -> ... (h j)', h=self.config.num_heads
     )
 
-    gate_a = complex_lib.sigmoid(a_gate(x_heads))
+    gate_a = recurrentgemma.complex_lib.sigmoid(a_gate(x_heads))
     gate_a = einops.rearrange(
         gate_a, '... h j -> ... (h j)', h=self.config.num_heads
     )
 
     # Compute the parameter `A` of the recurrence.
-    log_a_real = -8.0 * gate_a * complex_lib.softplus(a_real_param)
+    log_a_real = (
+        -8.0 * gate_a * recurrentgemma.complex_lib.softplus(a_real_param)
+    )
 
     if self.config.only_real:
-      a = complex_lib.exp(log_a_real)
+      a = recurrentgemma.complex_lib.exp(log_a_real)
     else:
       log_a_imag = a_imag_param * gate_a
       log_a_complex = self.real_imag_complex(log_a_real, log_a_imag)
-      a = complex_lib.exp(log_a_complex)
+      a = recurrentgemma.complex_lib.exp(log_a_complex)
 
     # Since A = |A| e^(i*θ), log A = log |A| + i*θ.
     # Real(log A) = log |A| therefore |A|^2 = e^(2*Real(log A))
-    mag_a_squared = complex_lib.exp(2 * log_a_real)
+    mag_a_squared = recurrentgemma.complex_lib.exp(2 * log_a_real)
 
     x = self.merged_to_complex(x)
 
@@ -584,7 +585,7 @@ class RGLRU(types.SequenceLayer):
     # Apply gamma normalization to the input. We need to clip the derivatives of
     # `sqrt` in order to prevent NaNs during training in bfloat16.
     reset = (segment_pos == 0).astype(a)
-    multiplier = layers.sqrt_bound_derivative(
+    multiplier = recurrentgemma.layers.sqrt_bound_derivative(
         1 - mag_a_squared, max_gradient=1000
     )
     multiplier = (
@@ -594,7 +595,7 @@ class RGLRU(types.SequenceLayer):
 
     # TODO(b/398200724): Add masking support to the scan and skip state updates
     # on invalid timesteps.
-    y, h = scan.linear_scan(
+    y, h = recurrentgemma.scan.linear_scan(
         x=normalized_x,
         a=a * (1 - reset[..., jnp.newaxis]),
         h0=h,
