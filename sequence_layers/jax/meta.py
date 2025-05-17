@@ -22,6 +22,8 @@ import flax
 unbox = flax.core.meta.unbox
 MESH_AXIS = flax.core.meta.PARTITION_NAME
 AXIS_TYPE = 'axis_type'
+IS_EMBEDDING = 'is_embedding'
+IS_NORMALIZER = 'is_normalizer'
 
 
 @enum.unique

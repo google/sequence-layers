@@ -32,8 +32,6 @@ from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
-from google3.learning.gemini.cms.core.models import labels
-
 
 __all__ = (
     # go/keep-sorted start
@@ -732,7 +730,7 @@ class ShawRelativePositionEmbedding(RelativePositionEmbedding):
     init_fn = utils.shard_initializer(
         self.config.embedding_init,
         self.config.embedding_sharding,
-        labels=[labels.IS_EMBEDDING],
+        labels=[meta.IS_EMBEDDING],
     )
     self.embedding = self.param(
         'embedding',
@@ -841,7 +839,7 @@ class T5RelativePositionEmbedding(RelativePositionEmbedding):
     init_fn = utils.shard_initializer(
         self.config.bias_matrix_init,
         self.config.bias_matrix_sharding,
-        labels=[labels.IS_EMBEDDING],
+        labels=[meta.IS_EMBEDDING],
     )
     self.bias_matrix = self.param(
         'embedding',
