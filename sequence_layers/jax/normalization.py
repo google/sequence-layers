@@ -20,11 +20,11 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
-from google3.learning.gemini.cms.core.models import labels
 
 __all__ = (
     # go/keep-sorted start
@@ -207,7 +207,7 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
       scale_init = utils.shard_initializer(
           self.config.scale_init,
           self.config.sharding,
-          labels=[labels.IS_NORMALIZER],
+          labels=[meta.IS_NORMALIZER],
       )
       scale = self.param(
           'scale',
@@ -325,7 +325,7 @@ class RMSNormalization(types.PreservesType, types.StatelessPointwise):
       scale_init = utils.shard_initializer(
           self.config.scale_init,
           self.config.sharding,
-          labels=[labels.IS_NORMALIZER],
+          labels=[meta.IS_NORMALIZER],
       )
       y *= jnp.reshape(
           self.param(
@@ -409,7 +409,7 @@ class BatchNormalization(types.PreservesType, types.StatelessPointwise):
     scale_init = utils.shard_initializer(
         self.config.scale_init,
         self.config.sharding,
-        labels=[labels.IS_NORMALIZER],
+        labels=[meta.IS_NORMALIZER],
     )
     bias_init = utils.shard_initializer(
         self.config.bias_init, self.config.sharding
@@ -702,7 +702,7 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
       scale_init = utils.shard_initializer(
           self.config.scale_init,
           self.config.sharding,
-          labels=[labels.IS_NORMALIZER],
+          labels=[meta.IS_NORMALIZER],
       )
       values *= jnp.reshape(
           self.param(
