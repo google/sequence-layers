@@ -20,7 +20,22 @@ import numpy as np
 import typeguard
 from typing import Callable, TypeVar, Union
 
-ArrayT = Union[jax.Array, jax.ShapeDtypeStruct, np.ndarray]
+
+class _MetaArrayT(type):
+  types = ()
+
+  def __instancecheck__(cls, obj):
+    return isinstance(obj, cls.types)
+
+
+class JaxArrayT(metaclass=_MetaArrayT):
+  types = (jax.Array, jax.ShapeDtypeStruct)
+
+
+class ArrayT(metaclass=_MetaArrayT):
+  types = (JaxArrayT, np.ndarray)
+
+
 Scalar = Shaped[ArrayT, ''] | Shaped[np.generic, ''] | Shaped[jnp.generic, '']
 ScalarInt = Int[ArrayT, ''] | Int[np.generic, ''] | Int[jnp.generic, '']
 ScalarFloat = Float[ArrayT, ''] | Float[np.generic, ''] | Float[jnp.generic, '']
@@ -33,7 +48,12 @@ _F = TypeVar('_F', bound=Callable)
 # Configure jaxtyping for cleaner error messages.
 jaxtyping_config.update('jaxtyping_remove_typechecker_stack', True)
 
+# TODO(b/417753029): OSS jaxtyping and typeguard are incompatible.
+runtime_type_checking_enabled = False
+
 
 def typed(function: _F) -> _F:
-  # Ensures that type annotations are enforced at runtime.
-  return jaxtyped(function, typechecker=typeguard.typechecked)
+  """A decorator that enables runtime type checking."""
+  if runtime_type_checking_enabled:
+    return jaxtyped(function, typechecker=typeguard.typechecked)
+  return function

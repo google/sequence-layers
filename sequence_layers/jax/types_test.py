@@ -279,6 +279,9 @@ class SequenceTest(test_utils.SequenceLayerTest):
     chex.assert_trees_all_equal(y.mask, x_left1.mask)
 
   def test_type_annotation(self):
+    if not jt.runtime_type_checking_enabled:
+      self.skipTest('Type checking is disabled.')
+
     @jt.typed
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],
@@ -310,6 +313,9 @@ class SequenceTest(test_utils.SequenceLayerTest):
       f(x)
 
   def test_type_annotation_masked_sequence(self):
+    if not jt.runtime_type_checking_enabled:
+      self.skipTest('Type checking is disabled.')
+
     @jt.typed
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],

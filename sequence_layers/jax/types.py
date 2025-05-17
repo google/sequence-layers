@@ -642,7 +642,7 @@ def _sequence_checker_fn(value, origin_type, args, memo):
 
 def _sequence_checker_lookup_fn(
     origin_type: Any, args: tuple[Any, ...], extras: tuple[Any, ...]
-) -> typeguard.TypeCheckerCallable | None:
+):
   """Lookup function to register Sequence type checker in typeguard."""
   del args
   del extras
@@ -658,9 +658,12 @@ def _add_custom_checker_lookup_fn(lookup_fn):
   if hasattr(typeguard, 'checker_lookup_functions'):
     # Recent `typeguard` has different API.
     checker_lookup_fns = typeguard.checker_lookup_functions
-  else:
+  elif hasattr(typeguard, 'config'):
     # TODO(rryan): Remove once typeguard is updated
     checker_lookup_fns = typeguard.config.checker_lookup_functions
+  else:
+    # This typeguard version (e.g. 2.13.3) doesn't support custom checkers.
+    return
   for i, f in enumerate(checker_lookup_fns):
     # Check qualname instead of equality, to avoid many copies when reloading
     # modules from colab.
