@@ -4,8 +4,8 @@ Note: This is not an officially supported Google product
 
 ## Overview
 
-A library for sequence modeling in TensorFlow 2, enabling easy creation of
-sequence models that can be executed both layer-by-layer (e.g. teacher forced
+A library for sequence modeling in Jax and TensorFlow 2, enabling easy creation
+of sequence models that can be executed both layer-by-layer (e.g. teacher forced
 training) and step-by-step (e.g. autoregressive sampling).
 
 A key feature of the library is that layers support streaming (step-by-step)
@@ -14,6 +14,9 @@ function in addition to the typical layer-wise processing feature found in other
 libraries like Keras. When layers support a `step` method, their `layer` method
 produces identical results for the same sequence of input blocks enabling easy
 switching between step-wise and layer-wise processing depending on the use case.
+
+**Note:** Only Jax support is installed by default. Use
+`pip install sequence_layers[tensorflow]` for TensorFlow.
 
 ## Goals
 

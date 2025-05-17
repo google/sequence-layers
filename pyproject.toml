@@ -18,11 +18,13 @@ keywords = []
 # pip dependencies of the project
 # Installed locally with `pip install -e `
 dependencies = [
-    "attrs",
+    "einops",
+    "flax",
+    "jax",
+    "jaxtyping",
     "numpy",
-    "scipy",
-    "tensorflow",
-    "tf_keras",
+    "recurrentgemma[jax] @ git+https://github.com/google-deepmind/recurrentgemma@main",
+    "typeguard==2.13.3",
 ]
 
 # `version` is automatically set by flit to use `sequence_layers.__version__`
@@ -37,11 +39,20 @@ repository = "https://github.com/google/sequence-layers"
 [project.optional-dependencies]
 # Development deps (unittest, linting, formating,...)
 # Installed through `pip install -e .[dev]`
+tensorflow = [
+    "attrs",
+    "scipy",
+    "tensorflow",
+    "tf_keras",
+]
 dev = [
+    "absl-py",
+    "chex",
     "pytest",
     "pytest-xdist",
     "pylint>=2.6.0",
     "pyink",
+    "tensorflow",  # JAX tests use TensorFlow.
 ]
 
 [tool.pyink]
