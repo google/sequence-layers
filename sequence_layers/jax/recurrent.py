@@ -64,6 +64,19 @@ def unit_forget_bias(key, shape, dtype) -> jax.Array:
   )
 
 
+def orthogonal_init(scale: float = 1.0, column_axis: int = -1):
+  def init(key: jax.Array, shape: types.Shape, dtype: types.DType) -> jax.Array:
+    # Flax's orthogonal initializer uses jax.lax.qr internally, which only
+    # supports float32. Compute the initializer in float32 then cast to the
+    # desired dtype.
+    value = nn.initializers.orthogonal(scale=scale, column_axis=column_axis)(
+        key, shape, jnp.float32
+    )
+    return value.astype(dtype)
+
+  return init
+
+
 class LSTM(types.SequenceLayer):
   """A Long Short-term Memory (LSTM) layer."""
 
@@ -80,9 +93,7 @@ class LSTM(types.SequenceLayer):
     use_bias: bool = True
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
     kernel_sharding: types.Sharding | None = None
-    recurrent_kernel_init: nn.initializers.Initializer = (
-        nn.initializers.orthogonal()
-    )
+    recurrent_kernel_init: nn.initializers.Initializer = orthogonal_init()
     recurrent_kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = unit_forget_bias
     bias_sharding: types.Sharding | None = None

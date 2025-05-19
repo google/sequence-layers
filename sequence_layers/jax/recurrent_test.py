@@ -27,14 +27,10 @@ import tensorflow.compat.v2 as tf
 
 class LSTMTest(test_utils.SequenceLayerTest):
 
-  @parameterized.product(
-      param_dtype=(jnp.float32, jnp.float64), random_mask=(False, True)
-  )
-  def test_lstm(self, param_dtype, random_mask):
+  @parameterized.product(random_mask=(False, True))
+  def test_lstm(self, random_mask):
     key = jax.random.PRNGKey(1234)
-    l = recurrent.LSTM.Config(
-        units=8, param_dtype=param_dtype, name='lstm'
-    ).make()
+    l = recurrent.LSTM.Config(units=8, name='lstm').make()
 
     batch_size, channels = 2, 3
     x = test_utils.random_sequence(batch_size, 1, channels)
@@ -52,9 +48,9 @@ class LSTMTest(test_utils.SequenceLayerTest):
         variables,
         {
             'params': {
-                'kernel': {'kernel': jnp.zeros((channels, 32), param_dtype)},
-                'recurrent_kernel': {'kernel': jnp.zeros((8, 32), param_dtype)},
-                'bias': jnp.zeros((32,), param_dtype),
+                'kernel': {'kernel': jnp.zeros((channels, 32), jnp.float32)},
+                'recurrent_kernel': {'kernel': jnp.zeros((8, 32), jnp.float32)},
+                'bias': jnp.zeros((32,), jnp.float32),
             }
         },
     )
@@ -65,13 +61,9 @@ class LSTMTest(test_utils.SequenceLayerTest):
       )
       self.verify_contract(l, x, training=False)
 
-  @parameterized.parameters(
-      *test_utils.standard_dtype_configs(input=True, compute=True)
-  )
-  def test_dtypes(self, input_dtype, compute_dtype):
+  @parameterized.parameters(*test_utils.standard_dtype_configs())
+  def test_dtypes(self, input_dtype, param_dtype, compute_dtype):
     """Check that input and compute dtypes interact correctly."""
-    # jnp.bfloat16 isn't currently supported by orthogonal initializer.
-    param_dtype = jnp.float32
     key = jax.random.PRNGKey(1234)
     l = recurrent.LSTM.Config(
         units=8,
