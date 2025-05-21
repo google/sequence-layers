@@ -3332,19 +3332,39 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     y = l.layer(x, training=False, constants=constants)
     self.assertEqual(y.dtype, jnp.bfloat16)
 
-  def test_no_query_delay_buffer(self):
+  @parameterized.parameters(True, False)
+  def test_no_query_delay_buffer(self, use_rope: bool):
     key = jax.random.PRNGKey(1234)
     max_past_horizon, max_future_horizon = 2, 3
     batch_size, source_channels = 2, 2
     source_name = 'source'
 
+    if use_rope:
+      query_network = position.ApplyRotaryPositionalEncoding.Config(
+          max_wavelength=10000,
+          # Critical: RoPE positions must not advance for invalid timesteps.
+          only_advance_position_for_valid_timesteps=True,
+          positions_in_at_least_fp32=False,
+      )
+      key_network = position.ApplyRotaryPositionalEncoding.Config(
+          max_wavelength=10000,
+          # Critical: RoPE positions must not advance for invalid timesteps.
+          only_advance_position_for_valid_timesteps=True,
+          positions_in_at_least_fp32=False,
+      )
+    else:
+      query_network = None
+      key_network = None
+
     l = attention.StreamingDotProductAttention.Config(
         source_name,
         num_heads=3,
-        units_per_head=5,
+        units_per_head=6,
         max_past_horizon=max_past_horizon,
         max_future_horizon=max_future_horizon,
         use_query_delay_buffer=False,
+        query_network=query_network,
+        key_network=key_network,
         name='streaming_dot_product_attention',
     ).make()
 
@@ -3361,7 +3381,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     # When not using a query delay buffer, the layer has no input or output
     # latency.
     self.assertEqual(l.input_latency, 0)
-    self.assertEqual(int(l.output_latency), 0)
+    self.assertEqual(l.output_latency, 0)
 
     time, channels = 30, 3
     # Source and x must be the same length.
@@ -3634,7 +3654,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
       # max_past_horizon > 0, max_future_horizon > 0, with attention sinks.
       (3, 5, 3, 5, 1),
   )
-  def test_streaming_local_dot_product_attention(
+  def test_basic(
       self,
       num_heads,
       units_per_head,
@@ -3860,21 +3880,41 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
     y = l.layer(x, training=False, constants=constants)
     self.assertEqual(y.dtype, jnp.bfloat16)
 
-  def test_no_query_delay_buffer(self):
+  @parameterized.parameters(True, False)
+  def test_no_query_delay_buffer(self, use_rope: bool):
     key = jax.random.PRNGKey(1234)
     max_past_horizon, max_future_horizon = 2, 3
     batch_size, source_channels = 2, 2
     source_name = 'source'
     block_size = max(1, max_future_horizon, max_past_horizon - 1)
 
+    if use_rope:
+      query_network = position.ApplyRotaryPositionalEncoding.Config(
+          max_wavelength=10000,
+          # Critical: RoPE positions must not advance for invalid timesteps.
+          only_advance_position_for_valid_timesteps=True,
+          positions_in_at_least_fp32=False,
+      )
+      key_network = position.ApplyRotaryPositionalEncoding.Config(
+          max_wavelength=10000,
+          # Critical: RoPE positions must not advance for invalid timesteps.
+          only_advance_position_for_valid_timesteps=True,
+          positions_in_at_least_fp32=False,
+      )
+    else:
+      query_network = None
+      key_network = None
+
     l = attention.StreamingLocalDotProductAttention.Config(
         source_name,
         num_heads=3,
-        units_per_head=5,
+        units_per_head=6,
         block_size=block_size,
         max_past_horizon=max_past_horizon,
         max_future_horizon=max_future_horizon,
         use_query_delay_buffer=False,
+        query_network=query_network,
+        key_network=key_network,
         name='streaming_local_dot_product_attention',
     ).make()
 
