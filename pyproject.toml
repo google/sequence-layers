@@ -48,6 +48,7 @@ tensorflow = [
 dev = [
     "absl-py",
     "chex",
+    "orbax",
     "pytest",
     "pytest-xdist",
     "pylint>=2.6.0",
