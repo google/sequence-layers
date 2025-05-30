@@ -237,6 +237,40 @@ def compute_conv_mask(
   )
 
 
+def compute_conv_initial_state(
+    batch_size: int,
+    input_spec: types.ShapeDType,
+    buffer_width: int,
+    padding: types.PaddingModeString,
+    pad_value: complex | None = None,
+) -> types.MaskedSequence:
+  """Returns the initial state for a convolution layer."""
+  match padding:
+    case (
+        types.PaddingMode.CAUSAL_VALID.value
+        | types.PaddingMode.REVERSE_CAUSAL_VALID.value
+        | types.PaddingMode.SEMICAUSAL_FULL.value
+    ):
+      mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
+    case (
+        types.PaddingMode.CAUSAL.value
+        | types.PaddingMode.REVERSE_CAUSAL.value
+        | types.PaddingMode.SEMICAUSAL.value
+    ):
+      mask = jnp.zeros((batch_size, buffer_width), dtype=types.MASK_DTYPE)
+    case _:
+      raise ValueError(
+          f'Stepwise processing is not supported with padding: {padding}'
+      )
+  values = jnp.full(
+      (batch_size, buffer_width) + input_spec.shape,
+      pad_value if pad_value is not None else 0.0,
+      dtype=input_spec.dtype,
+  )
+
+  return types.MaskedSequence(values, mask)
+
+
 def _compute_conv_transpose_output_length(
     time: int,
     kernel_size: int,
@@ -515,31 +549,11 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
           f' {input_spec}.'
       )
 
-    match self._paddings[0]:
-      case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
-          | types.PaddingMode.SEMICAUSAL_FULL.value
-      ):
-        mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
-      case (
-          types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
-      ):
-        mask = jnp.zeros((batch_size, buffer_width), dtype=types.MASK_DTYPE)
-      case _:
-        raise ValueError(
-            'Stepwise processing is not supported with padding:'
-            f' {self._paddings[0]}'
-        )
-
-    return types.MaskedSequence(
-        jnp.zeros(
-            (batch_size, buffer_width) + input_spec.shape,
-            dtype=input_spec.dtype,
-        ),
-        mask,
+    return compute_conv_initial_state(
+        batch_size,
+        input_spec,
+        buffer_width,
+        self._paddings[0],
     )
 
   @types.check_step

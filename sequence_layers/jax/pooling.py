@@ -93,10 +93,15 @@ class BasePooling1D(
 ):
   """Shared base logic for 1D pooling layers."""
 
+  def setup(self):
+    if self.config.padding == types.PaddingMode.CAUSAL_VALID.value:
+      raise ValueError(
+          'CAUSAL_VALID is not supported for 2D pooling. Use CAUSAL instead.'
+      )
+
   @property
   def supports_step(self) -> bool:
     return self.config.padding in (
-        types.PaddingMode.CAUSAL_VALID.value,
         types.PaddingMode.REVERSE_CAUSAL_VALID.value,
         types.PaddingMode.CAUSAL.value,
         types.PaddingMode.REVERSE_CAUSAL.value,
@@ -173,14 +178,13 @@ class BasePooling1D(
 
     # When executing a pooling step-by-step, we need a buffer for tracking the
     # current pooling window. This matches the padding added by `layer`.
-    return types.Sequence(
-        jnp.full(
-            (batch_size, self._buffer_width) + tuple(input_spec.shape),
-            self._pad_value(input_spec.dtype),
-            input_spec.dtype,
-        ),
-        jnp.ones((batch_size, self._buffer_width), dtype=types.MASK_DTYPE),
-    )
+    return convolution.compute_conv_initial_state(
+        batch_size,
+        input_spec,
+        self._buffer_width,
+        self.config.padding,
+        self._pad_value(input_spec.dtype),
+    ).unmask()
 
   @types.check_step
   def step(
@@ -202,7 +206,7 @@ class BasePooling1D(
       state = x
 
     # Compute the output for the current timestep.
-    values = self._layer(state.values, padding=(0, 0))
+    values = self._layer(state.values, state.mask, padding=(0, 0))
     mask = convolution.compute_conv_mask(
         state.mask,
         self.config.pool_size,
@@ -236,7 +240,7 @@ class BasePooling1D(
     )
     # Replace masked timesteps with pad value.
     x = x.mask_invalid(self._pad_value(x.dtype))
-    values = self._layer(x.values, padding)
+    values = self._layer(x.values, x.mask, padding)
 
     mask = convolution.compute_conv_mask(
         x.mask,
@@ -256,6 +260,7 @@ class BasePooling1D(
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[int, int],
   ) -> jt.Float[jt.ArrayT, 'B T *D']:
     raise NotImplementedError()
@@ -290,6 +295,7 @@ class MinPooling1D(BasePooling1D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[int, int],
   ) -> jt.Float[jt.ArrayT, 'B T *D']:
     return _reduce_window(
@@ -332,8 +338,10 @@ class MaxPooling1D(BasePooling1D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[int, int],
   ) -> jt.Float[jt.ArrayT, 'B T *D']:
+    del mask
     return _reduce_window(
         x,
         init_value=self._pad_value(x.dtype),
@@ -343,6 +351,13 @@ class MaxPooling1D(BasePooling1D):
         window_strides=(self.config.strides,),
         padding=(padding,),
     )
+
+
+def div_no_nan_grad(x, y):
+  """Divides x by y elment-wise, and return 0 value and grad where y is 0."""
+  # Apply jnp.where before div to avoid NaN grad, due to inf x / y, when y == 0.
+  is_zero = y == 0
+  return jnp.where(is_zero, jnp.zeros_like(x), x) / jnp.where(is_zero, 1.0, y)
 
 
 class AveragePooling1D(BasePooling1D):
@@ -356,6 +371,9 @@ class AveragePooling1D(BasePooling1D):
     strides: int = 1
     dilation_rate: int = 1
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
+    # If true, divide by the number of valid items (i.e., sum of the mask)
+    # instead of the pool size.
+    masked_average: bool = False
     name: str | None = None
 
     def __post_init__(self):
@@ -374,9 +392,10 @@ class AveragePooling1D(BasePooling1D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[int, int],
   ) -> jt.Float[jt.ArrayT, 'B T *D']:
-    y = _reduce_window(
+    y_sum = _reduce_window(
         x,
         init_value=self._pad_value(x.dtype),
         computation=jax.lax.add,
@@ -385,18 +404,30 @@ class AveragePooling1D(BasePooling1D):
         window_strides=(self.config.strides,),
         padding=(padding,),
     )
-
-    # Divide the summed windows by the number of elements per window to get the
-    # average. Ignore dilation since the holes in the pool operation do not
-    # contribute to the sum.
-    # TODO(rryan): Support division by actual number of valid elements in the
-    # window.
-    if issubclass(x.dtype.type, jnp.integer):
-      y = y // self.config.pool_size
+    if self.config.masked_average:
+      mask_sum = _reduce_window(
+          mask.astype(x.dtype),
+          init_value=self._pad_value(x.dtype),
+          computation=jax.lax.add,
+          window_dimensions=(self.config.pool_size,),
+          window_dilation=(self.config.dilation_rate,),
+          window_strides=(self.config.strides,),
+          padding=(padding,),
+      )
+      mask_sum = jnp.expand_dims(mask_sum, range(2, y_sum.ndim))
+      if issubclass(x.dtype.type, jnp.integer):
+        y = jnp.floor_divide(y_sum, mask_sum)
+      else:
+        y = div_no_nan_grad(y_sum, mask_sum)
+    elif issubclass(x.dtype.type, jnp.integer):
+      # Divide the summed windows by the number of elements per window to get
+      # the average. Ignore dilation since the holes in the pool operation do
+      # not contribute to the sum.
+      y = y_sum // self.config.pool_size
     else:
       # TODO(rryan): Should we divide first to avoid loss of precision due to
       # reduction, or alternatively increase precision of the reduction?
-      y = y / self.config.pool_size
+      y = y_sum / self.config.pool_size
     return y
 
 
@@ -413,11 +444,14 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
         isinstance(self.config.dilation_rate, tuple)
         and len(self.config.dilation_rate) == 2
     )
+    if self.config.time_padding == types.PaddingMode.CAUSAL_VALID.value:
+      raise ValueError(
+          'CAUSAL_VALID is not supported for 2D pooling. Use CAUSAL instead.'
+      )
 
   @property
   def supports_step(self) -> bool:
     return self.config.time_padding in (
-        types.PaddingMode.CAUSAL_VALID.value,
         types.PaddingMode.REVERSE_CAUSAL_VALID.value,
         types.PaddingMode.CAUSAL.value,
         types.PaddingMode.REVERSE_CAUSAL.value,
@@ -492,35 +526,16 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
     if not (buffer_width := self._buffer_width):
       return ()
 
-    match self.config.time_padding:
-      case (
-          types.PaddingMode.CAUSAL_VALID.value
-          | types.PaddingMode.REVERSE_CAUSAL_VALID.value
-      ):
-        mask = jnp.ones((batch_size, buffer_width), dtype=types.MASK_DTYPE)
-      case (
-          types.PaddingMode.CAUSAL.value
-          | types.PaddingMode.REVERSE_CAUSAL.value
-          | types.PaddingMode.SEMICAUSAL.value
-      ):
-        mask = jnp.zeros((batch_size, buffer_width), dtype=types.MASK_DTYPE)
-      case _:
-        raise ValueError(
-            'Stepwise processing is not supported with padding:'
-            f' {self._paddings[0]}'
-        )
-
     # When executing a pool step-by-step, we need a buffer for tracking
     # the current pooling window.
     # This matches the causal padding added by `layer`.
-    return types.Sequence(
-        jnp.full(
-            (batch_size, buffer_width) + tuple(input_spec.shape),
-            self._pad_value(input_spec.dtype),
-            dtype=input_spec.dtype,
-        ),
-        mask,
-    )
+    return convolution.compute_conv_initial_state(
+        batch_size,
+        input_spec,
+        buffer_width,
+        self.config.time_padding,
+        self._pad_value(input_spec.dtype),
+    ).unmask()
 
   @nn.nowrap
   def get_output_shape(
@@ -568,7 +583,9 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
       state = x
 
     # Compute the output for the current timestep.
-    values = self._layer(state.values, padding=(time_padding, spatial_padding))
+    values = self._layer(
+        state.values, state.mask, padding=(time_padding, spatial_padding)
+    )
     mask = convolution.compute_conv_mask(
         state.mask,
         self.config.pool_size[0],
@@ -607,7 +624,9 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
         self.config.dilation_rate[1],
     )
     x = x.mask_invalid(mask_value=self._pad_value(x.dtype))
-    values = self._layer(x.values, padding=(time_padding, spatial_padding))
+    values = self._layer(
+        x.values, x.mask, padding=(time_padding, spatial_padding)
+    )
 
     mask = convolution.compute_conv_mask(
         x.mask,
@@ -623,6 +642,7 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T H *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[tuple[int, int], tuple[int, int]],
   ) -> jt.Float[jt.ArrayT, 'B T H *D']:
     raise NotImplementedError()
@@ -690,8 +710,10 @@ class MinPooling2D(BasePooling2D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T H *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[tuple[int, int], tuple[int, int]],
   ) -> jt.Float[jt.ArrayT, 'B T H *D']:
+    del mask
     return _reduce_window(
         x,
         init_value=self._pad_value(x.dtype),
@@ -761,8 +783,10 @@ class MaxPooling2D(BasePooling2D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T H *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[tuple[int, int], tuple[int, int]],
   ) -> jt.Float[jt.ArrayT, 'B T H *D']:
+    del mask
     return _reduce_window(
         x,
         init_value=self._pad_value(x.dtype),
@@ -794,6 +818,9 @@ class AveragePooling2D(BasePooling2D):
     spatial_padding: types.PaddingModeString | tuple[int, int] = (
         types.PaddingMode.SAME.value
     )
+    # If true, divide by the number of valid items (i.e., sum of the expanded
+    # mask), instead of the overall pool size.
+    masked_average: bool = False
     name: str | None = None
 
     def __post_init__(self):
@@ -833,9 +860,10 @@ class AveragePooling2D(BasePooling2D):
   def _layer(
       self,
       x: jt.Float[jt.ArrayT, 'B T H *D'],
+      mask: jt.Bool[jt.ArrayT, 'B T'],
       padding: tuple[tuple[int, int], tuple[int, int]],
   ) -> jt.Float[jt.ArrayT, 'B T H *D']:
-    y = _reduce_window(
+    y_sum = _reduce_window(
         x,
         init_value=self._pad_value(x.dtype),
         computation=jax.lax.add,
@@ -845,15 +873,30 @@ class AveragePooling2D(BasePooling2D):
         padding=padding,
     )
 
-    # Divide the summed windows by the number of elements per window to get the
-    # average. Ignore dilation since the holes in the pool operation do not
-    # contribute to the sum.
-    # TODO(rryan): Support division by actual number of valid elements
-    # in the window.
-    if issubclass(x.dtype.type, jnp.integer):
-      y = y // np.prod(self.config.pool_size)
+    if self.config.masked_average:
+      time_dim_val = lambda v: v if isinstance(v, int) else v[0]
+      mask_sum = _reduce_window(
+          mask.astype(x.dtype),
+          init_value=self._pad_value(x.dtype),
+          computation=jax.lax.add,
+          window_dimensions=(time_dim_val(self.config.pool_size),),
+          window_dilation=(time_dim_val(self.config.dilation_rate),),
+          window_strides=(time_dim_val(self.config.strides),),
+          padding=padding[:1],
+      )
+      mask_sum = jnp.expand_dims(mask_sum, range(2, y_sum.ndim))
+      mask_sum *= np.prod(self.config.pool_size[1:])
+      if issubclass(x.dtype.type, jnp.integer):
+        y = jnp.floor_divide(y_sum, mask_sum)
+      else:
+        y = div_no_nan_grad(y_sum, mask_sum)
+    elif issubclass(x.dtype.type, jnp.integer):
+      # Divide the summed windows by the number of elements per window to get
+      # the average. Ignore dilation since the holes in the pool operation do
+      # not contribute to the sum.
+      y = y_sum // np.prod(self.config.pool_size)
     else:
       # TODO(rryan): Should we divide first to avoid loss of precision due to
       # reduction, or alternatively increase precision of the reduction?
-      y = y / np.prod(self.config.pool_size)
+      y = y_sum / np.prod(self.config.pool_size)
     return y
