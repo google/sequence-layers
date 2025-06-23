@@ -442,7 +442,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
       channel_shape=(
           (9,),
           (9, 5),
-          (9, 5, 7),
+          (9, 5, 3),
       ),
   )
   def test_channel_shapes(self, pool_type_kwargs, channel_shape):
