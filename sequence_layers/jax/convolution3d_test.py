@@ -116,7 +116,7 @@ class Conv3DTest(test_utils.SequenceLayerTest):
     )
     self.assertEqual(l.output_latency, expected_input_latency // strides)
 
-    batch_size, spatial1, spatial2, channels = 2, 7, 11, 3
+    batch_size, spatial1, spatial2, channels = 2, 7, 9, 3
     x = test_utils.random_sequence(batch_size, 1, spatial1, spatial2, channels)
     l = self.init_and_bind_layer(key, l, x)
     variables = flax.core.meta.unbox(l.variables)
@@ -227,7 +227,7 @@ class Conv3DTest(test_utils.SequenceLayerTest):
         name='conv3d',
     ).make()
 
-    batch_size, time, spatial1, spatial2, channels = 2, 20, 7, 11, 3
+    batch_size, time, spatial1, spatial2, channels = 2, 20, 7, 9, 3
     x = test_utils.random_sequence(
         batch_size, time, spatial1, spatial2, channels, dtype=input_dtype
     )

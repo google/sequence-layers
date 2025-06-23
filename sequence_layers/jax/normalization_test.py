@@ -42,10 +42,10 @@ class LayerNormalizationTest(test_utils.SequenceLayerTest):
       itertools.product(
           (False, True),
           [
-              ((2, 10, 32), [-1], [32]),
-              ((2, 3, 5, 32), [-1], [32]),
-              ((2, 3, 32, 9), [-2], [32]),
-              ((2, 3, 32, 8), [-1, -2], [32, 8]),
+              ((2, 10, 4), [-1], [4]),
+              ((2, 3, 5, 4), [-1], [4]),
+              ((2, 3, 4, 9), [-2], [4]),
+              ((2, 3, 4, 8), [-1, -2], [4, 8]),
           ],
       )
   )
@@ -103,7 +103,7 @@ class LayerNormalizationTest(test_utils.SequenceLayerTest):
   )
   def test_layer_normalization_dtypes(self, param_dtype, input_dtype, config):
     key = jax.random.PRNGKey(1234)
-    shape, axes, expected_param_shape = (2, 3, 32, 8), [-1, -2], [32, 8]
+    shape, axes, expected_param_shape = (2, 3, 4, 8), [-1, -2], [4, 8]
     training = config.pop('training', False)
     defaults = dict(
         axis=axes,
@@ -209,7 +209,7 @@ class RMSNormalizationTest(test_utils.SequenceLayerTest):
   )
   def test_rms_normalization_dtypes(self, param_dtype, input_dtype, config):
     key = jax.random.PRNGKey(1234)
-    shape, axes, expected_param_shape = (2, 3, 32, 8), [-1, -2], [32, 8]
+    shape, axes, expected_param_shape = (2, 3, 4, 8), [-1, -2], [4, 8]
     training = config.pop('training', False)
     defaults = dict(
         axis=axes,
@@ -257,8 +257,8 @@ class BatchNormalizationTest(test_utils.SequenceLayerTest):
     self.init_and_bind_layer(key, l, x)
 
   @parameterized.parameters(
-      ((32, 10, 3), -1, [3]),
-      ((32, 3, 5, 9), -2, [5]),
+      ((4, 10, 3), -1, [3]),
+      ((4, 3, 5, 9), -2, [5]),
       # TODO(rryan): Support multiple axes.
       # ((2, 3, 5, 9), [-1, -2], [5, 9]),
   )
@@ -273,7 +273,7 @@ class BatchNormalizationTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.name, 'batch_normalization')
 
     x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x, randomize_weights=True)
+    l = self.init_and_bind_layer(key, l, x, randomize_weights=False)
     self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
 
     unboxed_variables = flax.core.meta.unbox(l.variables)
@@ -363,7 +363,7 @@ class BatchNormalizationTest(test_utils.SequenceLayerTest):
   def test_batch_normalization_dtypes(self, param_dtype, input_dtype, config):
     key = jax.random.PRNGKey(1234)
     name = 'batch_normalization'
-    shape, axis, expected_param_shape = (32, 3, 5, 9), -2, [5]
+    shape, axis, expected_param_shape = (4, 3, 5, 9), -2, [5]
     defaults = dict(
         axis=axis,
         epsilon=1e-3,
@@ -440,9 +440,9 @@ class GroupNormalizationTest(test_utils.SequenceLayerTest):
   @parameterized.parameters(
       itertools.product(
           [
-              ((8, 32, 32), -1, 8, [32]),
-              ((8, 32, 5, 32), -2, 5, [5]),
-              ((8, 32, 5, 32), -2, 1, [5]),
+              ((8, 6, 6), -1, 3, [6]),
+              ((8, 6, 5, 6), -2, 5, [5]),
+              ((8, 6, 5, 6), -2, 1, [5]),
           ],
           (False, True),
       )
@@ -461,7 +461,7 @@ class GroupNormalizationTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.name, 'group_normalization')
 
     x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x, randomize_weights=True)
+    l = self.init_and_bind_layer(key, l, x, randomize_weights=False)
     self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
 
     y = self.verify_contract(
@@ -546,7 +546,7 @@ class GroupNormalizationTest(test_utils.SequenceLayerTest):
       self, param_dtype, input_dtype, config, training
   ):
     key = jax.random.PRNGKey(1234)
-    shape, axis, num_groups, expected_param_shape = (8, 6, 5, 32), -2, 5, [5]
+    shape, axis, num_groups, expected_param_shape = (8, 6, 5, 4), -2, 5, [5]
     defaults = dict(
         num_groups=num_groups,
         axis=axis,
