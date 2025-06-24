@@ -1103,12 +1103,8 @@ class Repeat(types.Emitting):
 
   @property
   def output_ratio(self) -> fractions.Fraction:
-    output_ratio = fractions.Fraction(1)
-    # TODO(rryan): Clean up logic.
     layer_output_ratio = self._get_child_property(lambda l: l.output_ratio)
-    for _ in range(self.config.num_repeats):
-      output_ratio *= layer_output_ratio
-    return output_ratio
+    return layer_output_ratio**self.config.num_repeats
 
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
