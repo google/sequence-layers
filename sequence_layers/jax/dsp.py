@@ -368,11 +368,10 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
     def __post_init__(self):
       object.__setattr__(self, 'padding', types.validate_padding(self.padding))
 
-      if self.padding in (
-          types.PaddingMode.SAME.value,
-          types.PaddingMode.REVERSE_CAUSAL.value,
-          types.PaddingMode.REVERSE_CAUSAL_VALID.value,
-          types.PaddingMode.CAUSAL_VALID.value,
+      if self.padding not in (
+          types.PaddingMode.CAUSAL.value,
+          types.PaddingMode.VALID.value,
+          types.PaddingMode.SEMICAUSAL_FULL.value,
       ):
         raise ValueError(f'Unsupported padding mode: {self.padding}')
 
