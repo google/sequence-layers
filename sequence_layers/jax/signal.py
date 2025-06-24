@@ -181,7 +181,8 @@ def inverse_stft_window_fn(frame_step: int, forward_window_fn=hann_window):
     denom = jnp.sum(denom, 0, keepdims=True)
     denom = jnp.tile(denom, [overlaps, 1])
     denom = jnp.reshape(denom, [overlaps * frame_step])
-    return forward_window / denom[:frame_length]
+    denom = denom[:frame_length]
+    return jnp.where(denom == 0.0, 0, forward_window / denom)
 
   return inverse_stft_window_fn_inner
 

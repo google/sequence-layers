@@ -351,5 +351,25 @@ class WindowTest(parameterized.TestCase):
     self.assertLess(err, 1e-5)
 
 
+class InverseStftWindowFnTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      (128, 64),
+      (128, 32),
+      (64, 64),
+      (64, 128),
+  )
+  def test_inverse_stft_window_fn(self, frame_length, frame_step):
+    """Test that inverse_stft_window_fn has unit gain at each window phase."""
+    inverse_window_fn = signal.inverse_stft_window_fn(frame_step)
+    inverse_window = inverse_window_fn(frame_length, jnp.float32)
+
+    tf_inv_window = tf.signal.inverse_stft_window_fn(
+        frame_step, tf.signal.hann_window
+    )(frame_length, tf.float32)
+
+    self.assertAllClose(inverse_window, tf_inv_window.numpy())
+
+
 if __name__ == '__main__':
   test_utils.main()
