@@ -1020,6 +1020,26 @@ class Repeat(types.Emitting):
       )
     return results[0]
 
+  def _build_child_layer_scanner(self, scan_fn):
+    return nn.scan(
+        scan_fn,
+        variable_axes={True: 0},  # Slice all variables on axis 0.
+        variable_broadcast=False,
+        in_axes=0,  # No input.
+        out_axes=0,  # No output.
+        split_rngs={
+            'params': self.is_initializing(),
+            nn.DenyList(('params',)): True,
+        },
+        length=self.config.num_repeats,
+        metadata_params={
+            # For params we replicate along this scan-over-layers axis.
+            meta.MESH_AXIS: None,
+            # For optimizers mark this axis in params as 'independent'.
+            meta.AXIS_TYPE: meta.AxisType.STACKED,
+        },
+    )
+
   @property
   def supports_step(self) -> bool:
     return self._get_child_property(lambda l: l.supports_step)
@@ -1043,26 +1063,7 @@ class Repeat(types.Emitting):
       result[0] = child_layer.get_accumulated_input_latency(result[0])
       return scan_carry, scan_input
 
-    repeat = nn.scan(
-        scan_fn,
-        variable_axes={True: 0},  # Slice all variables on axis 0.
-        variable_broadcast=False,
-        in_axes=0,  # No input.
-        out_axes=0,  # No output.
-        split_rngs={
-            'params': self.is_initializing(),
-            nn.DenyList(('params',)): True,
-        },
-        length=self.config.num_repeats,
-        metadata_params={
-            # For params we replicate along this scan-over-layers axis.
-            meta.MESH_AXIS: None,
-            # For optimizers mark this axis in params as 'independent'.
-            meta.AXIS_TYPE: meta.AxisType.STACKED,
-        },
-    )
-
-    repeat(self.child_layer, (), ())
+    self._build_child_layer_scanner(scan_fn)(self.child_layer, (), ())
     input_latency = result[0]
     return input_latency
 
@@ -1077,26 +1078,7 @@ class Repeat(types.Emitting):
       result[0] = child_layer.get_accumulated_output_latency(result[0])
       return scan_carry, scan_input
 
-    repeat = nn.scan(
-        scan_fn,
-        variable_axes={True: 0},  # Slice all variables on axis 0.
-        variable_broadcast=False,
-        in_axes=0,  # No input.
-        out_axes=0,  # No output.
-        split_rngs={
-            'params': self.is_initializing(),
-            nn.DenyList(('params',)): True,
-        },
-        length=self.config.num_repeats,
-        metadata_params={
-            # For params we replicate along this scan-over-layers axis.
-            meta.MESH_AXIS: None,
-            # For optimizers mark this axis in params as 'independent'.
-            meta.AXIS_TYPE: meta.AxisType.STACKED,
-        },
-    )
-
-    repeat(self.child_layer, (), ())
+    self._build_child_layer_scanner(scan_fn)(self.child_layer, (), ())
     output_latency = result[0]
     return output_latency
 
