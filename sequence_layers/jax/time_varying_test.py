@@ -65,6 +65,8 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
         training=False,
         # Integer tensors have no gradient to test.
         test_gradients=False,
+        # Receptive field test is not supported for integers.
+        test_receptive_field=False,
     ).mask_invalid()
 
     variables = flax.core.meta.unbox(l.variables)
@@ -140,6 +142,8 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
         training=False,
         # Integer tensors have no gradient to test.
         test_gradients=False,
+        # Receptive field test is not supported for integers.
+        test_receptive_field=False,
     )
 
     expected_num_embs = sum(num_embeddings_per_step)
@@ -253,6 +257,8 @@ class SequenceEmbeddingTest(test_utils.SequenceLayerTest):
         x,
         training=False,
         **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
+        # Receptive field test is not supported for integers.
+        test_receptive_field=False,
     )
     if compute_dtype:
       self.assertEqual(y.dtype, compute_dtype)
@@ -503,6 +509,7 @@ class MaskedDenseTest(test_utils.SequenceLayerTest):
         x,
         training=False,
         padding_invariance_pad_value=1e9,
+        test_receptive_field=False,
     )
 
     variables = flax.core.meta.unbox(l.variables)
@@ -552,6 +559,7 @@ class MaskedDenseTest(test_utils.SequenceLayerTest):
         x,
         training=False,
         padding_invariance_pad_value=1e9,
+        test_receptive_field=False,
         **test_utils.get_grad_tols(l, x, param_dtype, compute_dtype),
     )
     if compute_dtype:

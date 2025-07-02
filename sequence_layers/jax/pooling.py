@@ -145,6 +145,15 @@ class BasePooling1D(
         return 0
 
   @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return convolution.conv_receptive_field_per_step(
+        self.config.pool_size,
+        self.config.strides,
+        self.config.dilation_rate,
+        self.config.padding,
+    )
+
+  @property
   def _buffer_width(self) -> int:
     effective_pool_size = utils.convolution_effective_kernel_size(
         self.config.pool_size, self.config.dilation_rate
@@ -493,6 +502,20 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
       case _:
         # Unsupported.
         return 0
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    past = -utils.convolution_explicit_padding(
+        self.config.time_padding,
+        self.config.pool_size[0],
+        self.config.strides[0],
+        self.config.dilation_rate[0],
+    )[0]
+    effective_pool_size = utils.convolution_effective_kernel_size(
+        self.config.pool_size[0], self.config.dilation_rate[0]
+    )
+    future = past + effective_pool_size - 1
+    return {0: (past, future)}
 
   @property
   def _buffer_width(self) -> int:

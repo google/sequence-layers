@@ -13,6 +13,8 @@
 # limitations under the License.
 """Utilities test."""
 
+import fractions
+import typing
 from typing import Any
 
 from absl.testing import parameterized
@@ -95,6 +97,10 @@ class FlaxEinsumDenseTest(test_utils.SequenceLayerTest):
 
 class AddCountLayer(types.PreservesShape, types.PreservesType, types.Emitting):
   """A test layer that just adds a counter to the input."""
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (0, 0)}
 
   def get_initial_state(
       self,
@@ -1392,6 +1398,365 @@ class GetConstantTest(test_utils.SequenceLayerTest):
       utils.get_constant_sequence(
           layer, constants, 'foo_seq', (2, 3, 5), jnp.int32
       )
+
+
+class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
+
+  class _MockSequenceLayer:
+
+    def __init__(self, receptive_field_per_step=None, output_ratio=None):
+      self.receptive_field_per_step = receptive_field_per_step
+      self.output_ratio = output_ratio
+
+  @parameterized.named_parameters(
+      (
+          'both_none',
+          None,
+          None,
+          None,
+      ),
+      (
+          'first_none',
+          None,
+          (0, 1),
+          (0, 1),
+      ),
+      (
+          'second_none',
+          (0, 1),
+          None,
+          (0, 1),
+      ),
+      (
+          'overlap',
+          (0, 2),
+          (1, 3),
+          (0, 3),
+      ),
+      (
+          'disjoint',
+          (0, 1),
+          (1, 3),
+          (0, 3),
+      ),
+      (
+          'contained',
+          (0, 3),
+          (1, 2),
+          (0, 3),
+      ),
+      (
+          'negative_values',
+          (-2, 0),
+          (-1, 1),
+          (-2, 1),
+      ),
+  )
+  def test_receptive_field_union(self, rf_a, rf_b, expected_rf):
+    self.assertEqual(utils.receptive_field_union(rf_a, rf_b), expected_rf)
+
+  @parameterized.named_parameters(
+      (
+          'ratio_1_step_0',
+          {0: (0, 0), 1: (-1, 1)},
+          1,
+          0,
+          (0, 0),
+      ),
+      (
+          'ratio_1_step_1',
+          {0: (0, 0), 1: (-1, 1)},
+          1,
+          1,
+          (-1, 1),
+      ),
+      (
+          'ratio_2_upsample_step_0',
+          {0: (0, 1), 1: (0, 1)},
+          2,
+          0,
+          (0, 1),
+      ),
+      (
+          'ratio_2_upsample_step_3',
+          {0: (0, 1), 1: (0, 1)},
+          2,
+          3,
+          (1, 2),  # Shifted (0,1) by (3-1)//2 = 1
+      ),
+      (
+          'ratio_0.5_downsample_step_0',
+          {0: (0, 2)},
+          0.5,
+          0,
+          (0, 2),
+      ),
+      (
+          'ratio_0.5_downsample_step_1',
+          {0: (0, 2)},
+          0.5,
+          1,
+          (2, 4),  # Shifted (0,2) by (1-0)//0.5 = 2
+      ),
+      (
+          'rf_is_none',
+          {0: None, 1: (0, 0)},
+          1,
+          0,
+          None,
+      ),
+      (
+          'rf_is_none_wrap_around',
+          {0: (0, 0), 1: None},
+          1,
+          1,
+          None,
+      ),
+      (
+          'single_rf_entry_step_0',
+          {0: (-2, 2)},
+          1,
+          0,
+          (-2, 2),
+      ),
+      (
+          'single_rf_entry_step_5',
+          {0: (-2, 2)},
+          1,
+          5,
+          (3, 7),  # Shifted (-2,2) by 5//1 = 5
+      ),
+  )
+  def test_receptive_field_at(
+      self, receptive_field_per_step, output_ratio, step, expected_rf
+  ):
+
+    mock_layer = typing.cast(
+        types.SequenceLayer,
+        self._MockSequenceLayer(receptive_field_per_step, output_ratio),
+    )
+    self.assertEqual(
+        utils.layer_receptive_field_at(mock_layer, step), expected_rf
+    )
+
+  @parameterized.named_parameters(
+      (
+          'empty_rf_per_step',
+          {},
+          fractions.Fraction(1, 1),
+          None,
+      ),
+      (
+          'all_none_rf',
+          {0: None, 1: None},
+          fractions.Fraction(1, 1),
+          None,
+      ),
+      (
+          'single_rf',
+          {0: (0, 1)},
+          fractions.Fraction(1, 1),
+          (0, 1),
+      ),
+      (
+          'multiple_rf_overlap',
+          {0: (0, 2), 1: (-1, 1)},
+          fractions.Fraction(1, 1),
+          (-2, 2),  # (0,2) -> (0,2), (-1,1) -> (-2,0). Union is (-2,2)
+      ),
+      (
+          'multiple_rf_disjoint',
+          {0: (0, 1), 1: (3, 4)},
+          fractions.Fraction(1, 1),
+          (
+              0,
+              3,
+          ),  # (0,1) -> (0,1), (3,4) -> (2,3).
+      ),
+      (
+          'multiple_rf_with_none',
+          {0: (0, 1), 1: None, 2: (-2, -1)},
+          fractions.Fraction(1, 1),
+          (-4, 1),  # (0,1)->(0,1), (-2,-1)->(-4,-3). Union is (-4,1)
+      ),
+      (
+          'output_ratio_2',
+          {0: (0, 1), 1: (-1, 0)},
+          fractions.Fraction(
+              2, 1
+          ),  # (0,1)->(0,1), (-1,0)->(-1,0). Union is (-1,1)
+          (-1, 1),
+      ),
+      (
+          'output_ratio_half',
+          {0: (0, 1), 1: (-1, 0)},
+          fractions.Fraction(1, 2),
+          (
+              -3,
+              1,
+          ),  # (0,1)->(0,1), (-1,0)->(-3,-2). Union is (-3,1).
+      ),
+  )
+  def test_reduce_receptive_field_per_step(
+      self, rf_per_step, output_ratio, expected_rf
+  ):
+    self.assertEqual(
+        utils.reduce_receptive_field_per_step(rf_per_step, output_ratio),
+        expected_rf,
+    )
+
+  @parameterized.named_parameters(
+      (
+          'single_layer',
+          [{0: (0, 0), 1: (-1, 1)}],
+          {0: (0, 0), 1: (-1, 1)},
+      ),
+      (
+          'multiple_layers_same_steps',
+          [
+              {0: (0, 0), 1: (-2, 0)},
+              {0: (-1, 1), 1: (0, 1)},
+          ],
+          {0: (-1, 1), 1: (-2, 1)},
+      ),
+      (
+          'multiple_layers_different_steps',
+          [
+              {0: (0, 0)},
+              {0: (-1, 1), 1: (0, 1)},
+          ],
+          {0: (-1, 1), 1: (0, 1)},
+      ),
+      (
+          'layers_with_none',
+          [
+              {0: (0, 0), 1: None},
+              {0: None, 1: (0, 1)},
+          ],
+          {0: (0, 0), 1: (0, 1)},
+      ),
+      ('empty_list', [], {}),
+  )
+  def test_aggregate_layers_receptive_field_per_steps(
+      self,
+      rf_per_step_list: list[dict[int, types.ReceptiveField]],
+      expected_rf_dict: dict[int, types.ReceptiveField | None],
+  ):
+    layers = [
+        typing.cast(
+            types.SequenceLayer,
+            self._MockSequenceLayer(receptive_field_per_step=rf_per_step),
+        )
+        for rf_per_step in rf_per_step_list
+    ]
+    self.assertEqual(
+        utils.aggregate_layers_receptive_field_per_steps(layers),
+        expected_rf_dict,
+    )
+
+  @parameterized.named_parameters(
+      (
+          'identity_propagation',
+          {0: (0, 0)},
+          _MockSequenceLayer({0: (-1, 0)}, fractions.Fraction(1, 1)),
+          {0: (-1, 0)},
+      ),
+      (
+          'wider_rf_next',
+          {0: (-1, 1)},
+          _MockSequenceLayer({0: (0, 0)}, fractions.Fraction(1, 1)),
+          {0: (-1, 1)},
+      ),
+      (
+          'prev_is_downsample',
+          {0: (-1, 0)},
+          _MockSequenceLayer({0: (0, 1)}, fractions.Fraction(1, 2)),
+          {0: (-2, 1)},
+      ),
+      (
+          'cnn_then_downsample',
+          {0: (-2, 0)},
+          _MockSequenceLayer(
+              receptive_field_per_step={0: (0, 1)},
+              output_ratio=fractions.Fraction(1, 2),
+          ),
+          {0: (-4, 1)},
+      ),
+      (
+          'rf_next_is_none',
+          {0: None},
+          _MockSequenceLayer({0: (0, 1)}, fractions.Fraction(1, 2)),
+          {0: None},
+      ),
+      (
+          'all_prev_rf_at_are_none',
+          {0: (0, 0)},
+          _MockSequenceLayer({0: None}, fractions.Fraction(1, 1)),
+          {0: None},
+      ),
+  )
+  def test_propagate_receptive_field_to_prev_layer(
+      self,
+      layer_rf_per_step_next: dict[int, types.ReceptiveField | None],
+      layer_prev: _MockSequenceLayer,
+      expected_rf_dict: dict[int, types.ReceptiveField | None],
+  ):
+    layer_prev = typing.cast(types.SequenceLayer, layer_prev)
+    self.assertEqual(
+        utils.propagate_receptive_field_to_prev_layer(
+            layer_rf_per_step_next,
+            layer_prev.receptive_field_per_step,
+            layer_prev.output_ratio,
+        ),
+        expected_rf_dict,
+    )
+
+  @parameterized.named_parameters(
+      ('empty_layers', [], {0: (0, 0)}),
+      (
+          'single_layer',
+          [_MockSequenceLayer({0: (-1, 0)}, fractions.Fraction(1, 1))],
+          {0: (-1, 0)},
+      ),
+      (
+          'identity_plus_cnn',
+          [
+              _MockSequenceLayer({0: (0, 0)}, fractions.Fraction(1, 1)),
+              _MockSequenceLayer({0: (-1, 0)}, fractions.Fraction(1, 1)),
+          ],
+          {0: (-1, 0)},
+      ),
+      (
+          'downsample_plus_cnn',
+          [
+              _MockSequenceLayer(
+                  {0: (0, 1)}, fractions.Fraction(1, 2)
+              ),  # DS(2)
+              _MockSequenceLayer({0: (-2, 0)}, fractions.Fraction(1, 1)),
+          ],
+          {0: (-4, 1)},
+      ),
+      (
+          'layers_with_different_rf_len',
+          [
+              _MockSequenceLayer(
+                  {0: (0, 0), 1: (0, 0)}, fractions.Fraction(1, 1)
+              ),
+              _MockSequenceLayer({0: (-1, 0)}, fractions.Fraction(1, 1)),
+          ],
+          {0: (-2, 0), 1: (0, 0)},
+      ),
+  )
+  def test_receptive_field_per_step_of_serial_layers(
+      self,
+      layers: list[_MockSequenceLayer],
+      expected_rf_dict: dict[int, types.ReceptiveField | None],
+  ):
+    layers = [typing.cast(types.SequenceLayer, layer) for layer in layers]
+    self.assertEqual(
+        utils.receptive_field_per_step_of_serial_layers(layers),
+        expected_rf_dict,
+    )
 
 
 if __name__ == '__main__':

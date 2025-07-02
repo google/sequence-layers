@@ -14,8 +14,8 @@
 """Tests for the test utilities."""
 
 from unittest import mock
-
 from absl.testing import parameterized
+import numpy as np
 from sequence_layers.jax import test_utils
 
 
@@ -122,6 +122,49 @@ class NamedProductTest(test_utils.SequenceLayerTest):
         ValueError, str(iterator_without_testcase_name)
     ):
       test_utils.named_product(first, second)
+
+
+class Shear2dTest(test_utils.SequenceLayerTest):
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='basic_3x3',
+          input_array=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+          expected_output=[
+              [0, 0, 1, 2, 3],
+              [0, 4, 5, 6, 0],
+              [7, 8, 9, 0, 0],
+          ],
+      ),
+      dict(
+          testcase_name='rect_more_rows',
+          input_array=[[1, 2], [3, 4], [5, 6]],
+          expected_output=[[0, 0, 1, 2], [0, 3, 4, 0], [5, 6, 0, 0]],
+      ),
+      dict(
+          testcase_name='rect_more_cols',
+          input_array=[[1, 2, 3, 4], [5, 6, 7, 8]],
+          expected_output=[[0, 1, 2, 3, 4], [5, 6, 7, 8, 0]],
+      ),
+      dict(
+          testcase_name='single_row',
+          input_array=[[1, 2, 3]],
+          expected_output=[[1, 2, 3]],
+      ),
+      dict(
+          testcase_name='single_col',
+          input_array=[[1], [2], [3]],
+          expected_output=[[0, 0, 1], [0, 2, 0], [3, 0, 0]],
+      ),
+      dict(
+          testcase_name='with_zeros',
+          input_array=[[0, 1], [0, 0]],
+          expected_output=[[0, 0, 1], [0, 0, 0]],
+      ),
+  )
+  def test_shear_2d(self, input_array, expected_output):
+    output = test_utils._shear_2d(np.array(input_array))
+    self.assertAllEqual(output, np.array(expected_output))
 
 
 if __name__ == '__main__':

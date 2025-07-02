@@ -109,8 +109,7 @@ class SequenceEmbedding(types.SequenceLayer):
 
     if self.config.round_num_embeddings_to_multiple_of:
       num_embeddings = _round_up_to_multiple_of(
-          num_embeddings,
-          self.config.round_num_embeddings_to_multiple_of
+          num_embeddings, self.config.round_num_embeddings_to_multiple_of
       )
 
     self.embedding = self.param(
@@ -124,6 +123,10 @@ class SequenceEmbedding(types.SequenceLayer):
         ),
         self.config.param_dtype,
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (0, 0)}
 
   @nn.nowrap
   def _validate_input_dtype(self, dtype: types.DType):
@@ -285,6 +288,10 @@ class SequenceDense(types.SequenceLayer):
       return SequenceDense(self, name=self.name)
 
   config: Config
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (0, 0)}
 
   @nn.nowrap
   def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
@@ -477,6 +484,10 @@ class MaskedDense(types.SequenceLayer):
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (-self.config.num_steps + 1, 0)}
 
   @nn.nowrap
   def get_output_shape(

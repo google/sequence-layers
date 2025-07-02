@@ -383,7 +383,10 @@ class DropoutTest(test_utils.SequenceLayerTest):
     ).make()
     x = test_utils.random_sequence(2, 13, 5, dtype=dtype, random_mask=True)
     l = self.init_and_bind_layer(key, l, x)
-    y = self.verify_contract(l, x, training=False)
+    test_receptive_field = jnp.issubdtype(dtype, jnp.inexact)
+    y = self.verify_contract(
+        l, x, training=False, test_receptive_field=test_receptive_field
+    )
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'dropout')
@@ -1046,6 +1049,8 @@ class OneHotTest(test_utils.SequenceLayerTest):
         padding_invariance_pad_value=0,
         # Integer tensors have no gradient to test.
         test_gradients=False,
+        # Receptive field test is not supported for integers.
+        test_receptive_field=False,
     )
     self.assertEmpty(l.variables)
     self.assertAllEqual(
@@ -1104,6 +1109,8 @@ class EmbeddingTest(test_utils.SequenceLayerTest):
         training=False,
         # Integer tensors have no gradient to test.
         test_gradients=False,
+        # Receptive field test is not supported for integers.
+        test_receptive_field=False,
     )
 
     variables = flax.core.meta.unbox(l.variables)
@@ -1568,6 +1575,9 @@ class PointwiseMathTest(test_utils.SequenceLayerTest):
     batch_size, time, channels = 2, 10, 4
     for dtype in dtypes:
       x = test_utils.random_sequence(batch_size, time, channels, dtype=dtype)
+      if isinstance(config, (simple.Log.Config, simple.Power.Config)):
+        # only pass positive values to log and power to avoid nans.
+        x = x.apply_values(jnp.abs)
       l = dataclasses.replace(config, name='test').make()
       l = self.init_and_bind_layer(key, l, x)
 
@@ -1658,6 +1668,7 @@ class CastTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
     self.assertEqual(l.name, 'cast')
 
+    test_receptive_field = jnp.issubdtype(target_dtype, jnp.inexact)
     y = self.verify_contract(
         l,
         x,
@@ -1665,6 +1676,7 @@ class CastTest(test_utils.SequenceLayerTest):
         padding_invariance_pad_value=jnp.nan
         if target_dtype == jnp.float16
         else 32768,
+        test_receptive_field=test_receptive_field,
     )
     self.assertEmpty(l.variables)
     self.assertEqual(y.values.dtype, target_dtype)
@@ -1738,7 +1750,13 @@ class LambdaTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.get_output_shape_for_sequence(x), (5, 1))
     self.assertEqual(l.get_output_dtype(x.dtype), jnp.bool_)
     self.assertEqual(l.name, 'lambda')
-    y = self.verify_contract(l, x, training=False)
+    y = self.verify_contract(
+        l,
+        x,
+        training=False,
+        # Receptive field test is not supported for bools.
+        test_receptive_field=False,
+    )
     self.assertEmpty(l.variables)
     self.assertSequencesClose(y, x.apply_values(fn).mask_invalid())
 
@@ -1768,7 +1786,13 @@ class LambdaTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.get_output_shape_for_sequence(x), (5, 1))
     self.assertEqual(l.get_output_dtype(x.dtype), jnp.bool_)
     self.assertEqual(l.name, 'lambda')
-    y = self.verify_contract(l, x, training=False)
+    y = self.verify_contract(
+        l,
+        x,
+        training=False,
+        # Receptive field test is not supported for bools.
+        test_receptive_field=False,
+    )
     self.assertEmpty(l.variables)
     self.assertSequencesClose(y, fn(x).mask_invalid())
 
@@ -2054,7 +2078,7 @@ class ArgmaxTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.get_output_shape_for_sequence(x), ())
     self.assertEqual(l.name, 'argmax')
-    self.verify_contract(l, x, training=False)
+    self.verify_contract(l, x, training=False, test_receptive_field=False)
     self.assertEmpty(l.variables)
     self.assertAllEqual(y.values, jnp.array([[2], [0]]))
 
@@ -2111,7 +2135,10 @@ class SqueezeTest(test_utils.SequenceLayerTest):
         l.get_output_shape_for_sequence(x), expected_output.shape[2:]
     )
     self.assertEqual(l.name, 'squeeze')
-    self.verify_contract(l, x, training=False)
+    test_receptive_field = jnp.issubdtype(input_array.dtype, jnp.inexact)
+    self.verify_contract(
+        l, x, training=False, test_receptive_field=test_receptive_field
+    )
     self.assertEmpty(l.variables)
 
   @parameterized.parameters(

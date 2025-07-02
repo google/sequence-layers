@@ -82,6 +82,13 @@ class AddTimingSignal(
           f'{type(self).__name__} requires floating point argument.'
       )
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.config.only_advance_position_for_valid_timesteps:
+      return {0: (-np.inf, 0)}
+    else:
+      return {0: (0, 0)}
+
   def get_initial_state(
       self,
       batch_size: int,
@@ -215,6 +222,13 @@ class ApplyRotaryPositionalEncoding(
           'only_advance_position_for_valid_timesteps is incompatible with'
           f' {self.config.positions_name=}.'
       )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.config.only_advance_position_for_valid_timesteps:
+      return {0: (-np.inf, 0)}
+    else:
+      return {0: (0, 0)}
 
   @nn.nowrap
   def _check_inputs(self, input_spec: types.ShapeDType):

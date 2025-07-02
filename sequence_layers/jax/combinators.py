@@ -16,6 +16,7 @@
 import dataclasses
 import fractions
 import functools
+import math
 from typing import Callable, Sequence as TypingSequence, TypeVar
 
 import flax
@@ -82,6 +83,10 @@ class WrapperMixin:
   @property
   def output_latency(self) -> int:
     return self.child_layer.output_latency
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return self.child_layer.receptive_field_per_step
 
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     return self.child_layer.get_accumulated_input_latency(input_latency)
@@ -187,6 +192,18 @@ class SerialCombinatorMixin:
   @property
   def output_latency(self) -> int:
     return self.get_accumulated_output_latency(0)
+
+  @functools.cached_property
+  def receptive_field(self) -> types.ReceptiveField:
+    """Returns the receptive field of the serial combinator."""
+    return utils.reduce_receptive_field_per_step(
+        self.receptive_field_per_step, self.output_ratio
+    )
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    """Returns the range of the receptive field of this layer per step."""
+    return utils.receptive_field_per_step_of_serial_layers(self.layers)
 
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     return utils.serial_input_latency(self.layers, input_latency)
@@ -419,6 +436,12 @@ class Parallel(types.Emitting):
   @property
   def output_latency(self) -> int:
     return self.get_accumulated_output_latency(0)
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if not self.layers:
+      return {0: (0, 0)}
+    return utils.aggregate_layers_receptive_field_per_steps(self.layers)
 
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     """Latency of a parallel is the same for all layers."""
@@ -806,6 +829,34 @@ class Residual(SerialCombinatorMixin, types.Emitting):
   def output_latency(self) -> int:
     return self.get_accumulated_output_latency(0)
 
+  @functools.cached_property
+  def receptive_field(self) -> types.ReceptiveField:
+    return utils.reduce_receptive_field_per_step(
+        self.receptive_field_per_step, self.output_ratio
+    )
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    layers_rf_per_step = super().receptive_field_per_step
+    shortcut_rf_per_step = self.shortcut_layer.receptive_field_per_step
+    layers_output_ratio = super().output_ratio
+    shortcut_output_ratio = self.shortcut_layer.output_ratio
+    types.validate_receptive_field_per_step(layers_rf_per_step)
+    types.validate_receptive_field_per_step(shortcut_rf_per_step)
+    steps = range(math.lcm(len(layers_rf_per_step), len(shortcut_rf_per_step)))
+    rf_per_step = {}
+    for step in steps:
+      rf_per_step[step] = utils.receptive_field_union(
+          utils.receptive_field_at(
+              layers_rf_per_step, layers_output_ratio, step
+          ),
+          utils.receptive_field_at(
+              shortcut_rf_per_step, shortcut_output_ratio, step
+          ),
+      )
+    types.validate_receptive_field_per_step(rf_per_step)
+    return rf_per_step
+
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     latency = super().get_accumulated_input_latency(input_latency)
     shortcut_latency = self.shortcut_layer.get_accumulated_input_latency(
@@ -1051,6 +1102,31 @@ class Repeat(types.Emitting):
   @property
   def output_latency(self) -> int:
     return self.get_accumulated_output_latency(0)
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    layer_rf_per_step = [{}]
+    layer_output_ratio = [fractions.Fraction(1)]
+
+    def scan_fn(
+        child_layer: types.SequenceLayer,
+        scan_carry,
+        scan_input,
+    ):
+      layer_rf_per_step[0] = child_layer.receptive_field_per_step
+      layer_output_ratio[0] = child_layer.output_ratio
+      return scan_carry, scan_input
+
+    # This is slightly inefficient since scan keeps overwritting the receptive
+    # field and output ratios which do not change in scan iterations.
+    self._build_child_layer_scanner(scan_fn)(self.child_layer, (), ())
+
+    overall_rf_per_step = layer_rf_per_step[0]
+    for _ in range(self.config.num_repeats - 1):
+      overall_rf_per_step = utils.propagate_receptive_field_to_prev_layer(
+          overall_rf_per_step, layer_rf_per_step[0], layer_output_ratio[0]
+      )
+    return overall_rf_per_step
 
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     result = [input_latency]
@@ -1674,6 +1750,32 @@ class Bidirectional(types.Emitting):
   def output_ratio(self) -> fractions.Fraction:
     # setup() checks forward and backward output ratio is equal.
     return self.forward.output_ratio
+
+  @functools.cached_property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    rf_per_step_fwd = self.forward.receptive_field_per_step
+    rf_per_step_bwd = self.backward.receptive_field_per_step
+    types.validate_receptive_field_per_step(rf_per_step_fwd)
+    types.validate_receptive_field_per_step(rf_per_step_bwd)
+    num_steps_fwd = len(rf_per_step_fwd)
+    num_steps_bwd = len(rf_per_step_bwd)
+    num_steps = math.lcm(num_steps_fwd, num_steps_bwd)
+    rf_per_step = {}
+    for step in range(num_steps):
+      fwd_step = step % num_steps_fwd
+      bwd_step = (num_steps - step) % num_steps_bwd
+      rf_f = rf_per_step_fwd.get(fwd_step)
+      rf_b = rf_per_step_bwd.get(bwd_step)
+      rf_b = tuple(-r for r in reversed(rf_b)) if rf_b is not None else None
+      if rf_f is None and rf_b is None:
+        rf_per_step[step] = None
+      elif rf_f is None:
+        rf_per_step[step] = rf_b
+      elif rf_b is None:
+        rf_per_step[step] = rf_f
+      else:
+        rf_per_step[step] = (min(rf_f[0], rf_b[0]), max(rf_f[1], rf_b[1]))
+    return rf_per_step
 
   @nn.nowrap
   def get_output_shape(

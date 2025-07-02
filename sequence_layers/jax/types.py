@@ -124,6 +124,11 @@ Constants = MutableMapping[str, jt.AnyPyTree]
 Emits = jt.AnyPyTree
 ChannelSpec = ShapeDType
 ArrayLike = jax.Array | jax.core.Tracer | jax.core.ShapedArray | np.ndarray
+# Receptive field:
+# - (past, future) integer input time steps.
+# - Allow floats to accommodate -/+ inf indicating unlimited past/future.
+# - None for cases with no receptive field.
+ReceptiveField = tuple[float | int, float | int] | None
 
 ARRAY_LIKE_TYPES = (
     jax.Array,
@@ -275,6 +280,33 @@ def validate_explicit_padding(padding: TypingSequence[int]) -> tuple[int, int]:
     )
 
   return padding
+
+
+def validate_receptive_field(receptive_field: ReceptiveField) -> None:
+  """Checks that the provided receptive field is valid."""
+  if receptive_field is None:
+    return
+  past, future = receptive_field
+  if past > future:
+    raise ValueError(f'Invalid receptive field: {past=} > {future=}.')
+  if isinstance(past, float) and not np.isinf(past):
+    raise ValueError(f'Invalid receptive field: non-inf float {past=}.')
+  if isinstance(future, float) and not np.isinf(future):
+    raise ValueError(f'Invalid receptive field: non-inf float {future=}.')
+
+
+def validate_receptive_field_per_step(
+    receptive_field_per_step: dict[int, ReceptiveField],
+) -> None:
+  """Checks that the provided receptive field per step is valid."""
+  steps = sorted(receptive_field_per_step.keys())
+  if steps != list(range(len(steps))):
+    raise ValueError(
+        'receptive field steps must be a contiguous range starting from 0:'
+        f' {steps=}'
+    )
+  for rf in receptive_field_per_step.values():
+    validate_receptive_field(rf)
 
 
 def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
@@ -809,6 +841,76 @@ class Steppable(metaclass=abc.ABCMeta):
     # by the output ratio.
     return int(output_latency * output_ratio) + self.output_latency
 
+  @property
+  def receptive_field(self) -> ReceptiveField:
+    """Returns the range of the receptive field of this layer.
+
+    A (past, future) tuple indicating the input time step range
+    `[ti + past, ti + future]` that affects the output step `to`, where `ti` is
+    the first step of the input block corresponding to `to`, i.e.,
+    `ti = to // output_ratio`.
+
+    For cases where the receptive field varies across steps, we return the
+    union of the receptive fields. For example, with 2x downsampling and 2x
+    upsampling, the receptive field is [0, 1] at even steps and [-1, 0] at odd
+    steps. This property would return [-1, 1]. The `receptive_field_per_step`
+    property is a helper to compute the overall receptive field of a layer and
+    the receptive field of a composition of layers.
+
+    Infinite receptive field is represtend with +/-np.inf. E.g., RNNs have
+    (-np.inf, 0) receptive field.
+
+    No receptive field is represented as None. E.g., Conv1DTranspose with
+    kernel_size=1, stirde=2, produces None receptive on every other steps.
+    """
+    # To avoid circular dependency, the logic here is copied from utils.py, can
+    # we dedup?
+    rf_per_step = self.receptive_field_per_step
+    validate_receptive_field_per_step(rf_per_step)
+
+    # Only pick the steps that have receptive field.
+    rf_list = {s: rf for s, rf in rf_per_step.items() if rf is not None}
+    if not rf_list:
+      # No receptive field if all steps have no receptive field.
+      return None
+
+    # Compute the overall union of the receptive fields.
+    min_past = np.inf
+    max_future = -np.inf
+    output_ratio = self.output_ratio
+    for output_step, (past, future) in rf_list.items():
+      input_step = output_step // output_ratio
+      past -= input_step
+      future -= input_step
+      min_past = min(min_past, past)
+      max_future = max(max_future, future)
+    return min_past, max_future
+
+  # Should we cache this property? To compute the overall receptive field of a
+  # a composition of layers, we traverse all the possible paths to the input
+  # sequence in a brute force BFS manner. To avoid recomputing this property
+  # over and over, we can cache it.
+  @property
+  def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
+    """Returns the range of the receptive field of this layer per step.
+
+    For the cases that receptive field varies across steps, and repeats every
+    `n` steps, this property provides the per step receptive field, where steps
+    should be a contiguous range starting from 0. E.g., with 2x down-sampling
+    and 2x up-sampling, the receptive field at even steps is [0, 1] and at odd
+    steps is [-1, 0], so we get {0: [-1, 1], 1: [0, 1]}.
+
+    This serves as a helper to compute the overall receptive field of the layer
+    and the receptive field of composition of layers.
+
+    In most layers, the receptive field does not vary across steps, and this
+    property returns a single receptive field for step 0, i.e., {0: (p, f)}.
+    """
+    layer_name = type(self).__name__
+    raise NotImplementedError(
+        f'receptive_field_per_step is not implemented by {layer_name}'
+    )
+
   @abc.abstractmethod
   def layer(
       self, x: Sequence, *, training: bool, constants: Constants | None = None
@@ -1278,6 +1380,10 @@ class Stateless(SequenceLayer):
   - get_output_dtype
   """
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
+    return {0: (0, 0)}
+
   def get_initial_state(
       self,
       batch_size: int,
@@ -1310,6 +1416,10 @@ class StatelessEmitting(Emitting):
   - get_output_shape
   - get_output_dtype
   """
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
+    return {0: (0, 0)}
 
   def step_with_emits(
       self,

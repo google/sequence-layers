@@ -14,7 +14,9 @@
 """Test utilities."""
 
 import dataclasses
+import functools
 import itertools
+import logging
 import random
 from typing import Any, Callable, Iterable, Mapping, Sequence as TypingSequence, TypeVar
 
@@ -26,6 +28,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
 
@@ -514,6 +517,254 @@ def strip_batch_axis_of_garbage(tree):
   )
 
 
+@jax.jit
+def _shear_2d(x: jt.Shaped[jt.ArrayT, 'r c']) -> jt.Shaped[jt.ArrayT, 'r d']:
+  """Shears a 2D JAX array to produce a diagonal padding effect.
+
+  Example:
+  x:
+  [[1, 2, 3],
+   [4, 5, 6],
+   [7, 8, 9]]
+
+  output:
+  [[0, 0, 1, 2, 3],
+   [0, 4, 5, 6, 0],
+   [7, 8, 9, 0, 0]]
+
+  Args:
+      x: The input 2D JAX array of shape (r, c).
+
+  Returns:
+      A 2D JAX array of shape (r, d), where d = c + r - 1.
+  """
+  r, c = x.shape
+  # [r, c].
+  x = x[:, ::-1]
+  # [r, c + r].
+  x = jnp.pad(x, [[0, 0], [0, r]], constant_values=0.0)
+  # [r * (c + r)].
+  x = x.reshape(-1)
+  # [r * (c + r - 1)].
+  x = x[:-r]
+  # [r, c + r - 1].
+  x = x.reshape([r, c + r - 1])
+  # [r, c + r - 1].
+  x = x[:, ::-1]
+  return x
+
+
+def _prep_input_for_receptive_field(
+    l: types.SequenceLayer,
+    x: types.Sequence,
+    constants: types.Constants | None,
+    pad_constants: bool,
+    pad_constants_ratio: int,
+) -> tuple[types.Sequence, types.Constants | None]:
+  """Pads the input to the maximum receptive field."""
+  values = x.values
+  mask = jnp.ones_like(x.mask)
+  x_len = values.shape[1]
+  if l.receptive_field is not None:
+    past, future = l.receptive_field
+    rf_len = (
+        (future if future != np.inf else 0)
+        - (past if past != -np.inf else 0)
+        + 1
+    )
+    assert rf_len > 0
+    required_len = rf_len * 2
+  else:
+    # RF is None, so any length is fine.
+    required_len = x_len
+  if x_len < required_len:
+    pad_amount = required_len - x_len
+    pad_shape = (values.shape[0], pad_amount) + values.shape[2:]
+    values = jnp.concatenate(
+        [np.random.normal(size=pad_shape).astype(values.dtype), values],
+        axis=1,
+    )
+    batch_size, _ = mask.shape
+    mask = jnp.full([batch_size, x_len + pad_amount], True)
+    if constants is not None and pad_constants:
+      constant_pad_amount = pad_amount * pad_constants_ratio
+      padded_constants = {}
+      for k, v in constants.items():
+        if isinstance(v, types.Sequence):
+          v = v.pad_time(0, constant_pad_amount, valid=False)
+          # Mark all as valid to avoid blocking grads in receptive field
+          # calculations.
+          v = types.Sequence(v.values, jnp.ones_like(v.mask))
+        padded_constants[k] = v
+      constants = padded_constants
+  x = types.Sequence(values, mask)
+  return x, constants
+
+
+def _gradient_receptive_field(
+    l: types.SequenceLayer,
+    layer_fn: Callable[
+        [types.SequenceLayer, types.Sequence, types.Constants],
+        types.Sequence,
+    ],
+    x: types.Sequence,
+    constants: types.Constants | None = None,
+) -> types.ReceptiveField:
+  """Computes the gradient receptive field of a layer."""
+
+  def fn(
+      x: jt.Float[jt.ArrayT, 'b t *'],
+      x_fn: Callable[[jt.Float[jt.ArrayT, 'b t *']], types.Sequence],
+      y_fn: Callable[[types.Sequence], jt.Float[jt.ArrayT, 'b t *']],
+  ):
+    y = y_fn(layer_fn(l, x_fn(x), constants).mask_invalid().values)
+    # Reduce y to sum of absolute values of individual y channel values to
+    # avoid large gradient matrices.
+    return jax.lax.reduce_sum(jnp.abs(y), axes=list(range(2, y.ndim)))
+
+  x_real_fn = lambda x_: types.Sequence(x_ + 1j * jnp.imag(x.values), x.mask)
+  x_imag_fn = lambda x_: types.Sequence(jnp.real(x.values) + 1j * x_, x.mask)
+  jac_fn_real_y = functools.partial(
+      fn, x_fn=lambda x_: types.Sequence(x_, x.mask), y_fn=jnp.real
+  )
+  jac_fn_imag_y = functools.partial(
+      fn, x_fn=lambda x_: types.Sequence(x_, x.mask), y_fn=jnp.real
+  )
+  jac_fn_real_x_real_y = functools.partial(fn, x_fn=x_real_fn, y_fn=jnp.real)
+  jac_fn_imag_x_real_y = functools.partial(fn, x_fn=x_imag_fn, y_fn=jnp.real)
+  jac_fn_real_x_imag_y = functools.partial(fn, x_fn=x_real_fn, y_fn=jnp.imag)
+  jac_fn_imag_x_imag_y = functools.partial(fn, x_fn=x_imag_fn, y_fn=jnp.imag)
+
+  x_dtype = x.values.dtype
+  y_dtype = l.get_output_dtype(x_dtype)
+  x_is_complex = jnp.issubdtype(x_dtype, jnp.complexfloating)
+  y_is_complex = jnp.issubdtype(y_dtype, jnp.complexfloating)
+  x_is_floating = jnp.issubdtype(x_dtype, jnp.floating)
+  y_is_floating = jnp.issubdtype(y_dtype, jnp.floating)
+
+  if x_is_floating and y_is_floating:
+    # [By, Ty, Bx, Tx, *I].
+    grads = jax.jacrev(jac_fn_real_y)(x.values)
+    grads = jnp.where(jnp.isfinite(grads), grads, 0.0)
+    has_grad = jnp.logical_not(jnp.equal(grads, 0))
+  elif x_is_floating and y_is_complex:
+    # [By, Ty, Bx, Tx, *I].
+    grads_real = jax.jacrev(jac_fn_real_y)(x.values)
+    grads_imag = jax.jacrev(jac_fn_imag_y)(x.values)
+    grads_real = jnp.where(jnp.isfinite(grads_real), grads_real, 0.0)
+    grads_imag = jnp.where(jnp.isfinite(grads_imag), grads_imag, 0.0)
+    has_grad = jnp.logical_not(
+        jnp.logical_and(jnp.equal(grads_real, 0), jnp.equal(grads_imag, 0))
+    )
+  elif x_is_complex and y_is_floating:
+    # [By, Ty, Bx, Tx, *I].
+    grads_real = jax.jacrev(jac_fn_real_x_real_y)(jnp.real(x.values))
+    grads_imag = jax.jacrev(jac_fn_imag_x_real_y)(jnp.imag(x.values))
+    grads_real = jnp.where(jnp.isfinite(grads_real), grads_real, 0.0)
+    grads_imag = jnp.where(jnp.isfinite(grads_imag), grads_imag, 0.0)
+    has_grad = jnp.logical_not(
+        jnp.logical_and(jnp.equal(grads_real, 0), jnp.equal(grads_imag, 0))
+    )
+  elif x_is_complex and y_is_complex:
+    # [By, Ty, Bx, Tx, *I].
+    grads_real_x_real_y = jax.jacrev(jac_fn_real_x_real_y)(jnp.real(x.values))
+    grads_imag_x_real_y = jax.jacrev(jac_fn_imag_x_real_y)(jnp.imag(x.values))
+    grads_real_x_imag_y = jax.jacrev(jac_fn_real_x_imag_y)(jnp.real(x.values))
+    grads_imag_x_imag_y = jax.jacrev(jac_fn_imag_x_imag_y)(jnp.imag(x.values))
+    grads_real_x_real_y = jnp.where(
+        jnp.isfinite(grads_real_x_real_y), grads_real_x_real_y, 0.0
+    )
+    grads_imag_x_real_y = jnp.where(
+        jnp.isfinite(grads_imag_x_real_y), grads_imag_x_real_y, 0.0
+    )
+    grads_real_x_imag_y = jnp.where(
+        jnp.isfinite(grads_real_x_imag_y), grads_real_x_imag_y, 0.0
+    )
+    grads_imag_x_imag_y = jnp.where(
+        jnp.isfinite(grads_imag_x_imag_y), grads_imag_x_imag_y, 0.0
+    )
+
+    has_grad = jnp.logical_not(
+        jnp.all(
+            jnp.stack(
+                [
+                    jnp.equal(grads_real_x_real_y, 0),
+                    jnp.equal(grads_imag_x_real_y, 0),
+                    jnp.equal(grads_real_x_imag_y, 0),
+                    jnp.equal(grads_imag_x_imag_y, 0),
+                ],
+                axis=-1,
+            ),
+            axis=-1,
+        )
+    )
+  else:
+    raise ValueError(f'Unsupported dtypes: {x_dtype=}, {y_dtype=}.')
+
+  # From [By, Ty, Bx, Tx, *I] choose [By, Bx, *I]
+  y_batch_channel_axes = (0,)
+  x_batch_channel_axes = (2,) + tuple(range(4, 4 + x.ndim - 2))
+
+  # Reduce over batch and channel to get input/output timesteps grad presence.
+  # [Ty, Tx].
+  has_grad = has_grad.any(axis=x_batch_channel_axes + y_batch_channel_axes)
+  ty, tx = has_grad.shape
+
+  # Adjust the has_grad array to account for output ratio.
+  # E.g., with output_ratio = 3/2, we have.
+  # (3 x 2)   -->  (3 * 2 x 2) --->   (2 x 2)
+  # [[1, 0]  insert [[1, 0]   reduce [[1, 1] => Overall receptive field: [0, 1].
+  #  [1, 1]  zeros   [0, 0]           [0, 1]]
+  #  [0, 1]]         [1, 1]
+  #                  [0, 0]
+  #                  [0, 1]
+  #                  [0, 0]]
+  if l.output_ratio.denominator != 1:
+    # Insert output ratio denominator - 1 zeros between every output time step.
+    zeros = jnp.zeros(
+        (ty, l.output_ratio.denominator - 1, tx), dtype=has_grad.dtype
+    )
+    has_grad = jnp.concatenate([has_grad[:, None, :], zeros], axis=1)
+    has_grad = has_grad.reshape(-1, tx)
+  if l.output_ratio.numerator != 1:
+    n = l.output_ratio.numerator
+    # Reduce every output ratio numerator steps.
+    if has_grad.shape[0] % n != 0:
+      pad_width = (
+          (0, n - has_grad.shape[0] % n),
+          (0, 0),
+      )
+      has_grad = jnp.pad(has_grad, pad_width)
+
+    has_grad = jnp.reshape(has_grad, [-1, l.output_ratio.numerator, tx]).any(
+        axis=1
+    )
+
+  # After adjustments above has_grad should be shaped as [Tx, Tx] and each row
+  # i indicates the receptive field for the ith time step. To compute the
+  # aggregate union of the receptive fields, we shear it.
+  # Example:                                          (relative indices)
+  #                                                   -3               5
+  # [[1 1 0 0 0]        [[0 0 0 0 1 1 0 0 0]          |      ....      |
+  #  [1 1 1 0 0]  shear  [0 0 0 1 1 1 0 0 0]  reduce  v                v
+  #  [0 1 1 1 0]   -->   [0 0 0 1 1 1 0 0 0]   -->    [0 0 0 1 1 1 0 0 0]
+  #  [0 0 1 1 1]         [0 0 0 1 1 1 0 0 0]                 |   |
+  #  [0 0 0 1 1]]        [0 0 0 1 1 0 0 0 0]]                v   v
+  #                                         receptive field:[0,  2]
+  # ---------------------------------------------------------------------------
+  has_grad_sheared = _shear_2d(has_grad)
+  has_grad_sheared_any = has_grad_sheared.any(axis=0)
+  shift = -has_grad.shape[0] + 1
+
+  # Shift the array indices to account for past time steps.
+  receptive_field_indices = jnp.where(has_grad_sheared_any)[0] + shift
+  if receptive_field_indices.shape[0] == 0:
+    return None
+  past = receptive_field_indices[0].item()
+  future = receptive_field_indices[-1].item()
+  return past, future
+
+
 def _mask_and_pad_to_max_length(
     a: types.Sequence, b: types.Sequence
 ) -> tuple[types.Sequence, types.Sequence]:
@@ -612,6 +863,8 @@ class SequenceLayerTest(parameterized.TestCase):
       jit: bool = False,
       test_batching: bool = True,
       test_padding_invariance: bool = True,
+      test_receptive_field: bool = True,
+      test_receptive_field_relaxed: bool = False,
   ) -> types.Sequence:
     """Verifies that the provided layer obeys the SequenceLayer contract.
 
@@ -660,7 +913,7 @@ class SequenceLayerTest(parameterized.TestCase):
       padding_invariance_pad_value: The value to use for testing padding
         invariance. By default, use NaN to show that NaNs do not leak into valid
         regions of the sequence.
-      pad_constants: Whether to pad sl.Sequence instances in constants along
+      pad_constants: Whether to pad types.Sequence instances in constants along
         with padding x with padding_invariance_pad_value, when testing padding
         invariance.
       pad_constants_ratio: The ratio between the time dimension of x and
@@ -671,6 +924,10 @@ class SequenceLayerTest(parameterized.TestCase):
       test_batching: Whether to increase the batch size to verify batching
         works.
       test_padding_invariance: Whether to test the layer for padding invariance.
+      test_receptive_field: Whether to test the layer for receptive field.
+      test_receptive_field_relaxed: Whether to test the layer for receptive
+        field with relaxed conditions, i.e., allowing the layer to report a
+        receptive field that is larger than the actual receptive field.
 
     Returns:
       The output of
@@ -811,6 +1068,7 @@ class SequenceLayerTest(parameterized.TestCase):
       y_layer_batch = strip_batch_axis_of_garbage(y_layer_batch)
       self.assertSequencesClose(y_layer, y_layer_batch, rtol=rtol, atol=atol)
 
+    original_x = x
     if l.supports_step:
       # Extend x by the input latency so we run the layer until all outputs are
       # flushed.
@@ -866,6 +1124,57 @@ class SequenceLayerTest(parameterized.TestCase):
             atol=grad_atol,
         )
 
+    if test_receptive_field:
+      x_is_inexact = jnp.issubdtype(x.dtype, jnp.inexact)
+      y_is_inexact = jnp.issubdtype(y_layer.dtype, jnp.inexact)
+      receptive_field = l.receptive_field
+      if receptive_field == (-np.inf, np.inf):
+        logging.warning(
+            'Skipping receptive field test since layer has infinite receptive'
+            ' field.'
+        )
+      elif not x_is_inexact or not y_is_inexact:
+        # With integer types we cannot test with gradients. We can only verify
+        # that changing values outside receptive field does not change the
+        # output, which is not implemented yet.
+        raise NotImplementedError(
+            'Receptive field test with non-float/complex input/output types is'
+            ' not supported.'
+        )
+      else:
+        rf_x, rf_constants = _prep_input_for_receptive_field(
+            l, original_x, constants, pad_constants, pad_constants_ratio
+        )
+        expected_receptive_field = _gradient_receptive_field(
+            l, layer_fn, rf_x, rf_constants
+        )
+
+        if receptive_field is None:
+          self.assertIsNone(expected_receptive_field)
+        elif receptive_field[0] == -np.inf:
+          if test_receptive_field_relaxed:
+            self.assertGreaterEqual(
+                receptive_field[1], expected_receptive_field[1]
+            )
+          else:
+            self.assertEqual(receptive_field[1], expected_receptive_field[1])
+        elif receptive_field[1] == np.inf:
+          if test_receptive_field_relaxed:
+            self.assertLessEqual(
+                receptive_field[0], expected_receptive_field[0]
+            )
+          else:
+            self.assertEqual(receptive_field[0], expected_receptive_field[0])
+        else:
+          if test_receptive_field_relaxed:
+            self.assertLessEqual(
+                receptive_field[0], expected_receptive_field[0]
+            )
+            self.assertGreaterEqual(
+                receptive_field[1], expected_receptive_field[1]
+            )
+          else:
+            self.assertEqual(receptive_field, expected_receptive_field)
     return y_layer
 
   def assertSequencesClose(  # pylint: disable=invalid-name
