@@ -618,6 +618,10 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
   def supports_step(self) -> bool:
     return self.config.cumulative
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (-np.inf, 0 if self.config.cumulative else np.inf)}
+
   def get_initial_state(
       self,
       batch_size: int,

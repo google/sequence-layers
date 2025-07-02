@@ -141,13 +141,33 @@ class LatencyTest(test_utils.SequenceLayerTest):
           (2, 3),
           (3, 2),
       ],
+      conv_transpose_padding=[
+          'valid',
+          'same',
+          'causal',
+      ],
+      conv_padding=[
+          'valid',
+          'same',
+          'causal_valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
   )
   def test_serial_latency_upsample_downsample(
       self,
       kernel_size: int,
       stride: int,
       delays: tuple[int, int],
+      conv_transpose_padding,
+      conv_padding,
   ):
+    if conv_transpose_padding == 'valid':
+      self.skipTest('b/423621840')
+    if conv_padding == 'causal_valid' and conv_transpose_padding == 'causal':
+      self.skipTest('b/423604181')
     key = jax.random.PRNGKey(1234)
 
     pre_delay, post_delay = delays
@@ -168,7 +188,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            padding='causal',
+            padding=conv_transpose_padding,
             use_bias=False,
             precision='highest',
             name='conv1',
@@ -181,7 +201,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            padding='reverse_causal',
+            padding=conv_padding,
             use_bias=False,
             precision='highest',
             name='conv2',
@@ -205,10 +225,37 @@ class LatencyTest(test_utils.SequenceLayerTest):
           (2, 3),
           (3, 2),
       ],
+      conv_padding=[
+          'valid',
+          'same',
+          'causal_valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
+      conv_transpose_padding=[
+          'valid',
+          'same',
+          'causal',
+      ],
   )
   def test_serial_latency_downsample_upsample(
-      self, kernel_size: int, stride: int, delays: tuple[int, int]
+      self,
+      kernel_size: int,
+      stride: int,
+      delays: tuple[int, int],
+      conv_padding,
+      conv_transpose_padding,
   ):
+    if conv_transpose_padding == 'valid':
+      self.skipTest('b/423621840')
+    if (
+        conv_padding in ('causal_valid', 'reverse_causal_valid')
+        and conv_transpose_padding == 'causal'
+    ):
+      self.skipTest('b/423621841')
+
     key = jax.random.PRNGKey(1234)
 
     pre_delay, post_delay = delays
@@ -229,7 +276,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            padding='reverse_causal',
+            padding=conv_padding,
             use_bias=False,
             precision='highest',
             name='conv1',
@@ -241,13 +288,165 @@ class LatencyTest(test_utils.SequenceLayerTest):
             filters=1,
             kernel_size=kernel_size,
             strides=stride,
-            padding='causal',
+            padding=conv_transpose_padding,
             use_bias=False,
             precision='highest',
             name='conv2',
         ),
         # Input/output latency is post_delay.
         dsp.Delay.Config(post_delay, delay_layer_output=False),
+    ]).make()
+
+    x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
+    l = self.init_and_bind_layer(key, l, x)
+    self.verify_contract(l, x, training=False)
+
+  @parameterized.product(
+      kernel_sizes=[
+          (1, 2),
+          (2, 1),
+          (2, 3),
+          (3, 2),
+          (2, 4),
+          (4, 2),
+          (2, 5),
+          (5, 2),
+      ],
+      strides=[
+          (1, 1),
+          (1, 2),
+          (2, 1),
+          (2, 2),
+          (2, 3),
+          (3, 2),
+          (1, 4),
+          (4, 1),
+      ],
+      conv_transpose_padding=[
+          'valid',
+          'same',
+          'causal',
+      ],
+      conv_padding=[
+          'valid',
+          'same',
+          'causal_valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
+  )
+  def test_serial_upsample_downsample_non_matching_kernel_size_stride(
+      self,
+      kernel_sizes: tuple[int, int],
+      strides: tuple[int, int],
+      conv_transpose_padding,
+      conv_padding,
+  ):
+    if conv_transpose_padding == 'valid':
+      self.skipTest('b/423621840')
+    if conv_padding == 'causal_valid' and conv_transpose_padding == 'causal':
+      self.skipTest('b/423604181')
+    key = jax.random.PRNGKey(1234)
+
+    l = combinators.Serial.Config([
+        convolution.Conv1DTranspose.Config(
+            filters=1,
+            kernel_size=kernel_sizes[0],
+            strides=strides[0],
+            padding=conv_transpose_padding,
+            use_bias=False,
+            precision='highest',
+            name='conv1',
+        ),
+        convolution.Conv1D.Config(
+            filters=1,
+            kernel_size=kernel_sizes[1],
+            strides=strides[1],
+            padding=conv_padding,
+            use_bias=False,
+            precision='highest',
+            name='conv2',
+        ),
+    ]).make()
+
+    x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.verify_contract(l, x, training=False)
+
+  @parameterized.product(
+      kernel_sizes=[
+          (1, 2),
+          (2, 1),
+          (2, 3),
+          (3, 2),
+          (2, 4),
+          (4, 2),
+          (2, 5),
+          (5, 2),
+      ],
+      strides=[
+          (1, 1),
+          (1, 2),
+          (2, 1),
+          (2, 2),
+          (2, 3),
+          (3, 2),
+          (1, 4),
+          (4, 1),
+      ],
+      conv_padding=[
+          'valid',
+          'same',
+          'causal_valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
+      conv_transpose_padding=[
+          'valid',
+          'same',
+          'causal',
+      ],
+  )
+  def test_serial_downsample_upsample_non_matching_kernel_size_stride(
+      self,
+      kernel_sizes: tuple[int, int],
+      strides: tuple[int, int],
+      conv_padding,
+      conv_transpose_padding,
+  ):
+    if conv_transpose_padding == 'valid':
+      self.skipTest('b/423621840')
+    if (
+        conv_padding in ('causal_valid', 'reverse_causal_valid')
+        and conv_transpose_padding == 'causal'
+    ):
+      self.skipTest('b/423621841')
+    key = jax.random.PRNGKey(1234)
+
+    l = combinators.Serial.Config([
+        convolution.Conv1D.Config(
+            filters=1,
+            kernel_size=kernel_sizes[0],
+            strides=strides[0],
+            padding=conv_padding,
+            use_bias=False,
+            precision='highest',
+            name='conv1',
+        ),
+        convolution.Conv1DTranspose.Config(
+            filters=1,
+            kernel_size=kernel_sizes[1],
+            strides=strides[1],
+            padding=conv_transpose_padding,
+            use_bias=False,
+            precision='highest',
+            name='conv2',
+        ),
     ]).make()
 
     x = test_utils.random_sequence(1, 32, 1, random_lengths=False)
@@ -916,7 +1115,7 @@ class Conv1DTransposeTest(test_utils.SequenceLayerTest):
         kernel = variables['params']['kernel']
         bias = variables['params']['bias']
 
-        explicit_padding = convolution._transpose_conv_explicit_padding(
+        explicit_padding = convolution.transpose_conv_explicit_padding(
             kernel_size, stride, dilation_rate, padding
         )
 

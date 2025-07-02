@@ -329,13 +329,13 @@ class Conv2DTransposeTest(test_utils.SequenceLayerTest):
         kernel = variables['params']['kernel']
         bias = variables['params']['bias']
 
-        explicit_time_padding = convolution._transpose_conv_explicit_padding(
+        explicit_time_padding = convolution.transpose_conv_explicit_padding(
             kernel_size,
             strides,
             dilation_rate,
             time_padding,
         )
-        explicit_spatial_padding = convolution._transpose_conv_explicit_padding(
+        explicit_spatial_padding = convolution.transpose_conv_explicit_padding(
             kernel_size,
             strides,
             dilation_rate,

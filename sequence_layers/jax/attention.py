@@ -2386,6 +2386,14 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
         else 0
     )
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    max_past_horizon = self.config.max_past_horizon
+    max_future_horizon = self.config.max_future_horizon
+    past = -np.inf if max_past_horizon == -1 else -max_past_horizon
+    future = np.inf if max_future_horizon == -1 else max_future_horizon
+    return {0: (past, future)}
+
   def get_initial_state(
       self,
       batch_size: int,
@@ -3080,6 +3088,13 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
 
     return supports_step
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.query_network:
+      return self.query_network.receptive_field_per_step
+    else:
+      return {0: (0, 0)}
+
   def _get_source(self, constants: types.Constants | None) -> types.Sequence:
     return _get_source(
         self, self.config.source_name, constants, required_rank=3
@@ -3451,6 +3466,12 @@ class GmmAttention(types.PreservesType, types.Emitting):
         activation=None,
         name='output',
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    past = -np.inf if self.config.monotonic else 0
+    future = 0
+    return {0: (past, future)}
 
   def get_initial_state(
       self,
@@ -4133,6 +4154,14 @@ class LocalDotProductSelfAttention(
         if self.config.max_future_horizon >= 0
         else 0
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    max_past_horizon = self.config.max_past_horizon
+    max_future_horizon = self.config.max_future_horizon
+    past = -np.inf if max_past_horizon == -1 else -max_past_horizon
+    future = np.inf if max_future_horizon == -1 else max_future_horizon
+    return {0: (past, future)}
 
   def get_initial_state(
       self,
@@ -4859,6 +4888,12 @@ class StreamingDotProductAttention(
         and self.config.use_query_delay_buffer
         else 0
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.query_network:
+      return self.query_network.receptive_field_per_step
+    return {0: (0, 0)}
 
   def get_initial_state(
       self,
@@ -5627,6 +5662,12 @@ class StreamingLocalDotProductAttention(
         and self.config.use_query_delay_buffer
         else 0
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.query_network:
+      return self.query_network.receptive_field_per_step
+    return {0: (0, 0)}
 
   def get_initial_state(
       self,

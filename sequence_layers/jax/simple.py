@@ -1818,6 +1818,10 @@ class GlobalReshape(types.PreservesType, types.Stateless):
   def supports_step(self) -> bool:
     return False
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (-np.inf, np.inf)}
+
   @types.check_layer
   def layer(
       self,
@@ -2190,6 +2194,10 @@ class Upsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.rate)
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {s: (0, 0) for s in range(self.config.rate)}
+
   @types.check_layer
   def layer(
       self,
@@ -2227,6 +2235,10 @@ class Upsample2D(types.PreservesType, types.Stateless):
   @property
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.rate[0])
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {s: (0, 0) for s in range(self.config.rate[0])}
 
   @nn.nowrap
   def get_output_shape(
@@ -2542,6 +2554,10 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
   @property
   def supports_step(self) -> bool:
     return False
+
+  @property
+  def receptive_field(self) -> tuple[int | None, int | None]:
+    return (-np.inf, np.inf)
 
   def _get_rearrange_fn(self) -> Callable[[jax.Array], jax.Array]:
     before, after = self.config.pattern.split('->')

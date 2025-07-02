@@ -295,6 +295,7 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
           # JAX does not support reduce_window gradients with dilation_rate > 1.
           # Don't compute gradients for integer types.
           test_gradients=dilation_rate == 1 and dtype == jnp.float32,
+          test_receptive_field=dilation_rate == 1 and dtype == jnp.float32,
       )
 
       # Only test for flax compatibility on inputs that flax supports.
@@ -663,6 +664,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
           # JAX does not support reduce_window gradients with dilation_rate > 1.
           # Don't compute gradients for integer types.
           test_gradients=dilation_rate == 1 and dtype == jnp.float32,
+          test_receptive_field=dilation_rate == 1 and dtype == jnp.float32,
       )
 
       # Only test for flax compatibility on inputs that flax supports.

@@ -16,6 +16,7 @@
 import abc
 import dataclasses
 import fractions
+import math
 from typing import Callable, Literal
 
 import flax.linen as nn
@@ -25,7 +26,6 @@ import numpy as np
 from sequence_layers.jax import convolution
 from sequence_layers.jax import signal
 from sequence_layers.jax import types
-
 
 __all__ = (
     # go/keep-sorted start
@@ -169,6 +169,12 @@ class Frame(types.PreservesType, types.SequenceLayer):
       case _:
         # Other cases are handled in the parent class.
         return super().output_latency
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return convolution.conv_receptive_field_per_step(
+        self.config.frame_length, self.config.frame_step, 1, self.config.padding
+    )
 
   @property
   def _buffer_width(self) -> int:
@@ -400,6 +406,22 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
   @property
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.frame_step)
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.config.padding == types.PaddingMode.SEMICAUSAL_FULL.value:
+      past = 0
+      future = (
+          math.ceil(float(self.config.frame_length) / self.config.frame_step)
+          - 1
+      )
+      return {0: (past, future)}
+    return convolution.transpose_conv_receptive_field_per_step(
+        self.config.frame_length,
+        self.config.frame_step,
+        1,
+        self.config.padding,
+    )
 
   @nn.nowrap
   def _validate_input_shape(self, input_shape: types.ShapeLike) -> None:
@@ -964,6 +986,47 @@ class STFT(types.SequenceLayer):
   def input_latency(self) -> int:
     return self.framer.input_latency
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.config.window_fn:
+      window = self.config.window_fn(self.config.frame_length)
+    else:
+      window = np.ones(self.config.frame_length)
+    receptive_field = self.framer.receptive_field
+    assert receptive_field is not None, 'Layer has no receptive field.'
+    past, future = receptive_field
+    receptive_field_list = np.array(range(past, future + 1)).astype(np.int32)
+
+    if self.config.fft_length < self.config.frame_length:
+      if self.config.fft_padding == 'center':
+        trim_left = (self.config.frame_length - self.config.fft_length) // 2
+        trim_right = (
+            self.config.frame_length - self.config.fft_length - trim_left
+        )
+      elif self.config.fft_padding == 'right':
+        trim_left = 0
+        trim_right = (
+            self.config.frame_length - self.config.fft_length - trim_left
+        )
+      else:
+        raise ValueError(f'Unsupported FFT padding: {self.config.fft_padding}')
+      trim_mask = np.array(
+          [0] * trim_left
+          + [1] * (self.config.frame_length - trim_left - trim_right)
+          + [0] * trim_right
+      )
+      window = window * trim_mask
+
+    receptive_field_list = receptive_field_list[window > 0]
+    if receptive_field_list.size > 0:
+      past = np.nanmin(receptive_field_list).astype(np.int32).item()
+      future = np.nanmax(receptive_field_list).astype(np.int32).item()
+    else:
+      # Indicating no receptive field.
+      past = np.inf
+      future = -np.inf
+    return {0: (past, future)}
+
   def get_initial_state(
       self,
       batch_size: int,
@@ -1119,6 +1182,77 @@ class InverseSTFT(types.SequenceLayer):
   def output_ratio(self) -> fractions.Fraction:
     assert self.irfft.output_ratio == 1
     return self.overlap_add.output_ratio
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    fft_length = self.config.fft_length
+    frame_length = self.config.frame_length
+    frame_step = self.config.frame_step
+    time_padding = self.config.time_padding
+    fft_padding = self.config.fft_padding
+
+    explicit_padding = convolution.transpose_conv_explicit_padding(
+        frame_length,
+        frame_step,
+        1,
+        time_padding,
+    )
+    # Shift in the transpoed frame in OverlapAdd in the first step, i.e., the
+    # number of frame items that are that are unused in the first step.
+    shift_left = frame_length - explicit_padding[0] - 1
+    if (pad_amount := frame_length - fft_length) > 0:
+      if fft_padding == 'right':
+        pad_left = 0
+        pad_right = pad_amount
+      elif fft_padding == 'center':
+        pad_left = pad_amount // 2
+        pad_right = pad_amount - pad_left
+      else:
+        raise ValueError(f'Unsupported FFT padding: {fft_padding}')
+    else:
+      pad_left = 0
+      pad_right = 0
+
+    if self.config.window_fn:
+      window = self.config.window_fn(frame_length, dtype=jnp.int32)
+      if pad_amount > 0:
+        window = np.array([
+            v if pad_left <= i < pad_left + fft_length else 0
+            for i, v in enumerate(window)
+        ])
+      window_mask = window != 0
+    else:
+      window_mask = jnp.ones(frame_length, dtype=jnp.bool_)
+
+    p = -math.ceil(float(explicit_padding[0] + 1) / frame_step) + 1
+    f = math.ceil(float(shift_left) / frame_step) - 1
+    rf_per_step = {}
+    for i in range(frame_step):
+      if (explicit_padding[0] + 1) % frame_step == 0 or (
+          i < ((explicit_padding[0] + 1)) % frame_step
+      ):
+        p_i = p
+      else:
+        p_i = p + 1
+      f_i = f if i < -shift_left % frame_step else f + 1
+
+      if pad_amount > 0:
+        padding_mask = np.array(
+            [0] * pad_left + [1] * fft_length + [0] * pad_right, dtype=jnp.bool_
+        )
+      else:
+        padding_mask = jnp.ones(frame_length, dtype=jnp.bool_)
+      rf_frame_index = (i + shift_left) - np.arange(p_i, f_i + 1) * frame_step
+      rf_frame_index_mask = (window_mask & padding_mask)[rf_frame_index]
+      receptive_field_list = np.array(range(p_i, f_i + 1)).astype(np.int32)
+      receptive_field_list = receptive_field_list[rf_frame_index_mask]
+      if receptive_field_list.size > 0:
+        p_i = np.nanmin(receptive_field_list).astype(np.int32).item()
+        f_i = np.nanmax(receptive_field_list).astype(np.int32).item()
+        rf_per_step[i] = (p_i, f_i) if p_i <= f_i else None
+      else:
+        rf_per_step[i] = None
+    return rf_per_step
 
   def get_initial_state(
       self,
@@ -1348,6 +1482,13 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     else:
       return self.config.length
 
+  @property
+  def receptive_field_per_step(self):
+    if self.config.delay_layer_output:
+      return {0: (-self.config.length, -self.config.length)}
+    else:
+      return {0: (0, 0)}
+
   def setup(self) -> None:
     if self.config.length < 0:
       raise ValueError(f'Expected nonnegative delay length. Got: {self.config}')
@@ -1434,6 +1575,10 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
   @property
   def output_latency(self) -> int:
     return self.config.length
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (self.config.length, self.config.length)}
 
   def setup(self) -> None:
     if self.config.length < 0:

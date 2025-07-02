@@ -16,6 +16,7 @@
 import abc
 import dataclasses
 import fractions
+import math
 import typing
 from typing import Callable, Sequence as TypingSequence
 
@@ -301,7 +302,7 @@ def _compute_conv_transpose_output_length(
   return output_time
 
 
-def _transpose_conv_explicit_padding(
+def transpose_conv_explicit_padding(
     kernel_size: int,
     stride: int,
     dilation_rate: int,
@@ -340,6 +341,57 @@ def _transpose_conv_explicit_padding(
       raise ValueError(f'Unsupported padding: {padding}')
 
   return pad_left, pad_right
+
+
+def transpose_conv_receptive_field_per_step(
+    kernel_size: int,
+    stride: int,
+    dilation_rate: int,
+    padding: types.PaddingModeString,
+) -> dict[int, types.ReceptiveField]:
+  """Returns the receptive field per step for a transpose convolution."""
+  explicit_padding = transpose_conv_explicit_padding(
+      kernel_size,
+      stride,
+      dilation_rate,
+      padding,
+  )
+  effective_kernel_size = utils.convolution_effective_kernel_size(
+      kernel_size, dilation_rate
+  )
+  # Shift in transposed conv kernel in the first step, i.e., the number of
+  # kernel items are unused in the first step.
+  shift_left = effective_kernel_size - explicit_padding[0] - 1
+  p = -math.ceil(float(explicit_padding[0] + 1) / stride) + 1
+  f = math.ceil(float(shift_left) / stride) - 1
+  rf_per_step = {}
+  for i in range(stride):
+    if (explicit_padding[0] + 1) % stride == 0 or (
+        i < ((explicit_padding[0] + 1)) % stride
+    ):
+      p_i = p
+    else:
+      p_i = p + 1
+    f_i = f if i < -shift_left % stride else f + 1
+    rf_per_step[i] = (p_i, f_i) if p_i <= f_i else None
+  return rf_per_step
+
+
+def conv_receptive_field_per_step(
+    kernel_size: int,
+    stride: int,
+    dilation_rate: int,
+    padding: types.PaddingModeString,
+) -> dict[int, types.ReceptiveField]:
+  """Returns the receptive field per step for a convolution."""
+  effective_kernel_size = utils.convolution_effective_kernel_size(
+      kernel_size, dilation_rate
+  )
+  past = -utils.convolution_explicit_padding(
+      padding, kernel_size, stride, dilation_rate
+  )[0]
+  future = past + effective_kernel_size - 1
+  return {0: (past, future)}
 
 
 def compute_conv_transpose_mask(
@@ -382,7 +434,7 @@ def compute_conv_transpose_mask(
 
   # If effective_kernel_size > stride, use an actual transpose convolution to
   # compute the mask.
-  explicit_padding = _transpose_conv_explicit_padding(
+  explicit_padding = transpose_conv_explicit_padding(
       kernel_size,
       stride,
       dilation_rate,
@@ -503,6 +555,20 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
       case _:
         # Other cases are handled in the parent class.
         return super().output_latency
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    effective_kernel_size = utils.convolution_effective_kernel_size(
+        self._kernel_size[0], self._dilation_rate[0]
+    )
+    past = -utils.convolution_explicit_padding(
+        self._paddings[0],
+        self._kernel_size[0],
+        self._strides[0],
+        self._dilation_rate[0],
+    )[0]
+    future = past + effective_kernel_size - 1
+    return {0: (past, future)}
 
   @property
   def _buffer_width(self) -> int:
@@ -1438,6 +1504,15 @@ class Conv1DTranspose(types.SequenceLayer):
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.strides, 1)
 
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return transpose_conv_receptive_field_per_step(
+        self.config.kernel_size,
+        self.config.strides,
+        self.config.dilation_rate,
+        self.config.padding,
+    )
+
   @nn.nowrap
   def get_output_shape(
       self,
@@ -1565,7 +1640,7 @@ class Conv1DTranspose(types.SequenceLayer):
     # in step mode, so we can't produce the final effective_kernel_size - stride
     # samples).
 
-    explicit_padding = _transpose_conv_explicit_padding(
+    explicit_padding = transpose_conv_explicit_padding(
         self.config.kernel_size,
         self.config.strides,
         self.config.dilation_rate,
@@ -1607,7 +1682,7 @@ class Conv1DTranspose(types.SequenceLayer):
       x = x.mask_invalid()
 
     # Compute valid padding for step.
-    explicit_padding = _transpose_conv_explicit_padding(
+    explicit_padding = transpose_conv_explicit_padding(
         self.config.kernel_size,
         self.config.strides,
         self.config.dilation_rate,
@@ -1729,12 +1804,51 @@ class Conv2DTranspose(types.SequenceLayer):
   config: Config
 
   @property
+  def _kernel_size(self) -> tuple[int, ...]:
+    # Config normalizes these for us in __post_init__.
+    assert (
+        isinstance(self.config.kernel_size, tuple)
+        and len(self.config.kernel_size) == 2
+    ), self.config.kernel_size
+    return typing.cast(tuple[int, ...], self.config.kernel_size)
+
+  @property
+  def _strides(self) -> tuple[int, ...]:
+    # Config normalizes these for us in __post_init__.
+    assert (
+        isinstance(self.config.strides, tuple) and len(self.config.strides) == 2
+    ), self.config.strides
+    return typing.cast(tuple[int, ...], self.config.strides)
+
+  @property
+  def _dilation_rate(self) -> tuple[int, ...]:
+    # Config normalizes these for us in __post_init__.
+    assert (
+        isinstance(self.config.dilation_rate, tuple)
+        and len(self.config.dilation_rate) == 2
+    ), self.config.dilation_rate
+    return typing.cast(tuple[int, ...], self.config.dilation_rate)
+
+  @property
+  def _paddings(self) -> tuple[types.PaddingModeString | tuple[int, int], ...]:
+    return (self.config.time_padding, self.config.spatial_padding)
+
+  @property
   def supports_step(self) -> bool:
     return self.config.time_padding == types.PaddingMode.CAUSAL.value
 
   @property
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.strides[0], 1)
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return transpose_conv_receptive_field_per_step(
+        self._kernel_size[0],
+        self._strides[0],
+        self._dilation_rate[0],
+        self._paddings[0],
+    )
 
   @nn.nowrap
   def get_output_shape(
@@ -1877,14 +1991,14 @@ class Conv2DTranspose(types.SequenceLayer):
     if self.config.kernel_size[0] > 1:
       x = x.mask_invalid()
 
-    explicit_time_padding = _transpose_conv_explicit_padding(
+    explicit_time_padding = transpose_conv_explicit_padding(
         self.config.kernel_size[0],
         self.config.strides[0],
         self.config.dilation_rate[0],
         self.config.time_padding,
     )
 
-    explicit_spatial_padding = _transpose_conv_explicit_padding(
+    explicit_spatial_padding = transpose_conv_explicit_padding(
         self.config.kernel_size[1],
         self.config.strides[1],
         self.config.dilation_rate[1],
@@ -1932,14 +2046,14 @@ class Conv2DTranspose(types.SequenceLayer):
       x = x.mask_invalid()
 
     # Compute valid padding for step.
-    explicit_time_padding = _transpose_conv_explicit_padding(
+    explicit_time_padding = transpose_conv_explicit_padding(
         self.config.kernel_size[0],
         self.config.strides[0],
         self.config.dilation_rate[0],
         types.PaddingMode.VALID.value,
     )
 
-    explicit_spatial_padding = _transpose_conv_explicit_padding(
+    explicit_spatial_padding = transpose_conv_explicit_padding(
         self.config.kernel_size[1],
         self.config.strides[1],
         self.config.dilation_rate[1],

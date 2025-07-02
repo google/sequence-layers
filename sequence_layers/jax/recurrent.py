@@ -20,6 +20,7 @@ import einops
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 import recurrentgemma
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
@@ -121,6 +122,10 @@ class LSTM(types.SequenceLayer):
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (-np.inf, 0)}
 
   @nn.compact
   def _cell(
@@ -392,6 +397,10 @@ class RGLRU(types.SequenceLayer):
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (-np.inf, 0)}
 
   @jt.typed
   def merged_to_complex(

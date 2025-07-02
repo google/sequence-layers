@@ -407,6 +407,10 @@ class Conditioning(BaseConditioning):
   config: Config
 
   @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    return {0: (0, 0)}
+
+  @property
   def _conditioning_name(self) -> str:
     return self.config.conditioning_name
 

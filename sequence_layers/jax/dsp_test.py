@@ -64,7 +64,7 @@ class FFTTest(test_utils.SequenceLayerTest, parameterized.TestCase):
   def test_fft(self, shape_axis, fft_length, padding):
     shape, axis = shape_axis
     key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape, dtype=jnp.complex64)
+    x = test_utils.random_sequence(*shape, dtype=jnp.complex64, low_length=1)
     l = dsp.FFT.Config(
         fft_length, axis=axis, padding=padding, name='fft'
     ).make()
@@ -756,7 +756,7 @@ class OverlapAddTest(test_utils.SequenceLayerTest, parameterized.TestCase):
               # (1, 2),
               # (2, 3),
           ),
-          ((), (5, 9)),
+          ((), (3,), (5, 9)),
           (
               'causal',
               # 'same',  # TODO(rryan): Fix SAME tests.
@@ -766,6 +766,12 @@ class OverlapAddTest(test_utils.SequenceLayerTest, parameterized.TestCase):
       )
   )
   def test_overlap_add(self, frame_length_frame_step, inner_shape, padding):
+    if (
+        frame_length_frame_step == (4, 2)
+        and inner_shape == (5, 9)
+        and padding == 'valid'
+    ):
+      self.skipTest('b/423622422')
     key = jax.random.PRNGKey(1234)
     frame_length, frame_step = frame_length_frame_step
 

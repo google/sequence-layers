@@ -252,6 +252,7 @@ class SerialTest(test_utils.SequenceLayerTest):
     self.assertEqual(emits['emit3'].values.shape, (2, 2, 1))
     self.assertEqual(emits['emit4'].values.shape, (2, 1, 1))
     self.assertEqual(y.values.shape, (2, 1, 1))
+    self.verify_contract(l, x, training=False)
 
   def test_changes_shape_and_type(self):
     key = jax.random.PRNGKey(1234)
@@ -337,6 +338,7 @@ class SerialTest(test_utils.SequenceLayerTest):
             }
         },
     )
+    self.verify_contract(l, x, training=False)
 
   def test_share_scope_wrong_share_scope_length(self):
     key = jax.random.PRNGKey(1234)
@@ -602,6 +604,7 @@ class ParallelTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(emits['layers_2']['emit3'].values.shape, (2, 8, 1))
     self.assertEqual(emits['layers_3']['emit4'].values.shape, (2, 8, 1))
     self.assertEqual(y.values.shape, (2, 8, 4, 1) if is_stack else (2, 8, 1))
+    self.verify_contract(l, x, training=False)
 
   def test_share_scope(self):
     key = jax.random.PRNGKey(1234)
@@ -670,6 +673,7 @@ class ParallelTest(test_utils.SequenceLayerTest, parameterized.TestCase):
             }
         },
     )
+    self.verify_contract(l, x, training=False)
 
   def test_share_scope_wrong_share_scope_length(self):
     key = jax.random.PRNGKey(1234)
@@ -979,6 +983,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
     self.assertEqual(body_emits['emit'].values.shape, (2, 16, 1))
     self.assertEqual(shortcut_emits['shortcut_emit'].values.shape, (2, 16, 1))
     chex.assert_trees_all_equal(y.values, 2.0 * body_emits['emit'].values)
+    self.verify_contract(l, x, training=False)
 
   def test_changes_shape_and_type(self):
     key = jax.random.PRNGKey(1234)
@@ -1031,6 +1036,14 @@ class ResidualTest(test_utils.SequenceLayerTest):
 
     self.assertEqual(l.get_output_dtype(x.dtype), expected_output_dtype)
     self.assertEqual(y.dtype, expected_output_dtype)
+    test_receptive_field = (
+        jnp.issubdtype(input_dtype, jnp.inexact)
+        and jnp.issubdtype(residual_dtype, jnp.inexact)
+        and jnp.issubdtype(shortcut_dtype, jnp.inexact)
+    )
+    self.verify_contract(
+        l, x, training=False, test_receptive_field=test_receptive_field
+    )
 
   def test_share_scope(self):
     key = jax.random.PRNGKey(1234)
@@ -1099,6 +1112,7 @@ class ResidualTest(test_utils.SequenceLayerTest):
             }
         },
     )
+    self.verify_contract(l, x, training=False)
 
   def test_share_scope_wrong_share_scope_length(self):
     key = jax.random.PRNGKey(1234)
@@ -1702,6 +1716,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     # dropout1 is the result of applying one dropout layer, and dropout2 is the
     # result of both dropout layers.
     self.assertSequencesNotClose(dropout1, dropout2)
+    self.verify_contract(l, x, training=False)
 
   def test_nested_repeat(self):
     key = jax.random.PRNGKey(1234)
@@ -1837,7 +1852,7 @@ class RepeatTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     ).make()
 
     x = test_utils.random_sequence(2, 3, 6, low_length=2)
-    source = test_utils.random_sequence(2, 5, 1)
+    source = test_utils.random_sequence(2, 5, 1, low_length=1)
     constants = {'source': source}
     l = self.init_and_bind_layer(key, l, x, constants=constants)
 

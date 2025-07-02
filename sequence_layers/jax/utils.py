@@ -1959,3 +1959,191 @@ def serial_output_latency(
   for child_layer in layers:
     output_latency = child_layer.get_accumulated_output_latency(output_latency)
   return output_latency
+
+
+def receptive_field_union(
+    rf_a: types.ReceptiveField, rf_b: types.ReceptiveField
+) -> types.ReceptiveField:
+  """Returns the union of the receptive fields of the layers."""
+  if rf_a is None:
+    return rf_b
+  if rf_b is None:
+    return rf_a
+  past = min(rf_a[0], rf_b[0])
+  future = max(rf_a[1], rf_b[1])
+  return past, future
+
+
+def receptive_field_at(
+    layer_receptive_field_per_step: dict[int, types.ReceptiveField],
+    layer_output_ratio: fractions.Fraction,
+    output_step: int,
+) -> types.ReceptiveField:
+  """Returns the receptive field of the layer at the given output step."""
+  rf_per_step = layer_receptive_field_per_step
+  types.validate_receptive_field_per_step(rf_per_step)
+  # `output_step` can take any value, and we shift it to the range of values in
+  # rf_per_step to compute the relative receptive field, and apply the reverse
+  # shift in the input steps to get the actual input range for `output_step`.
+  normalized_step = output_step % len(rf_per_step)
+  shift = (output_step - normalized_step) // layer_output_ratio
+  rf = rf_per_step[normalized_step]
+  if rf is None:
+    return None
+  past, future = rf
+  return past + shift, future + shift
+
+
+def layer_receptive_field_at(
+    layer: types.SequenceLayer,
+    output_step: int,
+) -> types.ReceptiveField:
+  """Returns the receptive field of the layer at the given output step."""
+  return receptive_field_at(
+      layer.receptive_field_per_step, layer.output_ratio, output_step
+  )
+
+
+def reduce_receptive_field_per_step(
+    rf_per_step: dict[int, types.ReceptiveField],
+    output_ratio: fractions.Fraction,
+) -> types.ReceptiveField:
+  """Returns the union of the receptive fields in rf_per_step.
+
+  Args:
+    rf_per_step: The receptive field per step.
+    output_ratio: The output ratio of the layer.
+
+  Returns:
+    The overall union of the receptive fields.
+  """
+  types.validate_receptive_field_per_step(rf_per_step)
+
+  # Pick the steps that have receptive field.
+  rf_per_step = {k: v for k, v in rf_per_step.items() if v is not None}
+  if not rf_per_step:
+    # No receptive field if all steps have no receptive field.
+    return None
+
+  # Compute the overall union of the receptive fields.
+  min_past = np.inf
+  max_future = -np.inf
+  for step, rf in rf_per_step.items():
+    past, future = rf
+    past -= step // output_ratio
+    future -= step // output_ratio
+    min_past = min(min_past, past)
+    max_future = max(max_future, future)
+  return min_past, max_future
+
+
+def aggregate_layers_receptive_field_per_steps(
+    layers: TypingSequence[types.SequenceLayer],
+) -> dict[int, types.ReceptiveField]:
+  return aggregate_receptive_field_per_steps(
+      [layer.receptive_field_per_step for layer in layers]
+  )
+
+
+def aggregate_receptive_field_per_steps(
+    receptive_field_per_step_list: TypingSequence[
+        dict[int, types.ReceptiveField]
+    ],
+) -> dict[int, types.ReceptiveField]:
+  """Aggregates a list receptive field per step."""
+  agg_rf_per_step = {}
+  for rf_per_step in receptive_field_per_step_list:
+    types.validate_receptive_field_per_step(rf_per_step)
+    for step, rf in rf_per_step.items():
+      agg_rf_per_step[step] = receptive_field_union(
+          rf, agg_rf_per_step.get(step)
+      )
+  types.validate_receptive_field_per_step(agg_rf_per_step)
+  return agg_rf_per_step
+
+
+def propagate_receptive_field_to_prev_layer(
+    layer_rf_per_step_next: dict[int, types.ReceptiveField],
+    layer_rf_per_step_prev: dict[int, types.ReceptiveField],
+    layer_output_ratio_prev: fractions.Fraction,
+) -> dict[int, types.ReceptiveField]:
+  """Propagates the receptive field of the next layer to the previous layer.
+
+  Given the receptive field per step of next layer, this function traces back
+  and expands the receptive field to the previous layer, returns the overall
+  receptive per step obtained by stacking the two layers.
+
+  Args:
+    layer_rf_per_step_next: The receptive field of the next layer.
+    layer_rf_per_step_prev: The receptive field of the previous layer.
+    layer_output_ratio_prev: The output ratio of the previous layer.
+
+  Returns:
+    The receptive field per step of the Serial([previous, next]) layers.
+  """
+  expanded_rf_per_step = {}
+  for step_next, rf_next in layer_rf_per_step_next.items():
+    if rf_next is None:
+      expanded_rf_per_step[step_next] = None
+      continue
+    types.validate_receptive_field(rf_next)
+    past, future = rf_next
+
+    rf_prev_list = []
+
+    if past == -np.inf and future == np.inf:
+      rf_prev_list.append((-np.inf, np.inf))
+    else:
+      if past == -np.inf:
+        rf_prev_list.append((-np.inf, -np.inf))
+      if future == np.inf:
+        rf_prev_list.append((np.inf, np.inf))
+
+      # Is +1 enough when one side is +/-inf?
+      start = past if past != -np.inf else future
+      end = future + 1 if future != np.inf else past + 1
+      # There is a possibility of optimizing by only considering
+      # the first (past) and last (future) steps in computation below, but need
+      # to verify that it works for the case of layers with varying rf per step.
+      rf_prev_list.extend([
+          receptive_field_at(layer_rf_per_step_prev, layer_output_ratio_prev, i)
+          for i in range(start, end)
+      ])
+      rf_prev_list = [rf for rf in rf_prev_list if rf is not None]
+    if not rf_prev_list:
+      expanded_rf_per_step[step_next] = None
+      continue
+
+    min_past = np.inf
+    max_future = -np.inf
+    for rf_prev in rf_prev_list:
+      types.validate_receptive_field(rf_prev)
+      past_prev, future_prev = rf_prev
+      min_past = min(min_past, past_prev)
+      max_future = max(max_future, future_prev)
+    expanded_rf_per_step[step_next] = (min_past, max_future)
+  return expanded_rf_per_step
+
+
+def receptive_field_per_step_of_serial_layers(
+    layers: TypingSequence[types.SequenceLayer],
+) -> dict[int, types.ReceptiveField]:
+  """Returns the receptive field per step of the Serial(layers)."""
+  if not layers:
+    return {0: (0, 0)}
+  receptive_field_per_step_list = [
+      layer.receptive_field_per_step for layer in layers
+  ]
+  output_ratio_list = [layer.output_ratio for layer in layers]
+  # Note extra steps does not affect the result, and LCM is the
+  # upperbound of what we need, and we can reduce it to speed up computation.
+  num_steps = math.lcm(*[len(r) for r in receptive_field_per_step_list])
+  rf_per_step = {k: (k, k) for k in range(num_steps)}
+  # Start from the last layer and work our way to the first.
+  for output_ratio_i, rf_per_step_i in zip(
+      reversed(output_ratio_list), reversed(receptive_field_per_step_list)
+  ):
+    rf_per_step = propagate_receptive_field_to_prev_layer(
+        rf_per_step, rf_per_step_i, output_ratio_i
+    )
+  return rf_per_step
