@@ -23,6 +23,7 @@ dependencies = [
     "jax",
     "jaxtyping",
     "numpy",
+    "orbax-export",
     "recurrentgemma[jax]",
     "typeguard==2.13.3",
 ]
