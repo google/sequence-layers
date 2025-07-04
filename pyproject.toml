@@ -23,7 +23,7 @@ dependencies = [
     "jax",
     "jaxtyping",
     "numpy",
-    "recurrentgemma[jax] @ git+https://github.com/google-deepmind/recurrentgemma@main",
+    "recurrentgemma[jax]",
     "typeguard==2.13.3",
 ]
 
