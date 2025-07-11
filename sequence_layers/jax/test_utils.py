@@ -566,11 +566,9 @@ def _prep_input_for_receptive_field(
   mask = jnp.ones_like(x.mask)
   x_len = values.shape[1]
   if l.receptive_field is not None:
-    past, future = l.receptive_field
+    start, end = l.receptive_field
     rf_len = (
-        (future if future != np.inf else 0)
-        - (past if past != -np.inf else 0)
-        + 1
+        (end if end != np.inf else 0) - (start if start != -np.inf else 0) + 1
     )
     assert rf_len > 0
     required_len = rf_len * 2
@@ -760,9 +758,9 @@ def _gradient_receptive_field(
   receptive_field_indices = jnp.where(has_grad_sheared_any)[0] + shift
   if receptive_field_indices.shape[0] == 0:
     return None
-  past = receptive_field_indices[0].item()
-  future = receptive_field_indices[-1].item()
-  return past, future
+  start = receptive_field_indices[0].item()
+  end = receptive_field_indices[-1].item()
+  return start, end
 
 
 def _mask_and_pad_to_max_length(

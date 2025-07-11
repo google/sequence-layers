@@ -125,8 +125,8 @@ Emits = jt.AnyPyTree
 ChannelSpec = ShapeDType
 ArrayLike = jax.Array | jax.core.Tracer | jax.core.ShapedArray | np.ndarray
 # Receptive field:
-# - (past, future) integer input time steps.
-# - Allow floats to accommodate -/+ inf indicating unlimited past/future.
+# - (start, end) integer input time steps.
+# - Allow floats to accommodate -/+ inf indicating unlimited start/end.
 # - None for cases with no receptive field.
 ReceptiveField = tuple[float | int, float | int] | None
 
@@ -286,13 +286,13 @@ def validate_receptive_field(receptive_field: ReceptiveField) -> None:
   """Checks that the provided receptive field is valid."""
   if receptive_field is None:
     return
-  past, future = receptive_field
-  if past > future:
-    raise ValueError(f'Invalid receptive field: {past=} > {future=}.')
-  if isinstance(past, float) and not np.isinf(past):
-    raise ValueError(f'Invalid receptive field: non-inf float {past=}.')
-  if isinstance(future, float) and not np.isinf(future):
-    raise ValueError(f'Invalid receptive field: non-inf float {future=}.')
+  start, end = receptive_field
+  if start > end:
+    raise ValueError(f'Invalid receptive field: {start=} > {end=}.')
+  if isinstance(start, float) and not np.isinf(start):
+    raise ValueError(f'Invalid receptive field: non-inf float {start=}.')
+  if isinstance(end, float) and not np.isinf(end):
+    raise ValueError(f'Invalid receptive field: non-inf float {end=}.')
 
 
 def validate_receptive_field_per_step(
@@ -845,8 +845,8 @@ class Steppable(metaclass=abc.ABCMeta):
   def receptive_field(self) -> ReceptiveField:
     """Returns the range of the receptive field of this layer.
 
-    A (past, future) tuple indicating the input time step range
-    `[ti + past, ti + future]` that affects the output step `to`, where `ti` is
+    A (start, end) tuple indicating the input time step range
+    `[ti + start, ti + end]` that affects the output step `to`, where `ti` is
     the first step of the input block corresponding to `to`, i.e.,
     `ti = to // output_ratio`.
 
@@ -875,16 +875,16 @@ class Steppable(metaclass=abc.ABCMeta):
       return None
 
     # Compute the overall union of the receptive fields.
-    min_past = np.inf
-    max_future = -np.inf
+    min_start = np.inf
+    max_end = -np.inf
     output_ratio = self.output_ratio
-    for output_step, (past, future) in rf_list.items():
+    for output_step, (start, end) in rf_list.items():
       input_step = output_step // output_ratio
-      past -= input_step
-      future -= input_step
-      min_past = min(min_past, past)
-      max_future = max(max_future, future)
-    return min_past, max_future
+      start -= input_step
+      end -= input_step
+      min_start = min(min_start, start)
+      max_end = max(max_end, end)
+    return min_start, max_end
 
   # Should we cache this property? To compute the overall receptive field of a
   # a composition of layers, we traverse all the possible paths to the input

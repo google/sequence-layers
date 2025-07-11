@@ -362,18 +362,18 @@ def transpose_conv_receptive_field_per_step(
   # Shift in transposed conv kernel in the first step, i.e., the number of
   # kernel items are unused in the first step.
   shift_left = effective_kernel_size - explicit_padding[0] - 1
-  p = -math.ceil(float(explicit_padding[0] + 1) / stride) + 1
-  f = math.ceil(float(shift_left) / stride) - 1
+  start = -math.ceil(float(explicit_padding[0] + 1) / stride) + 1
+  end = math.ceil(float(shift_left) / stride) - 1
   rf_per_step = {}
   for i in range(stride):
     if (explicit_padding[0] + 1) % stride == 0 or (
         i < ((explicit_padding[0] + 1)) % stride
     ):
-      p_i = p
+      start_i = start
     else:
-      p_i = p + 1
-    f_i = f if i < -shift_left % stride else f + 1
-    rf_per_step[i] = (p_i, f_i) if p_i <= f_i else None
+      start_i = start + 1
+    end_i = end if i < -shift_left % stride else end + 1
+    rf_per_step[i] = (start_i, end_i) if start_i <= end_i else None
   return rf_per_step
 
 
@@ -387,11 +387,11 @@ def conv_receptive_field_per_step(
   effective_kernel_size = utils.convolution_effective_kernel_size(
       kernel_size, dilation_rate
   )
-  past = -utils.convolution_explicit_padding(
+  start = -utils.convolution_explicit_padding(
       padding, kernel_size, stride, dilation_rate
   )[0]
-  future = past + effective_kernel_size - 1
-  return {0: (past, future)}
+  end = start + effective_kernel_size - 1
+  return {0: (start, end)}
 
 
 def compute_conv_transpose_mask(
@@ -561,14 +561,14 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
     effective_kernel_size = utils.convolution_effective_kernel_size(
         self._kernel_size[0], self._dilation_rate[0]
     )
-    past = -utils.convolution_explicit_padding(
+    start = -utils.convolution_explicit_padding(
         self._paddings[0],
         self._kernel_size[0],
         self._strides[0],
         self._dilation_rate[0],
     )[0]
-    future = past + effective_kernel_size - 1
-    return {0: (past, future)}
+    end = start + effective_kernel_size - 1
+    return {0: (start, end)}
 
   @property
   def _buffer_width(self) -> int:
