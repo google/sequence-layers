@@ -2390,9 +2390,9 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     max_past_horizon = self.config.max_past_horizon
     max_future_horizon = self.config.max_future_horizon
-    past = -np.inf if max_past_horizon == -1 else -max_past_horizon
-    future = np.inf if max_future_horizon == -1 else max_future_horizon
-    return {0: (past, future)}
+    start = -np.inf if max_past_horizon == -1 else -max_past_horizon
+    end = np.inf if max_future_horizon == -1 else max_future_horizon
+    return {0: (start, end)}
 
   def get_initial_state(
       self,
@@ -3469,9 +3469,9 @@ class GmmAttention(types.PreservesType, types.Emitting):
 
   @property
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
-    past = -np.inf if self.config.monotonic else 0
-    future = 0
-    return {0: (past, future)}
+    start = -np.inf if self.config.monotonic else 0
+    end = 0
+    return {0: (start, end)}
 
   def get_initial_state(
       self,
@@ -4159,9 +4159,9 @@ class LocalDotProductSelfAttention(
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     max_past_horizon = self.config.max_past_horizon
     max_future_horizon = self.config.max_future_horizon
-    past = -np.inf if max_past_horizon == -1 else -max_past_horizon
-    future = np.inf if max_future_horizon == -1 else max_future_horizon
-    return {0: (past, future)}
+    start = -np.inf if max_past_horizon == -1 else -max_past_horizon
+    end = np.inf if max_future_horizon == -1 else max_future_horizon
+    return {0: (start, end)}
 
   def get_initial_state(
       self,

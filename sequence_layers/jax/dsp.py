@@ -410,12 +410,12 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
   @property
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     if self.config.padding == types.PaddingMode.SEMICAUSAL_FULL.value:
-      past = 0
-      future = (
+      start = 0
+      end = (
           math.ceil(float(self.config.frame_length) / self.config.frame_step)
           - 1
       )
-      return {0: (past, future)}
+      return {0: (start, end)}
     return convolution.transpose_conv_receptive_field_per_step(
         self.config.frame_length,
         self.config.frame_step,
@@ -994,8 +994,8 @@ class STFT(types.SequenceLayer):
       window = np.ones(self.config.frame_length)
     receptive_field = self.framer.receptive_field
     assert receptive_field is not None, 'Layer has no receptive field.'
-    past, future = receptive_field
-    receptive_field_list = np.array(range(past, future + 1)).astype(np.int32)
+    start, end = receptive_field
+    receptive_field_list = np.array(range(start, end + 1)).astype(np.int32)
 
     if self.config.fft_length < self.config.frame_length:
       if self.config.fft_padding == 'center':
@@ -1019,13 +1019,13 @@ class STFT(types.SequenceLayer):
 
     receptive_field_list = receptive_field_list[window > 0]
     if receptive_field_list.size > 0:
-      past = np.nanmin(receptive_field_list).astype(np.int32).item()
-      future = np.nanmax(receptive_field_list).astype(np.int32).item()
+      start = np.nanmin(receptive_field_list).astype(np.int32).item()
+      end = np.nanmax(receptive_field_list).astype(np.int32).item()
     else:
       # Indicating no receptive field.
-      past = np.inf
-      future = -np.inf
-    return {0: (past, future)}
+      start = np.inf
+      end = -np.inf
+    return {0: (start, end)}
 
   def get_initial_state(
       self,

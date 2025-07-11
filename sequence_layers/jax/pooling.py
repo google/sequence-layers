@@ -505,7 +505,7 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
 
   @property
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
-    past = -utils.convolution_explicit_padding(
+    start = -utils.convolution_explicit_padding(
         self.config.time_padding,
         self.config.pool_size[0],
         self.config.strides[0],
@@ -514,8 +514,8 @@ class BasePooling2D(types.PreservesType, types.SequenceLayer):
     effective_pool_size = utils.convolution_effective_kernel_size(
         self.config.pool_size[0], self.config.dilation_rate[0]
     )
-    future = past + effective_pool_size - 1
-    return {0: (past, future)}
+    end = start + effective_pool_size - 1
+    return {0: (start, end)}
 
   @property
   def _buffer_width(self) -> int:

@@ -1969,9 +1969,9 @@ def receptive_field_union(
     return rf_b
   if rf_b is None:
     return rf_a
-  past = min(rf_a[0], rf_b[0])
-  future = max(rf_a[1], rf_b[1])
-  return past, future
+  start = min(rf_a[0], rf_b[0])
+  end = max(rf_a[1], rf_b[1])
+  return start, end
 
 
 def receptive_field_at(
@@ -1990,8 +1990,8 @@ def receptive_field_at(
   rf = rf_per_step[normalized_step]
   if rf is None:
     return None
-  past, future = rf
-  return past + shift, future + shift
+  start, end = rf
+  return start + shift, end + shift
 
 
 def layer_receptive_field_at(
@@ -2026,15 +2026,15 @@ def reduce_receptive_field_per_step(
     return None
 
   # Compute the overall union of the receptive fields.
-  min_past = np.inf
-  max_future = -np.inf
+  min_start = np.inf
+  max_end = -np.inf
   for step, rf in rf_per_step.items():
-    past, future = rf
-    past -= step // output_ratio
-    future -= step // output_ratio
-    min_past = min(min_past, past)
-    max_future = max(max_future, future)
-  return min_past, max_future
+    start, end = rf
+    start -= step // output_ratio
+    end -= step // output_ratio
+    min_start = min(min_start, start)
+    max_end = max(max_end, end)
+  return min_start, max_end
 
 
 def aggregate_layers_receptive_field_per_steps(
@@ -2087,23 +2087,23 @@ def propagate_receptive_field_to_prev_layer(
       expanded_rf_per_step[step_next] = None
       continue
     types.validate_receptive_field(rf_next)
-    past, future = rf_next
+    start, end = rf_next
 
     rf_prev_list = []
 
-    if past == -np.inf and future == np.inf:
+    if start == -np.inf and end == np.inf:
       rf_prev_list.append((-np.inf, np.inf))
     else:
-      if past == -np.inf:
+      if start == -np.inf:
         rf_prev_list.append((-np.inf, -np.inf))
-      if future == np.inf:
+      if end == np.inf:
         rf_prev_list.append((np.inf, np.inf))
 
       # Is +1 enough when one side is +/-inf?
-      start = past if past != -np.inf else future
-      end = future + 1 if future != np.inf else past + 1
+      start = start if start != -np.inf else end
+      end = end + 1 if end != np.inf else start + 1
       # There is a possibility of optimizing by only considering
-      # the first (past) and last (future) steps in computation below, but need
+      # the first (start) and last (end) steps in computation below, but need
       # to verify that it works for the case of layers with varying rf per step.
       rf_prev_list.extend([
           receptive_field_at(layer_rf_per_step_prev, layer_output_ratio_prev, i)
@@ -2114,14 +2114,14 @@ def propagate_receptive_field_to_prev_layer(
       expanded_rf_per_step[step_next] = None
       continue
 
-    min_past = np.inf
-    max_future = -np.inf
+    min_start = np.inf
+    max_end = -np.inf
     for rf_prev in rf_prev_list:
       types.validate_receptive_field(rf_prev)
-      past_prev, future_prev = rf_prev
-      min_past = min(min_past, past_prev)
-      max_future = max(max_future, future_prev)
-    expanded_rf_per_step[step_next] = (min_past, max_future)
+      start_prev, end_prev = rf_prev
+      min_start = min(min_start, start_prev)
+      max_end = max(max_end, end_prev)
+    expanded_rf_per_step[step_next] = (min_start, max_end)
   return expanded_rf_per_step
 
 
