@@ -25,6 +25,7 @@ dependencies = [
     "numpy",
     "orbax-export",
     "recurrentgemma[jax]",
+    "torch>=2.7.1",
     "typeguard==2.13.3",
 ]
 
