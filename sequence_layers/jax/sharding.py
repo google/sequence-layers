@@ -21,7 +21,7 @@ UNCONSTRAINED = jax.sharding.PartitionSpec.UNCONSTRAINED
 DimSharding = str | Sequence[str] | None | type(UNCONSTRAINED)
 Sharding = Sequence[DimSharding] | None
 
-use_mesh = jax.sharding.use_mesh
+use_mesh = jax.set_mesh
 
 
 def shard(x: jax.Array, s: Sharding) -> jax.Array:
