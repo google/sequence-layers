@@ -2336,9 +2336,7 @@ class Logging(types.PreservesType, types.StatelessPointwise):
       # them out.
       nonjax_kwargs = {'prefix': self.config.prefix}
       for k, v in list(kwargs.items()):
-        try:
-          jax.interpreters.xla.canonicalize_dtype(v)
-        except:  # pylint: disable=bare-except
+        if isinstance(v, jax.ShapeDtypeStruct) or not jax.core.valid_jaxtype(v):
           nonjax_kwargs[k] = v
           del kwargs[k]
       # We then set up a callback for the remaining tensor values:
