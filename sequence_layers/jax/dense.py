@@ -161,6 +161,9 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
     bias_sharding: types.Sharding | None = None
     # Optional name for the layer.
     name: str | None = None
+    # Optional callable that returns a jnp.einsum-compatible function to use
+    # instead of jnp.einsum. For example, to enable quantization aware training.
+    einsum_factory: types.EinsumFactoryT | None = None
 
     def __post_init__(self):
       # Use hashable types for sequences.
@@ -245,6 +248,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
         bias_sharding=self.config.bias_sharding,
         projectable=True,
         axes_types=axes_types,
+        einsum_factory=self.config.einsum_factory,
     )
 
 
@@ -305,6 +309,9 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
     bias_sharding: types.Sharding | None = None
     # Optional name for the layer.
     name: str | None = None
+    # Optional callable that returns a jnp.einsum-compatible function to use
+    # instead of jnp.einsum. For example, to enable quantization aware training.
+    einsum_factory: types.EinsumFactoryT | None = None
 
     def __post_init__(self):
       # Use hashable types for sequences.
@@ -444,4 +451,5 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
         bias_sharding=self.config.bias_sharding,
         projectable=True,
         axes_types=axes_types,
+        einsum_factory=self.config.einsum_factory,
     )

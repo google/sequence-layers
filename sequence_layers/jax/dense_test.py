@@ -176,6 +176,31 @@ class DenseShapedTest(test_utils.SequenceLayerTest):
         },
     )
 
+  @parameterized.product(shape=((2, 13, 1), (2, 13, 5)), output_shape=((1,),))
+  def test_use_einsum_factory(self, shape, output_shape):
+    """Check that einsum_factory produces is used for dense einsum."""
+
+    def einsum_factory() -> types.JnpEinsumT:
+      def custom_einsum(equation, *args, **kwargs):
+        return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+
+      return custom_einsum
+
+    key = jax.random.PRNGKey(1234)
+    l = dense.DenseShaped.Config(
+        output_shape, einsum_factory=einsum_factory
+    ).make()
+    x = test_utils.random_sequence(*shape)
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertCountEqual(l.variables['params'], ['kernel', 'bias'])
+
+    y = l(x, training=False)
+    kernel = flax.core.meta.unbox(l.variables)['params']['kernel']
+    y_expected = x.apply_values(
+        lambda v: jnp.einsum('abc,cd->abd', v, kernel) * 3
+    ).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
+
   @parameterized.parameters(True, False)
   def test_use_bias(self, use_bias):
     """Check that use_bias controls whether a bias is created."""
@@ -402,6 +427,34 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
 
     y_expected = x.apply_values(
         lambda v: jnp.einsum(equation, v, kernel) + bias
+    ).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
+
+  def test_use_einsum_factory(self):
+    """Check that einsum_factory produces is used for dense einsum."""
+    shape = (2, 3, 5)
+    equation = '...a,ab->...b'
+    output_shape = (7,)
+
+    def einsum_factory() -> types.JnpEinsumT:
+      def custom_einsum(equation, *args, **kwargs):
+        return jnp.multiply(jnp.einsum(equation, *args, **kwargs), 3)
+
+      return custom_einsum
+
+    key = jax.random.PRNGKey(1234)
+    l = dense.EinsumDense.Config(
+        equation, output_shape, einsum_factory=einsum_factory
+    ).make()
+    x = test_utils.random_sequence(*shape)
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertCountEqual(l.variables['params'], ['kernel'])
+
+    y = l(x, training=False)
+    self.assertEqual(y.shape, (2, 3, 7))
+    kernel = flax.core.meta.unbox(l.variables)['params']['kernel']
+    y_expected = x.apply_values(
+        lambda v: jnp.einsum('abc,cd->abd', v, kernel) * 3
     ).mask_invalid()
     self.assertSequencesClose(y, y_expected)
 

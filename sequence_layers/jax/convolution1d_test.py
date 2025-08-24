@@ -31,6 +31,31 @@ from sequence_layers.jax import utils
 import tensorflow as tf
 
 
+class IdentityArrayConstraint(nn.Module):
+  """Identity array constraint."""
+
+  @nn.compact
+  def __call__(self, x, *args, **kwargs):
+    return x
+
+
+class MakeableIdentityArrayConstraint(
+    convolution.MakeableArrayConstraintModule
+):
+  """Make-able array constraint."""
+
+  def make(self, *args, **kwargs) -> nn.Module:
+    return IdentityArrayConstraint()
+
+
+class IdentityArrayFactory:
+  """Identity array factory."""
+
+  weight_factory = MakeableIdentityArrayConstraint()
+  input_factory = MakeableIdentityArrayConstraint()
+  output_factory = MakeableIdentityArrayConstraint()
+
+
 class LatencyTest(test_utils.SequenceLayerTest):
 
   @parameterized.product(
@@ -821,8 +846,12 @@ class Conv1DTest(test_utils.SequenceLayerTest):
           'reverse_causal',
           'semicausal',
       ],
+      array_factory=[
+          IdentityArrayFactory(),
+          convolution.ConvArrayConstraintFactory(),
+      ],
   )
-  def test_depthwise_conv1d(self, params, padding):
+  def test_depthwise_conv1d(self, params, padding, array_factory):
     key = jax.random.PRNGKey(1234)
     kernel_size, stride, dilation_rate = params
     # Initialize the bias randomly so that we can tell it is being applied.
@@ -834,6 +863,7 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         bias_init=nn.initializers.normal(),
         padding=padding,
         name='depthwise_conv1d',
+        array_factory=array_factory,
     ).make()
     self.assertEqual(l.block_size, stride)
     self.assertEqual(1 / l.output_ratio, stride)

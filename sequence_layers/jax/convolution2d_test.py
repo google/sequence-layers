@@ -25,6 +25,31 @@ from sequence_layers.jax import test_utils
 from sequence_layers.jax import utils
 
 
+class IdentityArrayConstraint(nn.Module):
+  """Identity array constraint."""
+
+  @nn.compact
+  def __call__(self, x, *args, **kwargs):
+    return x
+
+
+class MakeableIdentityArrayConstraint(
+    convolution.MakeableArrayConstraintModule
+):
+  """Make-able array constraint."""
+
+  def make(self, *args, **kwargs) -> nn.Module:
+    return IdentityArrayConstraint()
+
+
+class IdentityArrayFactory:
+  """Identity array factory."""
+
+  weight_factory = MakeableIdentityArrayConstraint()
+  input_factory = MakeableIdentityArrayConstraint()
+  output_factory = MakeableIdentityArrayConstraint()
+
+
 class Conv2DTest(test_utils.SequenceLayerTest):
 
   @parameterized.product(
@@ -65,12 +90,17 @@ class Conv2DTest(test_utils.SequenceLayerTest):
           'semicausal',
           (2, 3),
       ),
+      array_factory=(
+          IdentityArrayFactory(),
+          convolution.ConvArrayConstraintFactory(),
+      ),
   )
   def test_conv2d(
       self,
       kernel_size_strides_dilation_rate,
       time_padding,
       spatial_padding,
+      array_factory,
   ):
     key = jax.random.PRNGKey(1234)
     kernel_size, strides, dilation_rate = kernel_size_strides_dilation_rate
@@ -84,6 +114,7 @@ class Conv2DTest(test_utils.SequenceLayerTest):
         spatial_padding=spatial_padding,
         bias_init=nn.initializers.normal(),
         name='conv2d',
+        array_factory=array_factory,
     ).make()
     self.assertEqual(l.block_size, strides)
     self.assertEqual(1 / l.output_ratio, strides)
