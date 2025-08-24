@@ -18,7 +18,7 @@ import dataclasses
 import fractions
 import math
 import typing
-from typing import Callable, Sequence as TypingSequence
+from typing import Callable, Protocol, Sequence as TypingSequence
 
 import flax.linen as nn
 import jax
@@ -37,9 +37,36 @@ __all__ = (
     'Conv2D',
     'Conv2DTranspose',
     'Conv3D',
+    'ConvArrayConstraintFactory',
     'DepthwiseConv1D',
+    'MakeableArrayConstraintModule',
     # go/keep-sorted end
 )
+
+
+class MakeableArrayConstraintModule(Protocol):
+  """A Makeable nn.Module for applying array constraints.
+
+  The nn.Module that is returned should have a
+  `def __call__(x: jax.Array, axis: Sequence[int] | None = None) -> jax.Array`
+   method which applies the array constraints to the provided axes.
+  """
+
+  def make(self, name: str | None = None) -> nn.Module:
+    raise NotImplementedError()
+
+
+@dataclasses.dataclass(frozen=True)
+class ConvArrayConstraintFactory:
+  """Factory for array constraints for convolution.
+
+  For example, these constraints can support quantization of inputs,
+  the convolution kernel, and the output of the convolution.
+  """
+
+  weight_factory: MakeableArrayConstraintModule | None = None
+  input_factory: MakeableArrayConstraintModule | None = None
+  output_factory: MakeableArrayConstraintModule | None = None
 
 
 def _compute_conv_mask_logical(
@@ -919,6 +946,7 @@ class DepthwiseConv1D(BaseConv):
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
     name: str | None = None
+    array_factory: ConvArrayConstraintFactory = ConvArrayConstraintFactory()
 
     def __post_init__(self):
       object.__setattr__(self, 'padding', types.validate_padding(self.padding))
@@ -986,6 +1014,11 @@ class DepthwiseConv1D(BaseConv):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
+    if self.config.array_factory.weight_factory is not None:
+      weight_compression_algorithm = (
+          self.config.array_factory.weight_factory.make()
+      )
+      kernel = weight_compression_algorithm(kernel, (0, 1))
     if self.config.use_weight_norm:
       kernel = _weight_norm(self, kernel, 'scale')
     # One bias weight per output channel, shared between pixels.
@@ -1006,6 +1039,12 @@ class DepthwiseConv1D(BaseConv):
         x, kernel, bias, dtype=self.config.compute_dtype
     )
 
+    if self.config.array_factory.input_factory is not None:
+      activation_compression_algorithm = (
+          self.config.array_factory.input_factory.make(self.name)
+      )
+      x = activation_compression_algorithm(x)
+
     y = jax.lax.conv_general_dilated(
         x,
         kernel,
@@ -1017,6 +1056,11 @@ class DepthwiseConv1D(BaseConv):
         feature_group_count=in_features,
         precision=self.config.precision,
     )
+    if self.config.array_factory.output_factory is not None:
+      output_compression_algorithm = (
+          self.config.array_factory.output_factory.make(self.name + 'output')
+      )
+      y = output_compression_algorithm(y)
 
     if bias is not None:
       y = utils.bias_add(y, bias)
@@ -1059,6 +1103,7 @@ class Conv2D(BaseConv):
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
     name: str | None = None
+    array_factory: ConvArrayConstraintFactory = ConvArrayConstraintFactory()
 
     def __post_init__(self):
       object.__setattr__(
@@ -1197,6 +1242,13 @@ class Conv2D(BaseConv):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
+    if self.config.array_factory.weight_factory is not None:
+      weight_compression_algorithm = (
+          self.config.array_factory.weight_factory.make()
+      )
+      kernel = weight_compression_algorithm(
+          kernel, tuple(range(kernel.ndim - 1))
+      )
     if self.config.use_weight_norm:
       kernel = _weight_norm(self, kernel, 'scale')
     # One bias weight per output channel, shared between pixels.
@@ -1217,6 +1269,12 @@ class Conv2D(BaseConv):
         x, kernel, bias, dtype=self.config.compute_dtype
     )
 
+    if self.config.array_factory.input_factory is not None:
+      input_compression_algorithm = (
+          self.config.array_factory.input_factory.make(self.name)
+      )
+      x = input_compression_algorithm(x)
+
     y = jax.lax.conv_general_dilated(
         x,
         kernel,
@@ -1228,6 +1286,12 @@ class Conv2D(BaseConv):
         feature_group_count=self.config.groups,
         precision=self.config.precision,
     )
+
+    if self.config.array_factory.output_factory is not None:
+      output_compression_algorithm = (
+          self.config.array_factory.output_factory.make(self.name + 'output')
+      )
+      y = output_compression_algorithm(y)
 
     if bias is not None:
       y = utils.bias_add(y, bias)
