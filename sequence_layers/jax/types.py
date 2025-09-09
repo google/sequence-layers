@@ -51,6 +51,7 @@ __all__ = (
     'PaddingModeString',
     'PreservesShape',
     'PreservesType',
+    'ReceptiveField',
     'Sequence',
     'SequenceLayer',
     'SequenceLayerConfig',
