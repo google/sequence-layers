@@ -241,7 +241,12 @@ class StepByStepTest(test_utils.SequenceLayerTest):
         x = test_utils.random_sequence(2, t, *channel_shape)
         y_layer, y_layer_emits = l.layer_with_emits(x, training=False)
         y_step, _, y_step_emits = utils.step_by_step_dynamic(
-            l, x, training=False, blocks_per_step=blocks_per_step
+            l,
+            x,
+            training=False,
+            blocks_per_step=blocks_per_step,
+            constants=constants,
+            stream_constants=stream_constants,
         )
         self.assertSequencesClose(y_step_emits['x'], y_layer_emits['x'])
         trim = y_layer_emits['count'].shape[1]
