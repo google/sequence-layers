@@ -25,6 +25,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import meta
+from sequence_layers.jax import normalization
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
@@ -687,7 +688,9 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
       state = x
 
     # Compute the output for the current timestep.
-    values = self._layer(state.values, padding=explicit_paddings)
+    values = self._layer(
+        state.values, padding=explicit_paddings, training=training
+    )
     mask = compute_conv_mask(
         state.mask,
         self._kernel_size[0],
@@ -727,7 +730,7 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
             strict=True,
         )
     )
-    values = self._layer(x.values, padding=explicit_paddings)
+    values = self._layer(x.values, padding=explicit_paddings, training=training)
     mask = compute_conv_mask(
         x.mask,
         self._kernel_size[0],
@@ -749,6 +752,7 @@ class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
       self,
       x: jt.Float[jt.ArrayT, 'B T *S D'],
       padding: tuple[tuple[int, int], ...],
+      training: bool,
   ) -> jt.Float[jt.ArrayT, 'B T *S D']:
     raise NotImplementedError()
 
@@ -760,6 +764,7 @@ def _weight_norm(module: nn.Module, weight: jax.Array, name: str) -> jax.Array:
   if module.is_initializing():
     # Based on tensorflow addon, which preserves the original scale.
     # http://google3/third_party/py/tensorflow_addons/layers/wrappers.py;l=181;rcl=509843210
+    # FYI: in praxis this scale is initalized to 1.0.
     scale = module.param(
         name,
         lambda unused_key: jnp.linalg.norm(
@@ -783,6 +788,24 @@ def _l2_normalize(
   return x * jax.lax.rsqrt((x * x).sum(axis=axis, keepdims=True) + eps)
 
 
+def _apply_kernel_weight_constraints(
+    module: nn.Module,
+    kernel: jax.Array,
+    use_weight_norm: bool,
+    kernel_constraint: nn.Module | None,
+    training: bool,
+) -> jax.Array:
+  """Applies weight normalization and kernel constraints."""
+  if use_weight_norm and kernel_constraint is not None:
+    raise ValueError('`use_weight_norm` and `kernel_constraint` are both set.')
+
+  if use_weight_norm:
+    kernel = _weight_norm(module, kernel, 'scale')
+  elif kernel_constraint is not None:
+    kernel = kernel_constraint(kernel, training=training)
+  return kernel
+
+
 class Conv1D(BaseConv):
   """A 1D strided or dilated convolution layer."""
 
@@ -797,12 +820,14 @@ class Conv1D(BaseConv):
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
     groups: int = 1
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -815,6 +840,10 @@ class Conv1D(BaseConv):
       return Conv1D(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def _kernel_size(self) -> tuple[int, ...]:
@@ -862,6 +891,7 @@ class Conv1D(BaseConv):
       self,
       x: jt.Float[jt.ArrayT, 'B T D'],
       padding: tuple[tuple[int, int], ...],
+      training: bool,
   ) -> jt.Float[jt.ArrayT, 'B T D']:
     assert len(padding) == 1, padding
     in_features = jnp.shape(x)[-1]
@@ -884,8 +914,13 @@ class Conv1D(BaseConv):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training,
+    )
     # One bias weight per output channel, shared between pixels.
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
@@ -938,12 +973,14 @@ class DepthwiseConv1D(BaseConv):
     dilation_rate: int = 1
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -957,6 +994,10 @@ class DepthwiseConv1D(BaseConv):
       return DepthwiseConv1D(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def _kernel_size(self) -> tuple[int, ...]:
@@ -1004,6 +1045,7 @@ class DepthwiseConv1D(BaseConv):
       self,
       x: jt.Float[jt.ArrayT, 'B T D'],
       padding: tuple[tuple[int, int], ...],
+      training: bool,
   ) -> jt.Float[jt.ArrayT, 'B T D']:
     assert len(padding) == 1, padding
     in_features = jnp.shape(x)[-1]
@@ -1023,8 +1065,13 @@ class DepthwiseConv1D(BaseConv):
           self.config.array_factory.weight_factory.make()
       )
       kernel = weight_compression_algorithm(kernel, (0, 1))
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training,
+    )
     # One bias weight per output channel, shared between pixels.
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
@@ -1097,12 +1144,14 @@ class Conv2D(BaseConv):
     )
     groups: int = 1
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -1137,6 +1186,10 @@ class Conv2D(BaseConv):
       return Conv2D(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def _kernel_size(self) -> tuple[int, ...]:
@@ -1208,6 +1261,7 @@ class Conv2D(BaseConv):
       self,
       x: jt.Float[jt.ArrayT, 'B T H D'],
       padding: tuple[tuple[int, int], tuple[int, int]],
+      training: bool,
   ) -> jt.Float[jt.ArrayT, 'B T H D']:
     assert len(padding) == 2, padding
     in_features = jnp.shape(x)[-1]
@@ -1255,8 +1309,13 @@ class Conv2D(BaseConv):
       kernel = weight_compression_algorithm(
           kernel, tuple(range(kernel.ndim - 1))
       )
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training,
+    )
     # One bias weight per output channel, shared between pixels.
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
@@ -1331,12 +1390,14 @@ class Conv3D(BaseConv):
     ] = (types.PaddingMode.SAME.value, types.PaddingMode.SAME.value)
     groups: int = 1
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -1372,6 +1433,10 @@ class Conv3D(BaseConv):
       return Conv3D(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def _kernel_size(self) -> tuple[int, ...]:
@@ -1444,6 +1509,7 @@ class Conv3D(BaseConv):
       self,
       x: jt.Float[jt.ArrayT, 'B T H W D'],
       padding: tuple[tuple[int, int], tuple[int, int], tuple[int, int]],
+      training: bool,
   ) -> jt.Float[jt.ArrayT, 'B T H W D']:
     assert len(padding) == 3, padding
     in_features = jnp.shape(x)[-1]
@@ -1485,8 +1551,13 @@ class Conv3D(BaseConv):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training,
+    )
     # One bias weight per output channel, shared between channels.
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
@@ -1542,12 +1613,14 @@ class Conv1DTranspose(types.SequenceLayer):
     padding: types.PaddingModeString = types.PaddingMode.VALID.value
     groups: int = 1
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: str | None = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -1567,6 +1640,10 @@ class Conv1DTranspose(types.SequenceLayer):
       return Conv1DTranspose(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def supports_step(self) -> bool:
@@ -1660,8 +1737,13 @@ class Conv1DTranspose(types.SequenceLayer):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training=False,
+    )
 
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
@@ -1824,12 +1906,14 @@ class Conv2DTranspose(types.SequenceLayer):
     )
     groups: int = 1
     use_bias: bool = True
+
     use_weight_norm: bool = False
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     precision: str | None = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
+    kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
@@ -1876,6 +1960,10 @@ class Conv2DTranspose(types.SequenceLayer):
       return Conv2DTranspose(self, name=self.name)
 
   config: Config
+
+  def setup(self):
+    if self.config.kernel_constraint:
+      self.kernel_constraint = self.config.kernel_constraint.make()
 
   @property
   def _kernel_size(self) -> tuple[int, ...]:
@@ -2018,8 +2106,13 @@ class Conv2DTranspose(types.SequenceLayer):
     kernel = self.param(
         'kernel', kernel_init, kernel_shape, self.config.param_dtype
     )
-    if self.config.use_weight_norm:
-      kernel = _weight_norm(self, kernel, 'scale')
+    kernel = _apply_kernel_weight_constraints(
+        self,
+        kernel,
+        self.config.use_weight_norm,
+        self.kernel_constraint if self.config.kernel_constraint else None,
+        training=False,
+    )
 
     if self.config.use_bias:
       bias_init = utils.shard_initializer(

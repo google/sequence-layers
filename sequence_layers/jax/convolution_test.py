@@ -18,6 +18,7 @@ import flax
 import jax
 import jax.numpy as jnp
 from sequence_layers.jax import convolution
+from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
