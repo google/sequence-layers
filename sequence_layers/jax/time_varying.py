@@ -146,7 +146,12 @@ class SequenceEmbedding(types.SequenceLayer):
     return tuple(input_shape) + (self.config.dimension,)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     self._validate_input_dtype(input_dtype)
     if self.config.compute_dtype is None:
       return self.config.param_dtype
@@ -294,7 +299,12 @@ class SequenceDense(types.SequenceLayer):
     return {0: (0, 0)}
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -480,7 +490,12 @@ class MaskedDense(types.SequenceLayer):
   config: Config
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )

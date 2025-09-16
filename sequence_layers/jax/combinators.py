@@ -103,8 +103,13 @@ class WrapperMixin:
     return self.child_layer.output_ratio
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
-    return self.child_layer.get_output_dtype(input_dtype)
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    return self.child_layer.get_output_dtype(input_dtype, constants=constants)
 
   @nn.nowrap
   def get_output_shape(
@@ -241,10 +246,15 @@ class SerialCombinatorMixin:
     return tuple(states)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     dtype = input_dtype
     for child_layer in self.layers:
-      dtype = child_layer.get_output_dtype(dtype)
+      dtype = child_layer.get_output_dtype(dtype, constants=constants)
     return dtype
 
   @nn.nowrap
@@ -526,15 +536,22 @@ class Parallel(types.Emitting):
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     if not self.layers:
       return input_dtype
 
-    dtype = self.layers[0].get_output_dtype(input_dtype)
+    dtype = self.layers[0].get_output_dtype(input_dtype, constants=constants)
     for child_layer in self.layers[1:]:
       # TODO(rryan): We should probably disallow automatic type promotion
       # between integer and float types, since this is usually a sign of a bug.
-      dtype = jnp.result_type(dtype, child_layer.get_output_dtype(input_dtype))
+      dtype = jnp.result_type(
+          dtype, child_layer.get_output_dtype(input_dtype, constants=constants)
+      )
     return dtype
 
   def step_with_emits(
@@ -906,8 +923,10 @@ class Residual(SerialCombinatorMixin, types.Emitting):
           f'layer: {layer_shape} shortcut: {shortcut_shape}'
       )
 
-    layer_dtype = super().get_output_dtype(x_spec.dtype)
-    shortcut_dtype = self.shortcut_layer.get_output_dtype(x_spec.dtype)
+    layer_dtype = super().get_output_dtype(x_spec.dtype, constants=constants)
+    shortcut_dtype = self.shortcut_layer.get_output_dtype(
+        x_spec.dtype, constants=constants
+    )
     # Make sure we can compute a result dtype.
     jnp.result_type(layer_dtype, shortcut_dtype)
 
@@ -983,9 +1002,16 @@ class Residual(SerialCombinatorMixin, types.Emitting):
     return body_state, shortcut_state
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
-    layer_dtype = super().get_output_dtype(input_dtype)
-    shortcut_dtype = self.shortcut_layer.get_output_dtype(input_dtype)
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    layer_dtype = super().get_output_dtype(input_dtype, constants=constants)
+    shortcut_dtype = self.shortcut_layer.get_output_dtype(
+        input_dtype, constants=constants
+    )
     # TODO(rryan): We should probably disallow automatic type promotion between
     # integer and float types, since this is usually a sign of a bug.
     return jnp.result_type(layer_dtype, shortcut_dtype)
@@ -1183,7 +1209,12 @@ class Repeat(types.Emitting):
     return layer_output_ratio**self.config.num_repeats
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     # _validate asserts that input_dtype equals output_dtype.
     return input_dtype
 
@@ -1796,9 +1827,18 @@ class Bidirectional(types.Emitting):
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
-    forward_dtype = self.forward.get_output_dtype(input_dtype)
-    backward_dtype = self.backward.get_output_dtype(input_dtype)
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    forward_dtype = self.forward.get_output_dtype(
+        input_dtype, constants=constants
+    )
+    backward_dtype = self.backward.get_output_dtype(
+        input_dtype, constants=constants
+    )
     # TODO(rryan): We should probably disallow automatic type promotion between
     # integer and float types, since this is usually a sign of a bug.
     return jnp.result_type(forward_dtype, backward_dtype)

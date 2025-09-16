@@ -511,18 +511,21 @@ class AttentionInputProjectionHelper:
         )
 
   def get_input_projection_output_dtype(
-      self, config: QueryKeyValueProjectionConfig, input_dtype: types.DType
+      self,
+      config: QueryKeyValueProjectionConfig,
+      input_dtype: types.DType,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     """Returns the output dtype of the QKV projection."""
     match config:
       case CombinedQueryKeyValueProjection():
-        return self._qkv.get_output_dtype(input_dtype)
+        return self._qkv.get_output_dtype(input_dtype, constants=constants)
       case (
           SeparateQueryKeyValueProjection()
           | QueryAndKeyValueProjection()
           | QueryAndSharedKeyValueProjection()
       ):
-        return self._q.get_output_dtype(input_dtype)
+        return self._q.get_output_dtype(input_dtype, constants=constants)
       case _:
         raise NotImplementedError(config)
 
@@ -2403,7 +2406,7 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
       constants: types.Constants | None = None,
   ) -> types.State:
     compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype
+        self.config.input_projection, input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -2501,7 +2504,12 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -3182,7 +3190,12 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
     return (keys.values, values.values, mask, query_state, time_step)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -4172,7 +4185,7 @@ class LocalDotProductSelfAttention(
       constants: types.Constants | None = None,
   ) -> types.State:
     compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype
+        self.config.input_projection, input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -4264,7 +4277,12 @@ class LocalDotProductSelfAttention(
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -4904,7 +4922,7 @@ class StreamingDotProductAttention(
       constants: types.Constants | None = None,
   ) -> types.State:
     compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype
+        self.config.input_projection, input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -5002,7 +5020,12 @@ class StreamingDotProductAttention(
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -5678,7 +5701,7 @@ class StreamingLocalDotProductAttention(
       constants: types.Constants | None = None,
   ) -> types.State:
     compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype
+        self.config.input_projection, input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -5776,7 +5799,12 @@ class StreamingLocalDotProductAttention(
     )
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )

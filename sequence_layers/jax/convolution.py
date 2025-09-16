@@ -850,6 +850,8 @@ class Conv1D(BaseConv):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -990,6 +992,8 @@ class DepthwiseConv1D(BaseConv):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -1192,6 +1196,8 @@ class Conv2D(BaseConv):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -1426,6 +1432,8 @@ class Conv3D(BaseConv):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -1590,6 +1598,8 @@ class Conv1DTranspose(types.SequenceLayer):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -1942,6 +1952,8 @@ class Conv2DTranspose(types.SequenceLayer):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
