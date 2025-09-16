@@ -30,8 +30,11 @@ __all__ = (
     # go/keep-sorted start
     'BatchNormalization',
     'GroupNormalization',
+    'L2WeightNormalization',
     'LayerNormalization',
     'RMSNormalization',
+    'SpectralWeightNormalization',
+    'WeightNormalization',
     # go/keep-sorted end
 )
 
@@ -887,3 +890,173 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
 
     # Normalization leaves padded regions unmasked.
     return types.Sequence(reductions(x), x.mask)
+
+
+class WeightNormalization(nn.Module):
+  """Base class for weight normalization."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Base config for WeightNormalization."""
+
+    def make(self) -> 'WeightNormalization':
+      raise NotImplementedError()
+
+  @nn.compact
+  def __call__(self, x: jax.Array, training: bool) -> jax.Array:
+    raise NotImplementedError()
+
+
+class L2WeightNormalization(WeightNormalization):
+  """L2 weight norm on the last axis https://arxiv.org/abs/1602.07868."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(WeightNormalization.Config):
+    """Config for L2WeightNormalization."""
+
+    epsilon: float = 1e-12
+    scale_init: nn.initializers.Initializer = nn.initializers.ones_init()
+    sharding: types.Sharding | None = None
+    reductions_in_at_least_fp32: bool = False
+    param_dtype: types.DType = jnp.float32
+    name: str | None = None
+
+    def make(self) -> 'L2WeightNormalization':
+      return L2WeightNormalization(self, name=self.name)
+
+  config: Config
+
+  @nn.compact
+  def __call__(self, w: jax.Array, training: bool) -> jax.Array:
+    del training
+    scale_init = utils.shard_initializer(
+        self.config.scale_init,
+        self.config.sharding,
+        labels=[meta.IS_NORMALIZER],
+    )
+    scale = self.param(
+        'scale',
+        scale_init,
+        [w.shape[-1]],
+        self.config.param_dtype,
+    ).astype(w.dtype)
+
+    axis = list(range(w.ndim - 1))
+    scale = jnp.expand_dims(scale, axis)
+
+    @utils.maybe_in_at_least_fp32(self.config.reductions_in_at_least_fp32)
+    def _l2_normalize(x: jax.Array) -> jax.Array:
+      return x * jax.lax.rsqrt(
+          (x * x).sum(axis=axis, keepdims=True) + self.config.epsilon
+      )
+
+    return scale * _l2_normalize(w)
+
+
+class SpectralWeightNormalization(WeightNormalization):
+  """Applies spectral normalization to input sequences."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(WeightNormalization.Config):
+    """Config for SpectralWeightNormalization."""
+
+    n_power_iteration: int = 1
+    sharding: types.Sharding | None = None
+    u_init: nn.initializers.Initializer = nn.initializers.normal()
+    epsilon: float = 1e-12
+    reductions_in_at_least_fp32: bool = False
+    param_dtype: types.DType = jnp.float32
+    error_on_non_matrix: bool = False
+    collection_name: str = 'batch_stats'
+    name: str | None = None
+
+    def make(self) -> 'SpectralWeightNormalization':
+      return SpectralWeightNormalization(self, name=self.name)
+
+  config: Config
+
+  @nn.compact
+  def __call__(self, w: jax.Array, training: bool) -> jax.Array:
+
+    if self.config.n_power_iteration < 1:
+      raise ValueError(
+          f'n_power_iteration must be >= 1, got {self.config.n_power_iteration}'
+      )
+
+    u_init = utils.shard_initializer(
+        self.config.u_init,
+        self.config.sharding,
+        labels=[meta.IS_NORMALIZER],
+    )
+
+    @utils.maybe_in_at_least_fp32(self.config.reductions_in_at_least_fp32)
+    def _l2_normalize(w: jax.Array) -> jax.Array:
+      return w * jax.lax.rsqrt(
+          (w * w).sum(axis=-1, keepdims=True) + self.config.epsilon
+      )
+
+    value_shape = w.shape
+    value = w
+    # Skip and return value if input is scalar, vector or if number of power
+    # iterations is less than 1
+    if value.ndim <= 1:
+      return value
+    # Handle higher-order tensors.
+    elif value.ndim > 2:
+      if self.config.error_on_non_matrix:
+        raise ValueError(
+            f'Input is {value.ndim}D but error_on_non_matrix is True'
+        )
+      else:
+        value = jnp.reshape(w, (-1, value.shape[-1]))
+
+    def _maybe_make_rng(variable_name):
+      return (
+          self.make_rng('params')
+          if not self.has_variable(self.config.collection_name, variable_name)
+          else None
+      )
+
+    u_var = self.variable(
+        self.config.collection_name,
+        'u',
+        u_init,
+        _maybe_make_rng('u'),
+        (1, value.shape[-1]),
+        self.config.param_dtype,
+    )
+    u0 = u_var.value
+    sigma_init = utils.shard_initializer(
+        nn.initializers.ones,
+        self.config.sharding,
+        labels=[meta.IS_NORMALIZER],
+    )
+    sigma_var = self.variable(
+        self.config.collection_name,
+        'sigma',
+        sigma_init,
+        _maybe_make_rng('sigma'),
+        (),
+        self.config.param_dtype,
+    )
+
+    # Power iteration for the weight's singular value.
+    for _ in range(self.config.n_power_iteration):
+      v0 = _l2_normalize(
+          jnp.matmul(u0, value.transpose([1, 0])),
+      )
+      u0 = _l2_normalize(jnp.matmul(v0, value))
+
+    u0 = jax.lax.stop_gradient(u0)
+    v0 = jax.lax.stop_gradient(v0)
+
+    sigma = jnp.matmul(jnp.matmul(v0, value), jnp.transpose(u0))[0, 0]
+
+    value /= jnp.where(sigma != 0, sigma, 1)
+    value_bar = value.reshape(value_shape)
+
+    if training:
+      u_var.value = u0
+      sigma_var.value = sigma
+
+    return jnp.asarray(value_bar, w.dtype)

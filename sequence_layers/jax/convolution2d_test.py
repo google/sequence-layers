@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import convolution
+from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import utils
 
@@ -268,6 +269,56 @@ class Conv2DTest(test_utils.SequenceLayerTest):
     )
     self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
 
+  @parameterized.product(
+      input_dtype=[jnp.float32, jnp.bfloat16],
+      param_dtype=[jnp.float32],
+      compute_dtype=[None, jnp.float32, jnp.bfloat16],
+      kernel_constraint=[normalization.L2WeightNormalization.Config()],
+  )
+  def test_conv2d_dtypes_with_kernel_constraint(
+      self, input_dtype, param_dtype, compute_dtype, kernel_constraint
+  ):
+    key = jax.random.PRNGKey(1234)
+    kernel_size, strides, dilation_rate = 3, 2, 1
+    time_padding, spatial_padding = 'same', 'same'
+    filters = 2
+    l = convolution.Conv2D.Config(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        dilation_rate=dilation_rate,
+        time_padding=time_padding,
+        spatial_padding=spatial_padding,
+        kernel_constraint=kernel_constraint,
+        compute_dtype=compute_dtype,
+        param_dtype=param_dtype,
+        name='conv2d',
+    ).make()
+
+    batch_size, time, spatial, channels = 2, 20, 7, 3
+    x = test_utils.random_sequence(
+        batch_size, time, spatial, channels, dtype=input_dtype
+    )
+    l = self.init_and_bind_layer(key, l, x)
+    variables = flax.core.meta.unbox(l.variables)
+    expected_variables = {
+        'params': {
+            'kernel': jnp.zeros(
+                (kernel_size, kernel_size, channels, filters), param_dtype
+            ),
+            'bias': jnp.zeros((filters), param_dtype),
+        }
+    }
+    if kernel_constraint is not None:
+      expected_variables['params']['kernel_constraint'] = {
+          'scale': jnp.ones((2), param_dtype)
+      }
+    chex.assert_trees_all_equal_shapes_and_dtypes(
+        variables,
+        expected_variables,
+    )
+    self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
+
 
 class Conv2DTransposeTest(test_utils.SequenceLayerTest):
 
@@ -443,6 +494,57 @@ class Conv2DTransposeTest(test_utils.SequenceLayerTest):
     }
     if use_weight_norm:
       expected_variables['params']['scale'] = jnp.zeros((2), param_dtype)
+    chex.assert_trees_all_equal_shapes_and_dtypes(
+        variables,
+        expected_variables,
+    )
+    self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
+
+  @parameterized.product(
+      input_dtype=[jnp.float32, jnp.bfloat16],
+      param_dtype=[jnp.float32],
+      compute_dtype=[None, jnp.float32, jnp.bfloat16],
+      kernel_constraint=[
+          normalization.L2WeightNormalization.Config(),
+      ],
+  )
+  def test_conv2d_transpose_dtypes_with_kernel_constraint(
+      self, input_dtype, param_dtype, compute_dtype, kernel_constraint
+  ):
+    key = jax.random.PRNGKey(1234)
+    kernel_size, strides, dilation_rate = 3, 2, 1
+    time_padding, spatial_padding = 'same', 'same'
+    l = convolution.Conv2DTranspose.Config(
+        filters=2,
+        kernel_size=kernel_size,
+        dilation_rate=dilation_rate,
+        strides=strides,
+        time_padding=time_padding,
+        spatial_padding=spatial_padding,
+        kernel_constraint=kernel_constraint,
+        compute_dtype=compute_dtype,
+        name='transpose_conv2d',
+    ).make()
+
+    batch_size, time, spatial, channels = 2, 20, 7, 3
+    x = test_utils.random_sequence(
+        batch_size, time, spatial, channels, dtype=input_dtype
+    )
+    l = self.init_and_bind_layer(key, l, x)
+
+    variables = flax.core.meta.unbox(l.variables)
+    expected_variables = {
+        'params': {
+            'kernel': jnp.zeros(
+                (kernel_size, kernel_size, channels, 2), param_dtype
+            ),
+            'bias': jnp.zeros((2,), param_dtype),
+        }
+    }
+    if kernel_constraint is not None:
+      expected_variables['params']['kernel_constraint'] = {
+          'scale': jnp.ones((2), param_dtype)
+      }
     chex.assert_trees_all_equal_shapes_and_dtypes(
         variables,
         expected_variables,

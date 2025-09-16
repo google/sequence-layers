@@ -14,7 +14,6 @@
 """Normalization tests."""
 
 import itertools
-
 from absl.testing import parameterized
 import chex
 import flax
@@ -641,6 +640,51 @@ class ZeroInputStabilityTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(jnp.isfinite(outputs), True)
     for grad in jax.tree.leaves(grads):
       self.assertAllEqual(jnp.isfinite(grad), True)
+
+
+class WeightNormalizationTest(test_utils.SequenceLayerTest):
+
+  def test_l2_normalization(self):
+    epsilon = 1e-12
+    normalizer = normalization.L2WeightNormalization.Config(
+        name='l2_normalization',
+        epsilon=epsilon,
+    ).make()
+    w = jnp.array(
+        [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]]
+    )
+    key = jax.random.PRNGKey(0)
+    params = normalizer.init(key, w=w, training=False)
+    normalized = normalizer.apply(params, w=w, training=False)
+    self.assertAllClose(
+        normalized,
+        w / (jnp.sqrt((w**2).sum(axis=[0], keepdims=True)) + epsilon),
+    )
+
+  @parameterized.product(kernel_size=[2, 3, 5], training=[True, False])
+  def test_spectral_norm(self, kernel_size: int, training: bool):
+    epsilon = 1e-12
+    normalizer = normalization.SpectralWeightNormalization.Config(
+        name='spectral_normalization',
+        epsilon=epsilon,
+        n_power_iteration=10,
+    ).make()
+    # This test is based on keras SpectralNormalizationTest.test_normalization,
+    # which checks that SN normalizes weights by the maximum eigen value.
+    w = np.random.rand(kernel_size, kernel_size).astype(np.float32)
+    w = w @ w.T
+    eigen_val, _ = jnp.linalg.eig(w)
+    expected = w / jnp.max(jnp.abs(eigen_val))
+
+    key = jax.random.PRNGKey(0)
+    params = normalizer.init(key, w=w, training=training)
+    normalized, _ = normalizer.apply(
+        params,
+        w=w,
+        training=training,
+        mutable=['batch_stats'],
+    )
+    self.assertAllClose(normalized, expected)
 
 
 if __name__ == '__main__':
