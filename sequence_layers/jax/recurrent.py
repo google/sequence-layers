@@ -118,6 +118,8 @@ class LSTM(types.SequenceLayer):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
@@ -129,13 +131,16 @@ class LSTM(types.SequenceLayer):
 
   @nn.compact
   def _cell(
-      self, x: jax.Array, state: tuple[jax.Array, jax.Array]
+      self,
+      x: jax.Array,
+      state: tuple[jax.Array, jax.Array],
+      constants: types.Constants | None = None,
   ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
     if x.ndim != 3 or x.shape[1] != 1:
       raise ValueError(f'Expected [b, 1, d] inputs, got: {x.shape}.')
     c_tm1, h_tm1 = state
 
-    compute_dtype = self.get_output_dtype(x.dtype)
+    compute_dtype = self.get_output_dtype(x.dtype, constants=constants)
 
     # Project [b, 1, d] to [b, 1, 4 * units].
     z = utils.FlaxEinsumDense(
@@ -201,7 +206,7 @@ class LSTM(types.SequenceLayer):
   ) -> tuple[types.Sequence, types.State]:
     if x.shape[1] == 1:
 
-      y, new_state = self._cell(x.values, state)
+      y, new_state = self._cell(x.values, state, constants=constants)
 
       def copy_state_through(new_a: jax.Array, a: jax.Array) -> jax.Array:
         assert new_a.ndim >= 2, (new_a.shape, new_a.dtype)
@@ -249,7 +254,7 @@ class LSTM(types.SequenceLayer):
   ) -> types.State:
     # A time axis of 1 is included in the state arrays for ease of broadcasting
     # with the input.
-    compute_dtype = self.get_output_dtype(input_spec.dtype)
+    compute_dtype = self.get_output_dtype(input_spec.dtype, constants=constants)
     c = jnp.zeros((batch_size, 1, self.config.units), dtype=compute_dtype)
     h = jnp.zeros((batch_size, 1, self.config.units), dtype=compute_dtype)
     return (c, h)
@@ -393,6 +398,8 @@ class RGLRU(types.SequenceLayer):
   def get_output_dtype(
       self,
       input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
   ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype

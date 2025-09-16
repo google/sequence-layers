@@ -835,7 +835,12 @@ class RFFT(FFTBase):
     return rfft
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     match input_dtype:
       case jnp.bfloat16:
         return jnp.complex64
@@ -881,7 +886,12 @@ class IRFFT(FFTBase):
     _validate(self.config.fft_length, self.config.padding)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     match input_dtype:
       case jnp.complex64:
         return jnp.float32
@@ -1049,8 +1059,16 @@ class STFT(types.SequenceLayer):
     frame_shape = self.framer.get_output_shape(input_shape, constants=constants)
     return self.fft.get_output_shape(frame_shape, constants=constants)
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
-    fft_output_type = self.fft.get_output_dtype(input_dtype)
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    fft_output_type = self.fft.get_output_dtype(
+        input_dtype, constants=constants
+    )
 
     if self.config.output_magnitude:
       match fft_output_type:
@@ -1288,8 +1306,14 @@ class InverseSTFT(types.SequenceLayer):
     irfft_shape[0] = self.config.frame_length
     return self.overlap_add.get_output_shape(irfft_shape, constants=constants)
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
-    return self.irfft.get_output_dtype(input_dtype)
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    return self.irfft.get_output_dtype(input_dtype, constants=constants)
 
   @nn.nowrap
   def _apply_window(self, irfft: types.Sequence) -> types.Sequence:

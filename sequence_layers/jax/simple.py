@@ -478,7 +478,13 @@ class Abs(types.StatelessPointwiseFunctor):
   ) -> tuple[types.ValuesT, types.MaskT]:
     return jnp.abs(values), mask
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     # The absolute value of complex numbers is a real magnitude.
     match input_dtype:
       case jnp.complex64:
@@ -514,7 +520,13 @@ class Cast(types.StatelessPointwiseFunctor):
   ) -> tuple[types.ValuesT, types.MaskT]:
     return values.astype(self.config.dtype), mask
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return self.config.dtype
 
 
@@ -803,7 +815,12 @@ class Lambda(types.Stateless):
     return jax.ShapeDtypeStruct(output_spec.shape[2:], output_spec.dtype)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     # We don't know the input shape.
     if self.config.expected_input_spec is None:
       raise ValueError(
@@ -1391,7 +1408,12 @@ class OneHot(types.Stateless):
     return tuple(input_shape) + (self.config.depth,)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     self._validate(input_dtype)
     return self.config.compute_dtype
 
@@ -1470,7 +1492,12 @@ class Embedding(types.Stateless):
     return tuple(input_shape) + (self.config.dimension,)
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     self._validate(input_dtype)
     if self.config.compute_dtype is None:
       return self.config.param_dtype
@@ -1570,7 +1597,12 @@ class EmbeddingTranspose(types.Stateless):
 
   @override
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype,
         self.config.param_dtype or self.embedding.config.param_dtype,
@@ -2442,7 +2474,13 @@ class Argmax(types.Stateless):
   ) -> types.Shape:
     return tuple(input_shape[:-1])
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return jnp.int32
 
 

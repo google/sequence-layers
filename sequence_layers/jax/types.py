@@ -1122,7 +1122,9 @@ class Steppable(metaclass=abc.ABCMeta):
     return self.get_output_spec(x.channel_spec, constants=constants)
 
   @abc.abstractmethod
-  def get_output_dtype(self, input_dtype: DType) -> DType:
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
     """Returns the layer's output dtype for the specified input dtype."""
 
   @nn.nowrap
@@ -1147,7 +1149,7 @@ class Steppable(metaclass=abc.ABCMeta):
       including the batch or time dimension) and dtype.
     """
     shape = self.get_output_shape(input_spec.shape, constants=constants)
-    dtype = self.get_output_dtype(input_spec.dtype)
+    dtype = self.get_output_dtype(input_spec.dtype, constants=constants)
     return ChannelSpec(shape, dtype)
 
 
@@ -1300,7 +1302,10 @@ class PreservesType:
   """A mix-in for layers that do not change the input dtype."""
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: DType) -> DType:
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    del constants
     return input_dtype
 
 

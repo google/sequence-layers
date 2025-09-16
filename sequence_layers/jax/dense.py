@@ -40,6 +40,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
     """Dense config."""
+
     # The number of output features for the dense layer.
     features: int
     # Whether to use a bias.
@@ -73,7 +74,12 @@ class Dense(types.Stateless, utils.EinsumCommon):
   config: Config
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -175,7 +181,12 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
   config: Config
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )
@@ -379,7 +390,12 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
     return typing.cast(types.Shape, tuple(output_shape))
 
   @nn.nowrap
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     return utils.get_promoted_dtype(
         input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
     )

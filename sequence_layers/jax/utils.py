@@ -798,8 +798,14 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
   # Optional einsum factory to replace the default jnp.einsum callable.
   einsum_factory: types.EinsumFactoryT | None = None
 
-  def get_output_dtype(self, input_dtype: types.DType) -> types.DType:
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
     """Returns the layer's output dtype for the specified input dtype."""
+    del constants
     if self.is_initializing():
       param_dtype = jnp.float32
     else:
