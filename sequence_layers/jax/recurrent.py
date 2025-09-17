@@ -611,7 +611,7 @@ class RGLRU(types.SequenceLayer):
 
     # Apply gamma normalization to the input. We need to clip the derivatives of
     # `sqrt` in order to prevent NaNs during training in bfloat16.
-    reset = (segment_pos == 0).astype(a)
+    reset = (segment_pos == 0).astype(a.dtype)
     multiplier = recurrentgemma.layers.sqrt_bound_derivative(
         1 - mag_a_squared, max_gradient=1000
     )
