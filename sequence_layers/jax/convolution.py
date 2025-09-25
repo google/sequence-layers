@@ -1618,7 +1618,7 @@ class Conv1DTranspose(types.SequenceLayer):
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
-    precision: str | None = None
+    precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
     kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
@@ -1911,7 +1911,7 @@ class Conv2DTranspose(types.SequenceLayer):
     activation: Callable[[jax.Array], jax.Array] | None = None
     compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
-    precision: str | None = None
+    precision: nn.linear.PrecisionLike = None
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
     kernel_constraint: normalization.WeightNormalization.Config | None = None
     kernel_sharding: types.Sharding | None = None
