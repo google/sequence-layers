@@ -1188,12 +1188,12 @@ def _dot_product_attention(
     ),
     zero_fully_masked: bool,
     compute_dtype: Any | types.DType | None,
-    num_sink_embeddings: int,
+    num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nk h'] | None,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
-    jt.Float[jt.ArrayT, 'b q nq k+{num_sink_embeddings}'],
+    jt.Float[jt.ArrayT, 'b q nq k+{num_sink_positions}'],
 ]:
   """Computes standard dot product attention with queries, keys and values.
 
@@ -1228,7 +1228,7 @@ def _dot_product_attention(
     zero_fully_masked: Outputs all-zeros context vectors for queries which have
       nothing to attend to (i.e. all possible keys are masked).
     compute_dtype: The dtype to use for computations.
-    num_sink_embeddings: The number of sink embeddings (only needed for
+    num_sink_positions: The number of sink positions (only needed for
       jaxtyping).
     sink_key_logits: Logits used to sink the attention [B, N, T, K].
     sink_value_embeddings: Value embeddings corresponding to the sink keys [K,
@@ -1266,7 +1266,7 @@ def _dot_product_attention(
         precision,
         zero_fully_masked,
         compute_dtype,
-        num_sink_embeddings,
+        num_sink_positions,
         sink_key_logits,
         sink_value_embeddings,
     )
@@ -1534,12 +1534,12 @@ def _dot_product_attention_gqa(
     precision: nn.linear.PrecisionLike,
     zero_fully_masked: bool,
     compute_dtype: Any | types.DType | None,
-    num_sink_embeddings: int,
+    num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nk h'] | None,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
-    jt.Float[jt.ArrayT, 'b q nq k+{num_sink_embeddings}'],
+    jt.Float[jt.ArrayT, 'b q nq k+{num_sink_positions}'],
 ]:
   """Computes standard dot product attention with queries, keys and values.
 
@@ -1571,20 +1571,20 @@ def _dot_product_attention_gqa(
     zero_fully_masked: Outputs all-zeros context vectors for queries which have
       nothing to attend to (i.e. all possible keys are masked).
     compute_dtype: The dtype to use for computations.
-    num_sink_embeddings: The number of sink embeddings (only needed for
+    num_sink_positions: The number of sink positions (only needed for
       jaxtyping).
     sink_key_logits: Logits used to sink the attention [batch, num_query_heads,
-      query_time, num_sink_embeddings].
+      query_time, num_sink_positions].
     sink_value_embeddings: Value embeddings corresponding to the sink keys
-      [num_sink_embeddings, num_key_value_heads, units_per_head].
+      [num_sink_positions, num_key_value_heads, units_per_head].
 
   Returns:
     context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
       tensor of context vectors for the queries.
     probabilities: A [batch_size, query_time, num_query_heads, keys_time +
-      num_sink_embeddings] tensor of attention probabilities (for debugging).
+      num_sink_positions] tensor of attention probabilities (for debugging).
   """
-  del num_sink_embeddings
+  del num_sink_positions
   num_heads, units_per_head = queries.shape[-2:]
   num_kv_heads = keys.shape[2]
 
@@ -1725,7 +1725,7 @@ def _local_dot_product_attention(
     ),
     zero_fully_masked: bool,
     compute_dtype: Any | types.DType | None,
-    num_sink_embeddings: int,
+    num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nq h'] | None,
 ) -> tuple[
@@ -1733,7 +1733,7 @@ def _local_dot_product_attention(
     jt.Float[
         jt.ArrayT,
         'b q nq'  # pylint: disable=implicit-str-concat
-        ' {max_past_horizon+block_size+max_future_horizon+num_sink_embeddings}',
+        ' {max_past_horizon+block_size+max_future_horizon+num_sink_positions}',
     ],
 ]:
   """Computes "local" dot product attention with queries, keys and values.
@@ -1788,7 +1788,7 @@ def _local_dot_product_attention(
     zero_fully_masked: Outputs all-zeros context vectors for queries which have
       nothing to attend to (i.e. all possible keys are masked).
     compute_dtype: The dtype to use for computations.
-    num_sink_embeddings: The number of sink embeddings (only needed for
+    num_sink_positions: The number of sink positions (only needed for
       jaxtyping).
     sink_key_logits: Logits used to sink the attention [B, N, T, K].
     sink_value_embeddings: Value embeddings corresponding to the sink keys [K,
@@ -1800,7 +1800,7 @@ def _local_dot_product_attention(
     probabilities: A [batch_size, query_time, num_heads, keys_time] tensor of
       attention probabilities (for debugging).
   """
-  del num_sink_embeddings
+  del num_sink_positions
   num_heads, units_per_head = queries.shape[-2:]
   num_kv_heads = keys.shape[2]
 
@@ -2188,6 +2188,13 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # If True, use a learned scalar per attention head as an extra "sink" logit
+    # for softmax, as in gpt-oss (https://arxiv.org/abs/2508.10925) and
+    # described by Guangxuan Xiao: https://hanlab.mit.edu/blog/streamingllm
+    use_sink_scalars: bool = False
+    sink_scalars_init: nn.initializers.Initializer = (
+        nn.initializers.zeros_init()
+    )
     # Whether to use an experimental ring buffer implementation for the KV cache
     # updates. This implementation is more compute and memory efficient than the
     # default implementation on TPU.
@@ -2248,6 +2255,9 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
           f'{self.config.attention_logits_soft_cap=} should be None or non-neg.'
       )
 
+    if self.config.num_sink_embeddings > 0 and self.config.use_sink_scalars:
+      raise ValueError('Cannot use both sink embeddings and sink scalars.')
+
     if self.config.num_sink_embeddings > 0:
       self._sink_key_embeddings = self.param(
           'sink_key_embeddings',
@@ -2276,15 +2286,34 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
           self.config.param_dtype,
       )
 
+    elif self.config.use_sink_scalars:
+      self._sink_scalars = self.param(
+          'sink_scalars',
+          self.config.sink_scalars_init,
+          (self.config.num_heads,),
+          self.config.param_dtype,
+      )
+      self._sink_value_embeddings = jnp.zeros(
+          (
+              1,
+              num_kv_heads,
+              self.config.units_per_head,
+          ),
+          dtype=self.config.param_dtype,
+      )
+
+    else:
+      self._sink_value_embeddings = None
+
     if self.config.use_kv_cache_ringbuffer:
       num_kv_heads = self.config.num_kv_heads or self.config.num_heads
       if num_kv_heads != self.config.num_heads:
         raise NotImplementedError(
             'num_kv_heads is not supported with use_kv_cache_ringbuffer.'
         )
-      if self.config.num_sink_embeddings > 0:
+      if self.config.num_sink_embeddings > 0 or self.config.use_sink_scalars:
         raise NotImplementedError(
-            'Sink embeddings are not supported with use_kv_cache_ringbuffer.'
+            'Sinks are not supported with use_kv_cache_ringbuffer.'
         )
       if self.config.relative_position_embedding:
         raise NotImplementedError(
@@ -2639,6 +2668,11 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', x_queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          (x_queries.shape[0], 1, x_queries.shape[1], 1),
+      )
     else:
       sink_key_logits = None
 
@@ -2684,6 +2718,7 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
     if self.config.use_kv_cache_ringbuffer:
       assert not self.relative_position_embedding
       assert not self.config.num_sink_embeddings
+      assert not self.config.use_sink_scalars
 
       context_vectors, probabilities = _multi_key_value_dot_product_attention(
           queries=x_queries.values,
@@ -2723,11 +2758,10 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
           get_logits_fn=None,
           zero_fully_masked=self.config.zero_fully_masked,
           compute_dtype=compute_dtype,
-          num_sink_embeddings=self.config.num_sink_embeddings,
+          num_sink_positions=self.config.num_sink_embeddings
+          + self.config.use_sink_scalars,
           sink_key_logits=sink_key_logits,
-          sink_value_embeddings=self._sink_value_embeddings
-          if self.config.num_sink_embeddings > 0
-          else None,
+          sink_value_embeddings=self._sink_value_embeddings,
       )
 
     # Update KV caches and state.
@@ -2809,6 +2843,11 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          (queries.shape[0], 1, queries.shape[1], 1),
+      )
     else:
       sink_key_logits = None
 
@@ -2860,11 +2899,10 @@ class DotProductSelfAttention(types.Emitting, AttentionInputProjectionHelper):
         get_logits_fn=None,
         zero_fully_masked=self.config.zero_fully_masked,
         compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
+        num_sink_positions=self.config.num_sink_embeddings
+        + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
-        sink_value_embeddings=self._sink_value_embeddings
-        if self.config.num_sink_embeddings > 0
-        else None,
+        sink_value_embeddings=self._sink_value_embeddings,
     )
     emits = SelfAttentionEmits(types.Sequence(probabilities, x.mask))
 
@@ -2948,6 +2986,12 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # If True, use a learned scalar per attention head as an extra "sink" logit
+    # for softmax.
+    use_sink_scalars: bool = False
+    sink_scalars_init: nn.initializers.Initializer = (
+        nn.initializers.zeros_init()
+    )
     # An optional name for the layer.
     name: str | None = None
 
@@ -3009,6 +3053,14 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
         allow_combined_qkv=False,
     )
 
+    if (
+        hasattr(self.config, 'num_sink_embeddings')
+        and self.config.num_sink_embeddings > 0
+        and hasattr(self.config, 'use_sink_scalars')
+        and self.config.use_sink_scalars
+    ):
+      raise ValueError('Cannot use both sink embeddings and sink scalars.')
+
     if hasattr(self.config, 'num_sink_embeddings') and (
         self.config.num_sink_embeddings > 0
     ):
@@ -3038,6 +3090,27 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
           ),
           self.config.param_dtype,
       )
+
+    elif hasattr(self.config, 'use_sink_scalars') and (
+        self.config.use_sink_scalars
+    ):
+      self._sink_scalars = self.param(
+          'sink_scalars',
+          self.config.sink_scalars_init,
+          (self.config.num_heads,),
+          self.config.param_dtype,
+      )
+      self._sink_value_embeddings = jnp.zeros(
+          (
+              1,
+              self.config.num_heads,
+              self.config.units_per_head,
+          ),
+          dtype=self.config.param_dtype,
+      )
+
+    else:
+      self._sink_value_embeddings = None
 
     self.query_network = (
         self.config.query_network.make() if self.config.query_network else None
@@ -3332,6 +3405,15 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
           'BTNH,KNH->BNTK', query.values, self._sink_key_embeddings
       )
       sink_value_embeddings = self._sink_value_embeddings
+    elif (
+        hasattr(self.config, 'use_sink_scalars')
+        and self.config.use_sink_scalars
+    ):
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          (query.shape[0], 1, query.shape[1], 1),
+      )
+      sink_value_embeddings = self._sink_value_embeddings
     else:
       sink_key_logits = None
       sink_value_embeddings = None
@@ -3351,7 +3433,8 @@ class DotProductAttention(types.Emitting, AttentionInputProjectionHelper):
         get_logits_fn=None,
         zero_fully_masked=self.config.zero_fully_masked,
         compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
+        num_sink_positions=self.config.num_sink_embeddings
+        + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
         sink_value_embeddings=sink_value_embeddings,
     )
@@ -3963,6 +4046,12 @@ class LocalDotProductSelfAttention(
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # If True, use a learned scalar per attention head as an extra "sink" logit
+    # for softmax.
+    use_sink_scalars: bool = False
+    sink_scalars_init: nn.initializers.Initializer = (
+        nn.initializers.zeros_init()
+    )
     # Whether to use an experimental ring buffer implementation for the KV cache
     # updates. This implementation is more compute and memory efficient than the
     # default implementation on TPU.
@@ -4023,6 +4112,9 @@ class LocalDotProductSelfAttention(
           f'{self.config.attention_logits_soft_cap=} should be None or non-neg.'
       )
 
+    if self.config.num_sink_embeddings > 0 and self.config.use_sink_scalars:
+      raise ValueError('Cannot use both sink embeddings and sink scalars.')
+
     if self.config.num_sink_embeddings > 0:
       self._sink_key_embeddings = self.param(
           'sink_key_embeddings',
@@ -4051,10 +4143,28 @@ class LocalDotProductSelfAttention(
           self.config.param_dtype,
       )
 
+    elif self.config.use_sink_scalars:
+      self._sink_scalars = self.param(
+          'sink_scalars',
+          self.config.sink_scalars_init,
+          num_kv_heads,
+          self.config.param_dtype,
+      )
+      self._sink_value_embeddings = jnp.zeros(
+          (
+              1,
+              num_kv_heads,
+              self.config.units_per_head,
+          ),
+          dtype=self.config.param_dtype,
+      )
+    else:
+      self._sink_value_embeddings = None
+
     if self.config.use_kv_cache_ringbuffer:
-      if self.config.num_sink_embeddings > 0:
+      if self.config.num_sink_embeddings > 0 or self.config.use_sink_scalars:
         raise NotImplementedError(
-            'Sink embeddings are not supported with use_kv_cache_ringbuffer.'
+            'Sinks are not supported with use_kv_cache_ringbuffer.'
         )
       if self.config.relative_position_embedding:
         raise NotImplementedError(
@@ -4412,6 +4522,11 @@ class LocalDotProductSelfAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', x_queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [x_queries.shape[0], 1, x_queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -4443,6 +4558,7 @@ class LocalDotProductSelfAttention(
     if self.config.use_kv_cache_ringbuffer:
       assert not self.relative_position_embedding
       assert not self.config.num_sink_embeddings
+      assert not self.config.use_sink_scalars
 
       context_vectors, probabilities = _multi_key_value_dot_product_attention(
           queries=x_queries.values,
@@ -4482,11 +4598,10 @@ class LocalDotProductSelfAttention(
           get_logits_fn=get_logits_fn,
           zero_fully_masked=self.config.zero_fully_masked,
           compute_dtype=compute_dtype,
-          num_sink_embeddings=self.config.num_sink_embeddings,
+          num_sink_positions=self.config.num_sink_embeddings
+          + self.config.use_sink_scalars,
           sink_key_logits=sink_key_logits,
-          sink_value_embeddings=self._sink_value_embeddings
-          if self.config.num_sink_embeddings > 0
-          else None,
+          sink_value_embeddings=self._sink_value_embeddings,
       )
 
     # Update KV caches and state.
@@ -4563,6 +4678,11 @@ class LocalDotProductSelfAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [queries.shape[0], 1, queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -4594,11 +4714,10 @@ class LocalDotProductSelfAttention(
         get_logits_fn=get_logits_fn,
         zero_fully_masked=self.config.zero_fully_masked,
         compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
+        num_sink_positions=self.config.num_sink_embeddings
+        + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
-        sink_value_embeddings=self._sink_value_embeddings
-        if self.config.num_sink_embeddings > 0
-        else None,
+        sink_value_embeddings=self._sink_value_embeddings,
     )
     emits = SelfAttentionEmits(types.Sequence(probabilities, x.mask))
 
@@ -4698,6 +4817,12 @@ class StreamingDotProductAttention(
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # If True, use a learned scalar per attention head as an extra "sink" logit
+    # for softmax.
+    use_sink_scalars: bool = False
+    sink_scalars_init: nn.initializers.Initializer = (
+        nn.initializers.zeros_init()
+    )
     # Whether to use an experimental ring buffer implementation for the KV cache
     # updates. This implementation is more compute and memory efficient than the
     # default implementation on TPU.
@@ -4762,6 +4887,11 @@ class StreamingDotProductAttention(
         allow_combined_qkv=False,
     )
 
+    if self.config.num_sink_embeddings > 0 and self.config.use_sink_scalars:
+      raise NotImplementedError(
+          'Cannot use both sink embeddings and sink scalars.'
+      )
+
     if self.config.num_sink_embeddings > 0:
       self._sink_key_embeddings = self.param(
           'sink_key_embeddings',
@@ -4790,10 +4920,29 @@ class StreamingDotProductAttention(
           self.config.param_dtype,
       )
 
+    elif self.config.use_sink_scalars:
+      self._sink_scalars = self.param(
+          'sink_scalars',
+          self.config.sink_scalars_init,
+          (self.config.num_heads,),
+          self.config.param_dtype,
+      )
+      self._sink_value_embeddings = jnp.zeros(
+          (
+              1,
+              self.config.num_heads,
+              self.config.units_per_head,
+          ),
+          dtype=self.config.param_dtype,
+      )
+
+    else:
+      self._sink_value_embeddings = None
+
     if self.config.use_kv_cache_ringbuffer:
-      if self.config.num_sink_embeddings > 0:
+      if self.config.num_sink_embeddings > 0 or self.config.use_sink_scalars:
         raise NotImplementedError(
-            'Sink embeddings are not supported with use_kv_cache_ringbuffer.'
+            'Sinks are not supported with use_kv_cache_ringbuffer.'
         )
       if self.config.relative_position_embedding:
         raise NotImplementedError(
@@ -5163,6 +5312,11 @@ class StreamingDotProductAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [queries.shape[0], 1, queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -5194,6 +5348,7 @@ class StreamingDotProductAttention(
     if self.config.use_kv_cache_ringbuffer:
       assert not self.relative_position_embedding
       assert not self.config.num_sink_embeddings
+      assert not self.config.use_sink_scalars
       assert not get_logits_fn
 
       context_vectors, probabilities = _multi_key_value_dot_product_attention(
@@ -5234,11 +5389,10 @@ class StreamingDotProductAttention(
           get_logits_fn=get_logits_fn,
           zero_fully_masked=self.config.zero_fully_masked,
           compute_dtype=compute_dtype,
-          num_sink_embeddings=self.config.num_sink_embeddings,
+          num_sink_positions=self.config.num_sink_embeddings
+          + self.config.use_sink_scalars,
           sink_key_logits=sink_key_logits,
-          sink_value_embeddings=self._sink_value_embeddings
-          if self.config.num_sink_embeddings > 0
-          else None,
+          sink_value_embeddings=self._sink_value_embeddings,
       )
 
     # Update KV caches and state.
@@ -5331,6 +5485,11 @@ class StreamingDotProductAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [queries.shape[0], 1, queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -5370,11 +5529,10 @@ class StreamingDotProductAttention(
         get_logits_fn=get_logits_fn,
         zero_fully_masked=self.config.zero_fully_masked,
         compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
+        num_sink_positions=self.config.num_sink_embeddings
+        + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
-        sink_value_embeddings=self._sink_value_embeddings
-        if self.config.num_sink_embeddings > 0
-        else None,
+        sink_value_embeddings=self._sink_value_embeddings,
     )
     emits = CrossAttentionEmits(
         {self.config.source_name: types.Sequence(probabilities, x.mask)}
@@ -5480,6 +5638,12 @@ class StreamingLocalDotProductAttention(
         nn.linear.default_embed_init
     )
     sink_embeddings_sharding: types.Sharding | None = None
+    # If True, use a learned scalar per attention head as an extra "sink" logit
+    # for softmax.
+    use_sink_scalars: bool = False
+    sink_scalars_init: nn.initializers.Initializer = (
+        nn.initializers.zeros_init()
+    )
     # Whether to use an experimental ring buffer implementation for the KV cache
     # updates. This implementation is more compute and memory efficient than the
     # default implementation on TPU.
@@ -5541,6 +5705,9 @@ class StreamingLocalDotProductAttention(
         allow_combined_qkv=False,
     )
 
+    if self.config.num_sink_embeddings > 0 and self.config.use_sink_scalars:
+      raise ValueError('Cannot use both sink embeddings and sink scalars.')
+
     if self.config.num_sink_embeddings > 0:
       self._sink_key_embeddings = self.param(
           'sink_key_embeddings',
@@ -5569,10 +5736,29 @@ class StreamingLocalDotProductAttention(
           self.config.param_dtype,
       )
 
+    elif self.config.use_sink_scalars:
+      self._sink_scalars = self.param(
+          'sink_scalars',
+          self.config.sink_scalars_init,
+          (self.config.num_heads,),
+          self.config.param_dtype,
+      )
+      self._sink_value_embeddings = jnp.zeros(
+          (
+              1,
+              self.config.num_heads,
+              self.config.units_per_head,
+          ),
+          dtype=self.config.param_dtype,
+      )
+
+    else:
+      self._sink_value_embeddings = None
+
     if self.config.use_kv_cache_ringbuffer:
-      if self.config.num_sink_embeddings > 0:
+      if self.config.num_sink_embeddings > 0 or self.config.use_sink_scalars:
         raise NotImplementedError(
-            'Sink embeddings are not supported with use_kv_cache_ringbuffer.'
+            'Sinks are not supported with use_kv_cache_ringbuffer.'
         )
       if self.config.relative_position_embedding:
         raise NotImplementedError(
@@ -5942,6 +6128,11 @@ class StreamingLocalDotProductAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [queries.shape[0], 1, queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -5973,6 +6164,7 @@ class StreamingLocalDotProductAttention(
     if self.config.use_kv_cache_ringbuffer:
       assert not self.relative_position_embedding
       assert not self.config.num_sink_embeddings
+      assert not self.config.use_sink_scalars
       assert not get_logits_fn
 
       context_vectors, probabilities = _multi_key_value_dot_product_attention(
@@ -6013,11 +6205,10 @@ class StreamingLocalDotProductAttention(
           get_logits_fn=get_logits_fn,
           zero_fully_masked=self.config.zero_fully_masked,
           compute_dtype=compute_dtype,
-          num_sink_embeddings=self.config.num_sink_embeddings,
+          num_sink_positions=self.config.num_sink_embeddings
+          + self.config.use_sink_scalars,
           sink_key_logits=sink_key_logits,
-          sink_value_embeddings=self._sink_value_embeddings
-          if self.config.num_sink_embeddings > 0
-          else None,
+          sink_value_embeddings=self._sink_value_embeddings,
       )
 
     # Update KV caches and state.
@@ -6108,6 +6299,11 @@ class StreamingLocalDotProductAttention(
       sink_key_logits = jnp.einsum(
           'BTNH,KNH->BNTK', queries.values, self._sink_key_embeddings
       )
+    elif self.config.use_sink_scalars:
+      sink_key_logits = jnp.tile(
+          self._sink_scalars[None, :, None, None],
+          [queries.shape[0], 1, queries.shape[1], 1],
+      )
     else:
       sink_key_logits = None
 
@@ -6136,11 +6332,10 @@ class StreamingLocalDotProductAttention(
         get_logits_fn=get_logits_fn,
         zero_fully_masked=self.config.zero_fully_masked,
         compute_dtype=compute_dtype,
-        num_sink_embeddings=self.config.num_sink_embeddings,
+        num_sink_positions=self.config.num_sink_embeddings
+        + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
-        sink_value_embeddings=self._sink_value_embeddings
-        if self.config.num_sink_embeddings > 0
-        else None,
+        sink_value_embeddings=self._sink_value_embeddings,
     )
     emits = CrossAttentionEmits(
         {self.config.source_name: types.Sequence(probabilities, x.mask)}
