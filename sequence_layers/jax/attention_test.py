@@ -15,6 +15,7 @@
 import dataclasses
 import functools
 import itertools
+from typing import Literal
 
 from absl.testing import parameterized
 import chex
@@ -57,6 +58,7 @@ def assert_param_dtypes_inits_shapes(
     input_projection: attention.QueryKeyValueProjectionConfig,
     constants: types.Constants | None = None,
     num_sink_embeddings: int = 0,
+    use_sink_scalars: bool = False,
 ) -> None:
   config = layer.config
   params = {}
@@ -89,6 +91,12 @@ def assert_param_dtypes_inits_shapes(
             num_kv_heads,
             config.units_per_head,
         ),
+        dtype=config.param_dtype,
+    )
+
+  if use_sink_scalars:
+    params['sink_scalars'] = jnp.zeros(
+        (num_query_heads,),
         dtype=config.param_dtype,
     )
 
@@ -617,12 +625,13 @@ class GmmAttentionTest(test_utils.SequenceLayerTest):
 class DotProductAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
-      (1, 2, 0),
-      (3, 5, 0),
-      (3, 5, 1),
+      (1, 2, 0, False),
+      (3, 5, 0, False),
+      (3, 5, 1, False),
+      (3, 5, 0, True),
   )
   def test_dot_product_attention(
-      self, num_heads, units_per_head, num_sink_embeddings
+      self, num_heads, units_per_head, num_sink_embeddings, use_sink_scalars
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, source_time, source_channels = 2, 11, 2
@@ -634,6 +643,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     source = test_utils.random_sequence(
@@ -653,6 +663,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -1293,7 +1304,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
               'num_heads': 3,
           },
       ),
-      use_attention_sink=(False, True),
+      attention_sinks=('none', 'embeddings', 'scalars'),
   )
   def test_projection_config(
       self,
@@ -1303,13 +1314,14 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
           | attention.QueryAndSharedKeyValueProjection
       ),
       num_heads: int,
-      use_attention_sink: bool,
+      attention_sinks: Literal['none', 'embeddings', 'scalars'],
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, source_time, source_channels = 2, 11, 2
     source_name = 'source'
     units_per_head = 5
-    num_sink_embeddings = 2 if use_attention_sink else 0
+    num_sink_embeddings = 2 if attention_sinks == 'embeddings' else 0
+    use_sink_scalars = attention_sinks == 'scalars'
     l = attention.DotProductAttention.Config(
         source_name,
         num_heads=num_heads,
@@ -1318,6 +1330,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     source = test_utils.random_sequence(
@@ -1337,6 +1350,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -1359,28 +1373,30 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0. Steppable.
-      (1, 2, 3, 0, False, 0),
-      (1, 2, 3, 0, True, 0),
-      (3, 5, 3, 0, False, 0),
-      (3, 5, 3, 0, True, 0),
+      (1, 2, 3, 0, False, 0, False),
+      (1, 2, 3, 0, True, 0, False),
+      (3, 5, 3, 0, False, 0, False),
+      (3, 5, 3, 0, True, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0. Steppable.
-      (3, 5, 3, 2, False, 0),
-      (3, 5, 3, 2, True, 0),
-      (3, 5, 3, 5, False, 0),
-      (3, 5, 3, 5, True, 0),
+      (3, 5, 3, 2, False, 0, False),
+      (3, 5, 3, 2, True, 0, False),
+      (3, 5, 3, 5, False, 0, False),
+      (3, 5, 3, 5, True, 0, False),
       # max_past_horizon == -1, max_future_horizon > 0. Not steppable.
-      (3, 5, -1, 2, False, 0),
-      (3, 5, -1, 2, True, 0),
+      (3, 5, -1, 2, False, 0, False),
+      (3, 5, -1, 2, True, 0, False),
       # max_past_horizon > 0, max_future_horizon == -1. Not steppable.
-      (3, 5, 3, -1, False, 0),
-      (3, 5, 3, -1, True, 0),
+      (3, 5, 3, -1, False, 0, False),
+      (3, 5, 3, -1, True, 0, False),
       # max_past_horizon == -1, max_future_horizon == -1. Not steppable.
-      (3, 5, -1, -1, False, 0),
-      (3, 5, -1, -1, True, 0),
+      (3, 5, -1, -1, False, 0, False),
+      (3, 5, -1, -1, True, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0. Steppable with sink
       # attention.
-      (3, 5, 3, 2, False, 1),
-      (3, 5, 3, 2, True, 1),
+      (3, 5, 3, 2, False, 1, False),
+      (3, 5, 3, 2, True, 1, False),
+      (3, 5, 3, 2, False, 0, True),
+      (3, 5, 3, 2, True, 0, True),
   )
   def test_dot_product_self_attention(
       self,
@@ -1390,6 +1406,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
       max_future_horizon,
       random_mask,
       num_sink_embeddings,
+      use_sink_scalars,
   ):
     key = jax.random.PRNGKey(1234)
     batch_size = 2
@@ -1402,6 +1419,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='dot_product_self_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     channels = 1
@@ -1423,6 +1441,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l,
         x,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -2014,20 +2033,21 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
               'num_kv_heads': 3,
           },
       ),
-      use_attention_sink=(False, True),
+      attention_sinks=('none', 'embeddings', 'scalars'),
   )
   def test_projection_config(
       self,
       input_projection: attention.QueryKeyValueProjectionConfig,
       num_heads: int,
       num_kv_heads: int | None,
-      use_attention_sink: bool,
+      attention_sinks: Literal['none', 'embeddings', 'scalars'],
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, units_per_head = 2, 5
     max_past_horizon = 7
     max_future_horizon = 11
-    num_sink_embeddings = 2 if use_attention_sink else 0
+    num_sink_embeddings = 2 if attention_sinks == 'embeddings' else 0
+    use_sink_scalars = attention_sinks == 'scalars'
     l = attention.DotProductSelfAttention.Config(
         num_heads=num_heads,
         num_kv_heads=num_kv_heads,
@@ -2037,6 +2057,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_future_horizon=max_future_horizon,
         precision=jax.lax.Precision.HIGHEST,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         name='dot_product_self_attention',
     ).make()
 
@@ -2057,6 +2078,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l,
         x,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=input_projection,
     )
 
@@ -2089,6 +2111,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     max_past_horizon = 7
     max_future_horizon = 11
     num_sink_embeddings = 0
+    use_sink_scalars = False
     num_heads = 3
     num_kv_heads = None
     l_default = attention.DotProductSelfAttention.Config(
@@ -2100,6 +2123,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_future_horizon=max_future_horizon,
         precision=jax.lax.Precision.HIGHEST,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         name='dot_product_self_attention',
     ).make()
     l_einsum = attention.DotProductSelfAttention.Config(
@@ -2113,6 +2137,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         max_future_horizon=max_future_horizon,
         precision=jax.lax.Precision.HIGHEST,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         name='dot_product_self_attention',
     ).make()
 
@@ -2201,18 +2226,20 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0
-      (1, 2, 3, 0, False, 0),
-      (1, 2, 3, 0, True, 0),
-      (3, 5, 3, 0, False, 0),
-      (3, 5, 3, 0, True, 0),
+      (1, 2, 3, 0, False, 0, False),
+      (1, 2, 3, 0, True, 0, False),
+      (3, 5, 3, 0, False, 0, False),
+      (3, 5, 3, 0, True, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0
-      (3, 5, 3, 2, False, 0),
-      (3, 5, 3, 2, True, 0),
-      (3, 5, 3, 5, False, 0),
-      (3, 5, 3, 5, True, 0),
+      (3, 5, 3, 2, False, 0, False),
+      (3, 5, 3, 2, True, 0, False),
+      (3, 5, 3, 5, False, 0, False),
+      (3, 5, 3, 5, True, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0, with attention sink.
-      (3, 5, 3, 2, False, 1),
-      (3, 5, 3, 2, True, 1),
+      (3, 5, 3, 2, False, 1, False),
+      (3, 5, 3, 2, True, 1, False),
+      (3, 5, 3, 2, False, 0, True),
+      (3, 5, 3, 2, True, 0, True),
   )
   def test_local_dot_product_self_attention(
       self,
@@ -2222,6 +2249,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
       max_future_horizon,
       random_mask,
       num_sink_embeddings,
+      use_sink_scalars,
   ):
     key = jax.random.PRNGKey(1234)
     batch_size = 2
@@ -2238,6 +2266,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='local_dot_product_self_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     channels = 1
@@ -2254,6 +2283,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         l,
         x,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -2764,7 +2794,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         get_logits_fn=None,
         zero_fully_masked=True,
         compute_dtype=None,
-        num_sink_embeddings=0,
+        num_sink_positions=0,
         sink_key_logits=None,
         sink_value_embeddings=None,
     )
@@ -2822,7 +2852,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         get_logits_fn=None,
         zero_fully_masked=True,
         compute_dtype=None,
-        num_sink_embeddings=0,
+        num_sink_positions=0,
         sink_key_logits=None,
         sink_value_embeddings=None,
     )
@@ -2868,7 +2898,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         get_logits_fn=None,
         zero_fully_masked=True,
         compute_dtype=None,
-        num_sink_embeddings=0,
+        num_sink_positions=0,
         sink_key_logits=None,
         sink_value_embeddings=None,
     )
@@ -2919,7 +2949,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
             get_logits_fn=None,
             zero_fully_masked=zero_fully_masked,
             compute_dtype=None,
-            num_sink_embeddings=0,
+            num_sink_positions=0,
             sink_key_logits=None,
             sink_value_embeddings=None,
         )
@@ -3005,7 +3035,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         get_logits_fn=None,
         zero_fully_masked=False,
         compute_dtype=None,
-        num_sink_embeddings=0,
+        num_sink_positions=0,
         sink_key_logits=None,
         sink_value_embeddings=None,
     )
@@ -3090,7 +3120,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         get_logits_fn=None,
         zero_fully_masked=True,
         compute_dtype=None,
-        num_sink_embeddings=0,
+        num_sink_positions=0,
         sink_key_logits=None,
         sink_value_embeddings=None,
     )
@@ -3108,13 +3138,14 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0
-      (1, 2, 3, 0, 0),
-      (3, 5, 3, 0, 0),
+      (1, 2, 3, 0, 0, False),
+      (3, 5, 3, 0, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0
-      (3, 5, 3, 2, 0),
-      (3, 5, 3, 5, 0),
+      (3, 5, 3, 2, 0, False),
+      (3, 5, 3, 5, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0, with attention sinks.
-      (3, 5, 3, 5, 1),
+      (3, 5, 3, 5, 1, False),
+      (3, 5, 3, 5, 0, True),
   )
   def test_streaming_local_dot_product_attention(
       self,
@@ -3123,6 +3154,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
       max_past_horizon,
       max_future_horizon,
       num_sink_embeddings,
+      use_sink_scalars,
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, source_channels = 2, 2
@@ -3138,6 +3170,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
         precision=jax.lax.Precision.HIGHEST,
         name='streaming_dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     source = test_utils.random_sequence(batch_size, 1, source_channels)
@@ -3157,6 +3190,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -3493,7 +3527,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
               'num_heads': 3,
           },
       ),
-      use_attention_sink=(False, True),
+      attention_sinks=('none', 'embeddings', 'scalars'),
   )
   def test_projection_config(
       self,
@@ -3503,7 +3537,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
           | attention.QueryAndSharedKeyValueProjection
       ),
       num_heads: int,
-      use_attention_sink: bool,
+      attention_sinks: Literal['none', 'embeddings', 'scalars'],
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, time, channels, source_channels = 2, 11, 3, 2
@@ -3511,7 +3545,8 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     units_per_head = 5
     max_past_horizon = 3
     max_future_horizon = 3
-    num_sink_embeddings = 2 if use_attention_sink else 0
+    num_sink_embeddings = 2 if attention_sinks == 'embeddings' else 0
+    use_sink_scalars = attention_sinks == 'scalars'
     l = attention.StreamingDotProductAttention.Config(
         source_name,
         units_per_head=units_per_head,
@@ -3522,6 +3557,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='streaming_dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     x = test_utils.random_sequence(batch_size, time, channels)
@@ -3545,6 +3581,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -3646,13 +3683,14 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0
-      (1, 2, 3, 0, 0),
-      (3, 5, 3, 0, 0),
+      (1, 2, 3, 0, 0, False),
+      (3, 5, 3, 0, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0
-      (3, 5, 3, 2, 0),
-      (3, 5, 3, 5, 0),
+      (3, 5, 3, 2, 0, False),
+      (3, 5, 3, 5, 0, False),
       # max_past_horizon > 0, max_future_horizon > 0, with attention sinks.
-      (3, 5, 3, 5, 1),
+      (3, 5, 3, 5, 1, False),
+      (3, 5, 3, 5, 0, True),
   )
   def test_basic(
       self,
@@ -3661,6 +3699,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
       max_past_horizon,
       max_future_horizon,
       num_sink_embeddings,
+      use_sink_scalars,
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, source_channels = 2, 2
@@ -3678,6 +3717,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
         precision=jax.lax.Precision.HIGHEST,
         name='streaming_local_dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     source = test_utils.random_sequence(batch_size, 1, source_channels)
@@ -3697,6 +3737,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
@@ -4047,7 +4088,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
               'num_heads': 3,
           },
       ),
-      use_attention_sink=(False, True),
+      attention_sinks=('none', 'embeddings', 'scalars'),
   )
   def test_projection_config(
       self,
@@ -4057,7 +4098,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
           | attention.QueryAndSharedKeyValueProjection
       ),
       num_heads: int,
-      use_attention_sink: bool,
+      attention_sinks: Literal['none', 'embeddings', 'scalars'],
   ):
     key = jax.random.PRNGKey(1234)
     batch_size, time, channels, source_channels = 2, 11, 3, 2
@@ -4066,7 +4107,8 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
     max_past_horizon = 3
     max_future_horizon = 3
     block_size = max(1, max_future_horizon, max_past_horizon - 1)
-    num_sink_embeddings = 2 if use_attention_sink else 0
+    num_sink_embeddings = 2 if attention_sinks == 'embeddings' else 0
+    use_sink_scalars = attention_sinks == 'scalars'
     l = attention.StreamingLocalDotProductAttention.Config(
         source_name,
         units_per_head=units_per_head,
@@ -4078,6 +4120,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
         per_dim_scale=True,
         name='streaming_local_dot_product_attention',
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
     ).make()
 
     x = test_utils.random_sequence(batch_size, time, channels)
@@ -4101,6 +4144,7 @@ class StreamingLocalDotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         num_sink_embeddings=num_sink_embeddings,
+        use_sink_scalars=use_sink_scalars,
         input_projection=l.config.input_projection,
     )
 
