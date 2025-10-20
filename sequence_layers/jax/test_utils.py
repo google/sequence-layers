@@ -849,6 +849,7 @@ class SequenceLayerTest(parameterized.TestCase):
       training: bool,
       constants: types.Constants | None = None,
       stream_constants: bool = False,
+      stream_constants_list: list[types.Constants] | None = None,
       rtol: float = 1e-6,
       atol: float = 1e-6,
       test_gradients: bool = True,
@@ -900,6 +901,8 @@ class SequenceLayerTest(parameterized.TestCase):
       constants: Optional constants to provide to the layer.
       stream_constants: If True, stream Sequences present in constants at the
         same block size as x.
+      stream_constants_list: An optional list of constants, one for each step,
+        used when `stream_constants` is enabled.
       rtol: The relative tolerance to test equality with.
       atol: The absolute tolerance to test equality with.
       test_gradients: Whether to compute and compare the gradients for l applied
@@ -978,6 +981,7 @@ class SequenceLayerTest(parameterized.TestCase):
         l: types.SequenceLayer,
         x: types.Sequence,
         constants: types.Constants,
+        stream_constants_list: list[types.Constants] | None = None,
         *,
         blocks_per_step: int = 1,
     ) -> tuple[types.Sequence, types.State]:
@@ -989,6 +993,7 @@ class SequenceLayerTest(parameterized.TestCase):
           initial_state=state,
           constants=constants,
           stream_constants=stream_constants,
+          stream_constants_list=stream_constants_list,
           blocks_per_step=blocks_per_step,
       )
       chex.assert_trees_all_equal_shapes_and_dtypes(new_state, state)
@@ -1001,10 +1006,12 @@ class SequenceLayerTest(parameterized.TestCase):
         x: types.Sequence,
         constants: types.Constants,
     ):
-      (y, new_state), step_vjp_fn = nn.vjp(step_fn, l, x, constants)
+      (y, new_state), step_vjp_fn = nn.vjp(
+          step_fn, l, x, constants, stream_constants_list
+      )
       dy = get_dy(y)
       dstate = jax.tree_util.tree_map(jnp.zeros_like, new_state)
-      params_grad, x_grad, unused_constants_grad = step_vjp_fn((dy, dstate))
+      params_grad, x_grad, unused_constants_grad, _ = step_vjp_fn((dy, dstate))
       x_grad = types.Sequence(x_grad.values, x.mask).mask_invalid()
       return y, new_state, x_grad, params_grad
 
@@ -1043,7 +1050,11 @@ class SequenceLayerTest(parameterized.TestCase):
           padding_invariance_pad_value
       )
 
-    x_padded, constants_padded = x, constants
+    x_padded, constants_padded, stream_constants_padded_list = (
+        x,
+        constants,
+        stream_constants_list,
+    )
     if test_padding_invariance:
       x_padded = _pad(x, pad_amount)
       if pad_constants and constants_padded is not None:
@@ -1055,13 +1066,19 @@ class SequenceLayerTest(parameterized.TestCase):
             )
             for k, v in constants.items()
         }
+      if pad_constants and stream_constants_padded_list is not None:
+        stream_constants_padded_list = stream_constants_list
+        stream_constants_padded_list += stream_constants_list[:-1] * pad_amount
       y_layer_padded = layer_fn(l, x_padded, constants_padded)
       self.assertSequencesClose(y_layer, y_layer_padded, rtol=rtol, atol=atol)
 
     x_batch = None
     constants_batch = None
+    stream_constants_list_batch = None
     if test_batching:
-      x_batch, constants_batch = pad_batch_axis_with_garbage((x, constants))
+      x_batch, constants_batch, stream_constants_list_batch = (
+          pad_batch_axis_with_garbage((x, constants, stream_constants_list))
+      )
       y_layer_batch = layer_fn(l, x_batch, constants_batch)
       y_layer_batch = strip_batch_axis_of_garbage(y_layer_batch)
       self.assertSequencesClose(y_layer, y_layer_batch, rtol=rtol, atol=atol)
@@ -1079,19 +1096,23 @@ class SequenceLayerTest(parameterized.TestCase):
             l, x, constants
         )
       else:
-        y_step, _ = step_fn(l, x, constants)
+        y_step, _ = step_fn(l, x, constants, stream_constants_list)
         y_step_x_grad = None
         y_step_params_grad = None
 
       if test_2x_step:
-        y_step_2x, _ = step_fn(l, x, constants, blocks_per_step=2)
+        y_step_2x, _ = step_fn(
+            l, x, constants, stream_constants_list, blocks_per_step=2
+        )
       else:
         y_step_2x = None
 
       if test_batching:
         assert x_batch is not None
         x_batch = x_batch.pad_time(0, input_latency, valid=False)
-        y_step_batch, _ = step_fn(l, x_batch, constants_batch)
+        y_step_batch, _ = step_fn(
+            l, x_batch, constants_batch, stream_constants_list_batch
+        )
         y_step_batch = strip_batch_axis_of_garbage(y_step_batch)
         self.assertSequencesClose(y_step, y_step_batch, rtol=rtol, atol=atol)
 
@@ -1102,7 +1123,9 @@ class SequenceLayerTest(parameterized.TestCase):
 
       # Property 2: Padding invariance.
       if test_padding_invariance:
-        y_step_padded, _ = step_fn(l, x_padded, constants_padded)
+        y_step_padded, _ = step_fn(
+            l, x_padded, constants_padded, stream_constants_padded_list
+        )
         self.assertSequencesClose(y_step, y_step_padded, rtol=rtol, atol=atol)
 
       if test_gradients:

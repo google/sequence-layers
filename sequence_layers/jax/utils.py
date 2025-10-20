@@ -204,6 +204,7 @@ def step_by_step_static(
     constants: types.Constants | None = None,
     with_emits: bool = True,
     stream_constants: bool = False,
+    stream_constants_list: list[types.Constants] | None = None,
 ) -> tuple[types.Sequence, types.State, types.Emits]:
   """Executes a SequenceLayer timestep-by-timestep statically.
 
@@ -224,6 +225,8 @@ def step_by_step_static(
       is more efficient to disable this.
     stream_constants: If True, stream Sequences present in constants at the same
       block size as x.
+    stream_constants_list: An optional list of constants, one for each step,
+      used when `stream_constants` is enabled.
 
   Returns:
     The resulting sequence, final state, and emits stacked over time (if
@@ -244,7 +247,7 @@ def step_by_step_static(
   if constants is None:
     constants = {}
 
-  if stream_constants:
+  if stream_constants and stream_constants_list is None:
 
     def pad_constant(x):
       if isinstance(x, types.Sequence):
@@ -276,11 +279,14 @@ def step_by_step_static(
     x_block = read_block(x, b)
 
     if stream_constants:
-      step_constants = jax.tree_util.tree_map(
-          lambda x: read_block(x, b) if isinstance(x, types.Sequence) else x,  # pylint: disable=cell-var-from-loop
-          constants,
-          is_leaf=lambda x: isinstance(x, types.Sequence),
-      )
+      if stream_constants_list is None:
+        step_constants = jax.tree_util.tree_map(
+            lambda x: read_block(x, b) if isinstance(x, types.Sequence) else x,  # pylint: disable=cell-var-from-loop
+            constants,
+            is_leaf=lambda x: isinstance(x, types.Sequence),
+        )
+      else:
+        step_constants = stream_constants_list[b]
     else:
       step_constants = constants
 
