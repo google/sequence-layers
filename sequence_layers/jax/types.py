@@ -639,7 +639,7 @@ class MetaSequenceT(type):
     )
 
 
-class SequenceT(metaclass=MetaSequenceT):
+class SequenceT(Sequence, metaclass=MetaSequenceT):
   pass
 
 
