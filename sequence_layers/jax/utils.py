@@ -1736,14 +1736,24 @@ def is_floating(dtype: np.dtype) -> bool:
 def pprint_tree_shapes_types(tree: Any) -> None:
   """Pretty-prints the shapes and types of a pytree."""
   pprint.pprint(
-      jax.tree.map(lambda a: jax.ShapeDtypeStruct(a.shape, a.dtype), tree)
+      jax.tree.map(
+          lambda a: jax.ShapeDtypeStruct(a.shape, a.dtype)
+          if hasattr(a, 'shape') and hasattr(a, 'dtype')
+          else a,
+          tree,
+      )
   )
 
 
 def pformat_tree_shapes_types(tree: Any) -> str:
   """Pretty-formats the shapes and types of a pytree."""
   return pprint.pformat(
-      jax.tree.map(lambda a: jax.ShapeDtypeStruct(a.shape, a.dtype), tree)
+      jax.tree.map(
+          lambda a: jax.ShapeDtypeStruct(a.shape, a.dtype)
+          if hasattr(a, 'shape') and hasattr(a, 'dtype')
+          else a,
+          tree,
+      )
   )
 
 
