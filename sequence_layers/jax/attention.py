@@ -184,6 +184,7 @@ class QueryKeyValueProjectionConfig:
   # instead of jnp.einsum for the query, key and value projections.
   # For example, to enable quantization aware training.
   einsum_factory: types.EinsumFactoryT | None = None
+  quantization_provider: types.QuantizationProviderT | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -362,6 +363,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='query_key_value_projection',
         )
       case SeparateQueryKeyValueProjection():
@@ -382,6 +384,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='query_projection',
         )
         self._k = utils.FlaxEinsumDense(
@@ -401,6 +404,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='key_projection',
         )
         self._v = utils.FlaxEinsumDense(
@@ -420,6 +424,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='value_projection',
         )
       case QueryAndKeyValueProjection():
@@ -440,6 +445,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='query_projection',
         )
         self._kv = utils.FlaxEinsumDense(
@@ -464,6 +470,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='key_value_projection',
         )
       case QueryAndSharedKeyValueProjection():
@@ -484,6 +491,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='query_projection',
         )
         self._shared_kv = utils.FlaxEinsumDense(
@@ -507,6 +515,7 @@ class AttentionInputProjectionHelper:
             compute_dtype=compute_dtype,
             param_dtype=param_dtype,
             einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
             name='shared_key_value_projection',
         )
 

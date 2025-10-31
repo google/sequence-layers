@@ -20,7 +20,7 @@ import fractions
 import functools
 import math
 import typing
-from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Self, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Protocol, Self, Sequence as TypingSequence, TypeVar
 
 from absl import logging
 from flax import linen as nn
@@ -51,6 +51,7 @@ __all__ = (
     'PaddingModeString',
     'PreservesShape',
     'PreservesType',
+    'QuantizationProviderT',
     'ReceptiveField',
     'Sequence',
     'SequenceLayer',
@@ -114,6 +115,54 @@ ApplyMaskedParams = ParamSpec('ApplyMaskedParams')
 # Einsum factory types.
 JnpEinsumT = Callable[[str, Any, Any], Any]
 EinsumFactoryT = Callable[..., JnpEinsumT]
+
+
+class QuantizationProviderT(Protocol):
+  """Interface provided by quantization libraries for model integration."""
+
+  @abc.abstractmethod
+  def create_weight_with_eqn(
+      self,
+      module: nn.Module,
+      name: str,
+      eqn: str,
+      init_fn: Callable[..., Any],
+      *init_args: Any,
+      **init_kwargs: Any,
+  ) -> Any:
+    """Create a weight, may or may not be quantized.
+
+    This function should be called in place of `self.param(name, init_fn)`, so
+    that the quantization library can intercept the weight creation.
+
+    Args:
+      module: The module that is creating the weight, usually `self`.
+      name: The name of the weight.
+      eqn: The einsum equation.
+      init_fn: The initialization function.
+      *init_args: The arguments to the initialization function.
+      **init_kwargs: The keyword arguments to the initialization function.
+
+    Returns:
+      The original weight, if quantization is not needed, or anything, e.g., a
+      custom QuantizedWeight, if quantization is needed.
+    """
+
+  @abc.abstractmethod
+  def get_einsum(
+      self,
+      module: nn.Module,
+  ) -> JnpEinsumT:
+    """Return a quantized einsum function.
+
+    Args:
+      module: The module that is requesting the einsum, usually `self`.
+
+    Returns:
+      The jnp.einsum function, if quantization is not needed, or a custom
+      einsum function that takes QuantizedWeight, if quantization is needed.
+    """
+
 
 # SequenceLayer type aliases:
 State = jt.AnyPyTree

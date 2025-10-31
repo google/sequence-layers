@@ -744,13 +744,29 @@ class EinsumCommon(Protocol):
       bias_init: nn.initializers.Initializer = nn.initializers.zeros_init(),
       bias_sharding: types.Sharding | None = None,
       einsum_factory: types.EinsumFactoryT | None = None,
+      quantization_provider: types.QuantizationProviderT | None = None,
       **kernel_init_kwargs,
   ) -> jax.Array:
     """Compute einsum with the given shapes. Call from an @nn.compact method."""
+    if quantization_provider is not None and einsum_factory is not None:
+      raise ValueError(
+          'quantization_provider and einsum_factory cannot both be set.'
+      )
+    if quantization_provider is not None:
+      assert isinstance(self, nn.Module)  # make pytype happy
     kernel_init = shard_initializer(
         kernel_init, kernel_sharding, **kernel_init_kwargs
     )
-    kernel = self.param('kernel', kernel_init, kernel_shape, param_dtype)
+    if quantization_provider is not None:
+      kernel = quantization_provider.create_weight_with_eqn(
+          self,
+          'kernel',
+          equation,
+          kernel_init,
+          kernel_shape,
+      )
+    else:
+      kernel = self.param('kernel', kernel_init, kernel_shape, param_dtype)
     if bias_shape is not None:
       bias_init = shard_initializer(bias_init, bias_sharding)
       bias = self.param('bias', bias_init, bias_shape, param_dtype)
@@ -761,11 +777,14 @@ class EinsumCommon(Protocol):
         inputs, kernel, bias, dtype=compute_dtype
     )
 
-    if einsum_factory is None:
-      ret = jnp.einsum(equation, inputs, kernel, precision=precision)
-    else:
-      einsum_func = einsum_factory()
+    if einsum_factory is not None or quantization_provider is not None:
+      if quantization_provider is not None:
+        einsum_func = quantization_provider.get_einsum(self)
+      else:
+        einsum_func = einsum_factory()
       ret = einsum_func(equation, inputs, kernel)
+    else:
+      ret = jnp.einsum(equation, inputs, kernel, precision=precision)
 
     if bias is not None:
       ret = bias_add(ret, bias)
@@ -803,6 +822,7 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
   bias_sharding: types.Sharding | None = None
   # Optional einsum factory to replace the default jnp.einsum callable.
   einsum_factory: types.EinsumFactoryT | None = None
+  quantization_provider: types.QuantizationProviderT | None = None
 
   def get_output_dtype(
       self,
@@ -851,6 +871,7 @@ class FlaxEinsumDense(nn.Module, EinsumCommon):
         bias_init=self.bias_init,
         bias_sharding=self.bias_sharding,
         einsum_factory=self.einsum_factory,
+        quantization_provider=self.quantization_provider,
     )
 
 
