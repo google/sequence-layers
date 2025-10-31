@@ -67,6 +67,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
     einsum_factory: types.EinsumFactoryT | None = None
     # Optional name for the layer.
     name: str | None = None
+    quantization_provider: types.QuantizationProviderT | None = None
 
     def make(self) -> 'Dense':
       return Dense(self, name=self.name)
@@ -133,6 +134,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
         projectable=True,
         axes_types=(meta.AxisType.FANIN, None),
         einsum_factory=self.config.einsum_factory,
+        quantization_provider=self.config.quantization_provider,
     )
 
 
@@ -170,6 +172,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
     # Optional callable that returns a jnp.einsum-compatible function to use
     # instead of jnp.einsum. For example, to enable quantization aware training.
     einsum_factory: types.EinsumFactoryT | None = None
+    quantization_provider: types.QuantizationProviderT | None = None
 
     def __post_init__(self):
       # Use hashable types for sequences.
@@ -260,6 +263,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
         projectable=True,
         axes_types=axes_types,
         einsum_factory=self.config.einsum_factory,
+        quantization_provider=self.config.quantization_provider,
     )
 
 
@@ -323,6 +327,7 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
     # Optional callable that returns a jnp.einsum-compatible function to use
     # instead of jnp.einsum. For example, to enable quantization aware training.
     einsum_factory: types.EinsumFactoryT | None = None
+    quantization_provider: types.QuantizationProviderT | None = None
 
     def __post_init__(self):
       # Use hashable types for sequences.
@@ -468,4 +473,5 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
         projectable=True,
         axes_types=axes_types,
         einsum_factory=self.config.einsum_factory,
+        quantization_provider=self.config.quantization_provider,
     )
