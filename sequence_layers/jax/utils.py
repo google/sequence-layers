@@ -23,6 +23,7 @@ import re
 import typing
 from typing import Any, Callable, Protocol, Self, Sequence as TypingSequence, TypeVar
 
+import flax.core.scope
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -326,6 +327,9 @@ def step_by_step_dynamic(
     with_emits: bool = True,
     unroll: int = 1,
     stream_constants: bool = False,
+    variable_broadcast: flax.core.scope.CollectionFilter = True,
+    variable_carry: flax.core.scope.CollectionFilter = False,
+    remat: bool = False,
 ) -> tuple[types.Sequence, types.State, types.Emits]:
   """Executes a SequenceLayer timestep-by-timestep dynamically.
 
@@ -349,6 +353,11 @@ def step_by_step_dynamic(
       compile times.
     stream_constants: If True, stream Sequences present in constants at the same
       block size as x.
+    variable_broadcast: Variable collections to broadcast across scan steps,
+      passed to nn.scan.
+    variable_carry: Variable collections to carry across scan steps, passed to
+      nn.scan.
+    remat: Whether to remat the step function.
 
   Returns:
     The resulting sequence, final state, and emits stacked over time (if
@@ -405,9 +414,13 @@ def step_by_step_dynamic(
 
     return state, (output, emits)
 
+  if remat:
+    step_fn = nn.remat(step_fn)
+
   scan_fn = nn.scan(
       step_fn,
-      variable_broadcast=True,
+      variable_broadcast=variable_broadcast,
+      variable_carry=variable_carry,
       # Split all RNGs in our scope except for params (which when split during
       # initialization leads to different parameters on each iteration of the
       # loop and causes compilation errors).
