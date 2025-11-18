@@ -1458,6 +1458,7 @@ class Embedding(types.Stateless):
     embedding_sharding: types.Sharding | None = None
     # Optional name for the layer.
     name: str | None = None
+    embedding_param_name: str = 'embedding'
 
     def make(self) -> 'Embedding':
       return Embedding(self, name=self.name)
@@ -1466,7 +1467,7 @@ class Embedding(types.Stateless):
 
   def setup(self):
     self.embedding = self.param(
-        'embedding',
+        self.config.embedding_param_name,
         utils.shard_initializer(
             self.config.embedding_init, self.config.embedding_sharding
         ),
