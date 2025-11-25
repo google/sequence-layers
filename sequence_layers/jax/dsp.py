@@ -1584,6 +1584,9 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     # The non-negative length of the lookahead to apply. A length of zero is a
     # no-op.
     length: int
+    # If true, `layer` trims from the left and pads on the right with invalid
+    # timesteps to preserve the physical length of the input sequence.
+    preserve_length_in_layer: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -1653,7 +1656,12 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
   ) -> types.Sequence:
     if not self.config.length:
       return x
-    return x[:, self.config.length :]
+
+    x = x[:, self.config.length :]
+    if self.config.preserve_length_in_layer:
+      return x.pad_time(0, self.config.length, valid=False)
+    else:
+      return x
 
 
 class Window(types.PreservesShape, types.PreservesType, types.Stateless):
