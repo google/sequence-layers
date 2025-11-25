@@ -1366,6 +1366,43 @@ class EmbeddingTransposeTest(test_utils.SequenceLayerTest):
       embedding_transpose.get_output_shape(input_shape)
 
 
+class SnakeTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      ((2, 3, 5), False),
+      ((2, 3, 5), True),
+      ((2, 3, 5, 9), False),
+      ((2, 3, 5, 9), True),
+  )
+  def test_snake(self, shape, separate_beta: bool):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*shape)
+    l = simple.Snake.Config(
+        separate_beta=separate_beta, name='snake'
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(
+        l.get_output_shape_for_sequence(x),
+        x.channel_shape,
+    )
+    self.verify_contract(l, x, training=False)
+    variables = flax.core.meta.unbox(l.variables)
+    expected_params = {
+        'params': {
+            'alpha_log': jnp.zeros(x.channel_shape, dtype=jnp.float32),
+        }
+    }
+    if separate_beta:
+      expected_params['params']['beta_log'] = jnp.zeros(
+          x.channel_shape, dtype=jnp.float32
+      )
+    chex.assert_trees_all_equal_shapes_and_dtypes(
+        variables, expected_params
+    )
+
+
 class AffineTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
