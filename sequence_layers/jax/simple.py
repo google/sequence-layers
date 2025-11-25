@@ -81,6 +81,7 @@ __all__ = (
     'Scale',
     'Sigmoid',
     'Slice',
+    'Snake',
     'Softmax',
     'Softplus',
     'Squeeze',
@@ -913,6 +914,61 @@ class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
     values = jax.ad_checkpoint.checkpoint_name(
         values, self.config.checkpoint_name
     )
+    return values, mask
+
+
+class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
+  """The "snake" activation, i.e. x + 1/beta * sin^2(x*alpha) activation.
+
+  Originally proposed in: https://arxiv.org/abs/2006.08195
+
+  Follows the extension in BigVGAN: https://arxiv.org/abs/2206.04658
+  which uses a separate beta, models a parameter per channel dimension, and
+  learns the parameters in log scale.
+  """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config for Snake."""
+    separate_beta: bool
+    param_dtype: types.DType = jnp.float32
+    name: str | None = None
+
+    def make(self) -> 'Snake':
+      return Snake(self, name=self.name)
+
+  config: Config
+
+  @property
+  def mask_required(self):
+    return False
+
+  @nn.compact
+  def fn(
+      self,
+      values: types.ValuesT,
+      mask: types.MaskT,
+  ) -> tuple[types.ValuesT, types.MaskT]:
+    channel_shape = values.shape[2:]
+    alpha_log = self.param(
+        'alpha_log',
+        nn.initializers.zeros_init(),
+        channel_shape,
+        self.config.param_dtype,
+    )
+    alpha = jnp.exp(alpha_log)[jnp.newaxis, jnp.newaxis, ...]
+    if self.config.separate_beta:
+      beta_log = self.param(
+          'beta_log',
+          nn.initializers.zeros_init(),
+          channel_shape,
+          self.config.param_dtype,
+      )
+      beta = jnp.exp(beta_log)[jnp.newaxis, jnp.newaxis, ...]
+    else:
+      beta = alpha
+
+    values += jnp.square(jnp.sin(values * alpha)) / (beta + 1e-12)
     return values, mask
 
 
