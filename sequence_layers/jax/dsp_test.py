@@ -900,6 +900,20 @@ class LookaheadTest(test_utils.SequenceLayerTest, parameterized.TestCase):
     self.assertEqual(y.shape[1], 11 - length)
     self.assertEmpty(l.variables)
 
+  def test_lookahead_preserve_length_in_layer(self):
+    x = test_utils.random_sequence(2, 11, 3, 5)
+    l = (
+        dsp.Lookahead.Config(
+            length=2,
+            preserve_length_in_layer=True,
+            name='lookahead',
+        )
+        .make()
+        .bind({})
+    )
+    y = self.verify_contract(l, x, training=False)
+    self.assertEqual(y.shape[1], 11)
+
 
 class WindowTest(test_utils.SequenceLayerTest, parameterized.TestCase):
 
