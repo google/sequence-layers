@@ -32,6 +32,7 @@ class AxisType(enum.Enum):
   CHANNEL = 'CHANNEL'
   STACKED = 'STACKED'
 
+
 Partitioned = flax.core.meta.Partitioned
 
 
@@ -46,6 +47,7 @@ def with_meta(
   del kwargs
 
   names = names if names is not None else ()
+
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
     value = fn(*args, **kwargs)
