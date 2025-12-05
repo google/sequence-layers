@@ -27,6 +27,82 @@ from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 
 
+class L2NormalizeTest(test_utils.SequenceLayerTest):
+
+  def test_invalid_axis(self):
+    """Normalizing over the batch or time dimension is not allowed."""
+    key = jax.random.PRNGKey(1234)
+    l = normalization.L2Normalize.Config(axis=[-1, -2]).make()
+    x = test_utils.random_sequence(2, 3, 5)
+    with self.assertRaises(ValueError):
+      self.init_and_bind_layer(key, l, x)
+
+  @parameterized.parameters(
+      itertools.product(
+          (False, True),
+          [
+              ((2, 10, 3), [-1]),
+              ((2, 3, 5, 9), [-1]),
+              ((2, 3, 5, 9), [-2]),
+              ((2, 3, 5, 9), [-1, -2]),
+          ],
+      )
+  )
+  def test_l2_normalization(self, training, shape_axes):
+    key = jax.random.PRNGKey(1234)
+    shape, axes = shape_axes
+    epsilon = 1e-12
+    l = normalization.L2Normalize.Config(
+        axis=axes, epsilon=epsilon, name='l2_normalization'
+    ).make()
+    x = test_utils.random_sequence(*shape)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'l2_normalization')
+    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
+
+    y = self.verify_contract(l, x, training=training)
+    self.assertEmpty(flax.core.meta.unbox(l.variables))
+
+    # Verify the train batch is normalized correctly.
+    reduce_axes = tuple(
+        a for a in range(len(shape)) if a in axes or a - len(shape) in axes
+    )
+    x_ss = np.sum(np.square(x.values), axis=reduce_axes, keepdims=True)
+
+    y_expected = types.Sequence(
+        x.values / np.sqrt(x_ss + epsilon), x.mask
+    ).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
+
+  @parameterized.product(
+      test_utils.standard_dtype_configs(input=True),
+      config=(
+          dict(training=True),
+          dict(epsilon=1.0),
+      ),
+  )
+  def test_l2_normalization_dtypes(self, input_dtype, config):
+    key = jax.random.PRNGKey(1234)
+    shape, axes = (2, 3, 4, 8), [-1, -2]
+    training = config.pop('training', False)
+    layer = normalization.L2Normalize.Config(axis=axes, **config).make()
+    inputs = test_utils.random_sequence(*shape, dtype=input_dtype)
+    layer = self.init_and_bind_layer(key, layer, inputs)
+    unboxed_variables = flax.core.meta.unbox(layer.variables)
+
+    self.assertEmpty(unboxed_variables)
+
+    self.verify_contract(
+        layer,
+        inputs,
+        training=training,
+        **test_utils.get_grad_tols(layer, inputs, jnp.float32, input_dtype),
+    )
+
+
 class LayerNormalizationTest(test_utils.SequenceLayerTest):
 
   def test_invalid_axis(self):

@@ -30,6 +30,7 @@ __all__ = (
     # go/keep-sorted start
     'BatchNormalization',
     'GroupNormalization',
+    'L2Normalize',
     'L2WeightNormalization',
     'LayerNormalization',
     'RMSNormalization',
@@ -128,6 +129,59 @@ def _zero_gradient_helper(
     return values, custom_gradient
 
   return forward_fn_custom_gradient(*args)
+
+
+class L2Normalize(types.PreservesType, types.StatelessPointwise):
+  """L2 normalization over the specified channel axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config for L2Normalize."""
+
+    axis: int | types.ShapeLike = -1
+    epsilon: float = 1e-12
+    name: str | None = None
+
+    def __post_init__(self):
+      # Use hashable types for sequences.
+      if not isinstance(self.axis, int):
+        object.__setattr__(self, 'axis', tuple(self.axis))
+
+    def make(self) -> 'L2Normalize':
+      return L2Normalize(self, name=self.name)
+
+  config: Config
+
+  @nn.compact
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    reduction_axes = _validate_and_normalize_axes(self.config.axis, x.shape)
+
+    @utils.maybe_in_at_least_fp32(True)
+    def reductions(values: jax.Array) -> jax.Array:
+      def forward_fn(values: jax.Array) -> tuple[jt.AnyPyTree, jt.AnyPyTree]:
+        squared_sum = jnp.sum(
+            jnp.square(values), axis=reduction_axes, keepdims=True
+        )
+        normed = values * jax.lax.rsqrt(squared_sum + self.config.epsilon)
+
+        # Guard against blowup from all-zero inputs.
+        should_zero_gradient = squared_sum == 0
+
+        return normed, (should_zero_gradient,)
+
+      return _zero_gradient_helper(forward_fn, values)
+
+    y = reductions(x.values)
+
+    # Normalization leaves padded regions unmasked.
+    return types.Sequence(y, x.mask)
 
 
 class LayerNormalization(types.PreservesType, types.StatelessPointwise):
