@@ -472,7 +472,7 @@ class ReshapeTest(test_util.SequenceLayerTest, parameterized.TestCase):
     x, y = self.evaluate([x, y])
     self.assertAllEqual(
         y.values,
-        np.reshape(x.values, newshape=shape[:2] + expected_output_shape),
+        np.reshape(x.values, shape[:2] + expected_output_shape),
     )
 
   @parameterized.parameters(
