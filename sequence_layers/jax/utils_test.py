@@ -23,10 +23,19 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import attention
 from sequence_layers.jax import meta
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+
+
+def _array_to_spec(arr: jax.Array) -> types.ShapeDType:
+  return types.ShapeDType(arr.shape, dtype=arr.dtype)
+
+
+def _seq_to_spec(seq: types.Sequence) -> types.Sequence:
+  return types.Sequence(_array_to_spec(seq.values), _array_to_spec(seq.mask))
 
 
 class FlaxEinsumDenseTest(test_utils.SequenceLayerTest):
@@ -1761,6 +1770,94 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
     self.assertEqual(
         utils.receptive_field_per_step_of_serial_layers(layers),
         expected_rf_dict,
+    )
+
+  def test_layer_with_emits_spec(self):
+    batch_size = 2
+    seq_len = 6
+    channel = 16
+    num_heads = 4
+    units_per_head = 3
+    max_past_horizon = 7
+    seq = types.Sequence(
+        values=jnp.zeros((batch_size, seq_len, channel)),
+        mask=jnp.ones((batch_size, seq_len), dtype=types.MASK_DTYPE),
+    )
+    layer = attention.DotProductSelfAttention.Config(
+        units_per_head=units_per_head,
+        num_heads=num_heads,
+        max_past_horizon=max_past_horizon,
+    ).make()
+
+    layer = layer.bind(
+        layer.init(
+            jax.random.PRNGKey(0),
+            seq,
+            training=False,
+        )
+    )
+    values_spec = types.ShapeDType(
+        shape=(batch_size, seq_len, channel), dtype=jnp.float32
+    )
+
+    output, emits = layer.layer_with_emits(seq, training=False)
+    output_spec, emits_spec = utils.layer_with_emits_spec(
+        layer, values_spec, training=False
+    )
+
+    self.assertEqual(_seq_to_spec(output), output_spec)
+    self.assertEqual(
+        _seq_to_spec(emits.probabilities), emits_spec.probabilities
+    )
+
+  def test_step_with_emits_spec(self):
+    batch_size = 2
+    seq_len = 6
+    channel = 16
+    num_heads = 4
+    units_per_head = 3
+    max_past_horizon = 7
+    seq = types.Sequence(
+        values=jnp.zeros((batch_size, seq_len, channel)),
+        mask=jnp.ones((batch_size, seq_len), dtype=types.MASK_DTYPE),
+    )
+    layer = attention.DotProductSelfAttention.Config(
+        units_per_head=units_per_head,
+        num_heads=num_heads,
+        max_past_horizon=max_past_horizon,
+    ).make()
+
+    layer = layer.bind(
+        layer.init(
+            jax.random.PRNGKey(0),
+            seq,
+            training=False,
+        )
+    )
+    values_spec = types.ShapeDType(
+        shape=(batch_size, seq_len, channel), dtype=jnp.float32
+    )
+    initial_state = layer.get_initial_state(
+        batch_size,
+        types.ShapeDType(shape=(channel,), dtype=jnp.float32),
+        training=False,
+    )
+
+    output, state, emits = layer.step_with_emits(
+        seq, initial_state, training=False
+    )
+    output_spec, state_spec, emits_spec = utils.step_with_emits_spec(
+        layer, values_spec, initial_state, training=False
+    )
+
+    self.assertEqual(_seq_to_spec(output), output_spec)
+    for s, s_spec in zip(state, state_spec):
+      if isinstance(s, tuple) and not s:
+        self.assertEqual(s, s_spec)
+      else:
+        self.assertEqual(_array_to_spec(s), s_spec)
+    self.assertEqual(
+        _seq_to_spec(emits.probabilities), emits_spec.probabilities
     )
 
 
