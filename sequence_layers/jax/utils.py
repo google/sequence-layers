@@ -1059,7 +1059,7 @@ def sequence_split(
     indices_or_sections: int | TypingSequence[int],
     axis: int = 0,
 ) -> list[types.SequenceSelf]:
-  """Splits an sl.Sequence on the specified axes, preserving sequence type."""
+  """Splits an Sequence on the specified axes, preserving sequence type."""
 
   if axis < 0 and axis >= -seq.ndim:
     axis += seq.ndim
@@ -2203,3 +2203,42 @@ def receptive_field_per_step_of_serial_layers(
         rf_per_step, rf_per_step_i, output_ratio_i
     )
   return rf_per_step
+
+
+def layer_with_emits_spec(
+    layer: types.SequenceLayer,
+    values_spec: types.ShapeDType,
+    *,
+    training: bool,
+    constants: types.Constants | None = None,
+) -> tuple[types.Sequence, types.Emits]:
+  """Returns the output spec layer_with_emits call of a SequenceLayer."""
+  x_spec = types.Sequence(
+      values_spec,
+      types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
+  )
+  fn = functools.partial(
+      layer.layer_with_emits, training=training, constants=constants
+  )
+  output, emits = jax.eval_shape(fn, x_spec)
+  return output, emits
+
+
+def step_with_emits_spec(
+    layer: types.SequenceLayer,
+    values_spec: types.ShapeDType,
+    state: types.State,
+    *,
+    training: bool,
+    constants: types.Constants | None = None,
+) -> tuple[types.Sequence, types.State, types.Emits]:
+  """Returns the output spec step_with_emits call of a SequenceLayer."""
+  x_spec = types.Sequence(
+      values_spec,
+      types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
+  )
+  fn = functools.partial(
+      layer.step_with_emits, training=training, constants=constants
+  )
+  output, state, emits = jax.eval_shape(fn, x_spec, state)
+  return output, state, emits
