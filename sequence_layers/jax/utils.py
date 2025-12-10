@@ -1722,13 +1722,23 @@ def batch_where(
   """A jnp.where-like operation switching on the outermost batch dimension."""
 
   def where_a(a: jax.Array, b: jax.Array) -> jax.Array:
-    assert a.shape == b.shape, (a.shape, b.shape)
-    assert a.shape[:1] == cond.shape
+    if a.shape != b.shape:
+      raise ValueError(f'{a.shape=} != {b.shape=}')
+    if a.shape[:1] != cond.shape:
+      raise ValueError(
+          f'Batch dimension of {a.shape=} and {cond.shape=} must match.'
+      )
 
     c = cond.reshape(cond.shape + (1,) * (a.ndim - 1))
     return jnp.where(c, a, b)
 
-  return jax.tree.map(where_a, a, b)
+  try:
+    return jax.tree.map(where_a, a, b)
+  except ValueError as e:
+    cond = pformat_tree_shapes_types(cond)
+    a = pformat_tree_shapes_types(a)
+    b = pformat_tree_shapes_types(b)
+    raise ValueError(f'batch_where failed with {cond=} {a=} {b=}') from e
 
 
 def split_dimension(
