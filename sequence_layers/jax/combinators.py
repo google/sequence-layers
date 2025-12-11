@@ -1580,6 +1580,9 @@ class CheckpointGradient(WrapperMixin, types.Emitting):
     # https://jax.readthedocs.io/en/latest/notebooks/autodiff_remat.html
     # TODO(rryan): Do we need a layer vs. step policy?
     policy: Callable[..., bool] | None = None
+    # Whether to share the scope of the wrapped layer. This is useful to avoid
+    # representing the CheckpointGradient layer in the parameter tree.
+    share_scope: bool = False
     name: str | None = None
 
     def make(self) -> 'CheckpointGradient':
@@ -1589,6 +1592,8 @@ class CheckpointGradient(WrapperMixin, types.Emitting):
 
   def setup(self) -> None:
     self.child_layer = self.config.layer.make()
+    if self.config.share_scope:
+      nn.share_scope(self, self.child_layer)
 
   def layer(
       self,
