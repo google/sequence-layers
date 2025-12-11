@@ -2051,6 +2051,37 @@ class CheckpointGradientTest(test_utils.SequenceLayerTest):
     )
     # TODO(rryan): Test that the checkpoint policy was actually used.
 
+  def test_share_scope(self):
+    key = jax.random.PRNGKey(1234)
+    l = combinators.CheckpointGradient.Config(
+        convolution.Conv1D.Config(
+            7,
+            kernel_size=5,
+            strides=2,
+            padding='reverse_causal_valid',
+            name='conv',
+        ),
+        share_scope=True,
+    ).make()
+    x = test_utils.random_sequence(2, 3, 5)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.input_latency, 4)
+    self.assertEqual(l.output_latency, 2)
+    self.assertEqual(l.block_size, 2)
+    self.assertEqual(l.output_ratio, 1 / 2)
+
+    chex.assert_trees_all_equal_shapes_and_dtypes(
+        flax.core.meta.unbox(l.variables),
+        {
+            'params': {
+                'bias': jnp.zeros((7,)),
+                'kernel': jnp.zeros((5, 5, 7)),
+            }
+        },
+    )
+
 
 class ParallelChannelsTest(
     test_utils.SequenceLayerTest, parameterized.TestCase
