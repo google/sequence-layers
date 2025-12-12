@@ -1288,6 +1288,7 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    expected_constant: str = 'test'
     name: str | None = None
 
     def make(self) -> 'AssertConstantsLayer':
@@ -1303,8 +1304,8 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.State:
-    if constants is None or 'test' not in constants:
-      raise ValueError('constant not present')
+    if constants is None or self.config.expected_constant not in constants:
+      raise ValueError(f'{self.config.expected_constant=} not present')
     return super().get_initial_state(
         batch_size, input_spec, training=training, constants=constants
     )
@@ -1315,8 +1316,8 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
-    if constants is None or 'test' not in constants:
-      raise ValueError('constant not present')
+    if constants is None or self.config.expected_constant not in constants:
+      raise ValueError(f'{self.config.expected_constant=} not present')
     return super().get_output_shape(input_shape, constants=constants)
 
   def layer(
@@ -1327,8 +1328,8 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       constants: types.Constants | None = None,
   ) -> types.Sequence:
     del training
-    if constants is None or 'test' not in constants:
-      raise ValueError('constant not present')
+    if constants is None or self.config.expected_constant not in constants:
+      raise ValueError(f'{self.config.expected_constant=} not present')
     return x
 
 
