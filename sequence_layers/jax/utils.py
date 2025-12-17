@@ -2227,10 +2227,16 @@ def layer_with_emits_spec(
       values_spec,
       types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
   )
-  fn = functools.partial(
-      layer.layer_with_emits, training=training, constants=constants
-  )
-  output, emits = jax.eval_shape(fn, x_spec)
+  def layer_fn(
+      layer: types.SequenceLayer,
+      x: types.Sequence,
+      constants: types.Constants,
+  ):
+    return layer.layer_with_emits(x, training=training, constants=constants)
+
+  cloned = layer.clone().bind(layer.variables, mutable=True)
+  layer_fn = functools.partial(nn.jit(layer_fn), cloned)
+  output, emits = jax.eval_shape(layer_fn, x_spec, constants)
   return output, emits
 
 
@@ -2247,8 +2253,17 @@ def step_with_emits_spec(
       values_spec,
       types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
   )
-  fn = functools.partial(
-      layer.step_with_emits, training=training, constants=constants
-  )
-  output, state, emits = jax.eval_shape(fn, x_spec, state)
-  return output, state, emits
+
+  def step_fn(
+      layer: types.SequenceLayer,
+      x: types.Sequence,
+      state: types.State,
+      constants: types.Constants,
+  ):
+    return layer.step_with_emits(
+        x, state, training=training, constants=constants
+    )
+
+  cloned = layer.clone().bind(layer.variables, mutable=True)
+  step_fn = functools.partial(nn.jit(step_fn), cloned)
+  return jax.eval_shape(step_fn, x_spec, state, constants)
