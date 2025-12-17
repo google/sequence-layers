@@ -1036,13 +1036,23 @@ class Repeat(types.Emitting):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    """Configuration for Repeat."""
     layer: types.SequenceLayerConfig
     num_repeats: int
     remat: bool = False
+    # Whether to prevent common subexpression elimination (CSE). Preventing CSE
+    # comes with a potentially high cost performance-wise, but is true by
+    # default since it can prevent the intended behavior of gradient
+    # checkpointing.
+    prevent_cse: bool = False
+    # JAX checkpoint policy. By default, recalculates everything.
+    # https://jax.readthedocs.io/en/latest/notebooks/autodiff_remat.html
+    policy: Callable[..., bool] | None = None
     # Whether to unroll the repeat layer when running layer-wise.
     unroll_layer: bool = False
     # Whether to unroll the repeat layer when running step-wise.
     unroll_step: bool = False
+    # An optional name for the layer.
     name: str | None = None
 
     def make(self) -> 'Repeat':
@@ -1293,8 +1303,11 @@ class Repeat(types.Emitting):
       return scan_carry_output, scan_output
 
     if self.config.remat:
-      # TODO(rryan): Support customization (prevent_cse, policy, etc.).
-      scan_fn = nn.remat(scan_fn, prevent_cse=False)
+      scan_fn = nn.remat(
+          scan_fn,
+          prevent_cse=self.config.prevent_cse,
+          policy=self.config.policy,
+      )
 
     metadata_params = {
         # For params we replicate along this scan-over-layers axis.
@@ -1491,7 +1504,11 @@ class Repeat(types.Emitting):
       return scan_carry_output, scan_output
 
     if self.config.remat:
-      scan_fn = nn.remat(scan_fn)
+      scan_fn = nn.remat(
+          scan_fn,
+          prevent_cse=self.config.prevent_cse,
+          policy=self.config.policy,
+      )
 
     metadata_params = {
         # For params we replicate along this scan-over-layers axis.
