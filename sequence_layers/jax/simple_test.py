@@ -1025,6 +1025,28 @@ class EmitTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(y, emits)
 
 
+class NamedEmitTest(test_utils.SequenceLayerTest):
+
+  def test_emit(self):
+    key = jax.random.PRNGKey(1234)
+    l = simple.NamedEmit.Config(emit_name='test_emit', name='named_emit').make()
+    x = test_utils.random_sequence(2, 3, 5)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), (5,))
+    self.assertEqual(l.name, 'named_emit')
+    self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    y, emits = l.layer_with_emits(x, training=False)
+    self.assertSequencesEqual(y, x)
+    self.assertIsInstance(emits, dict)
+    self.assertIn('test_emit', emits)
+    self.assertSequencesEqual(emits['test_emit'], x)
+
+
 class OneHotTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(((1, 2, 3),), ((2, 3, 5, 9),), ((2, 3, 5, 9, 2),))
