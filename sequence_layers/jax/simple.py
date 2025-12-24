@@ -72,6 +72,7 @@ __all__ = (
     'Minimum',
     'Mod',
     'MoveAxis',
+    'NamedEmit',
     'OneHot',
     'OptimizationBarrier',
     'PRelu',
@@ -930,6 +931,7 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
     """Config for Snake."""
+
     separate_beta: bool
     param_dtype: types.DType = jnp.float32
     name: str | None = None
@@ -2127,6 +2129,32 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Sequence]:
     return x, x
+
+
+class NamedEmit(
+    types.PreservesType, types.PreservesShape, types.StatelessEmitting
+):
+  """An identity layer that emits its input with a named output."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    emit_name: str
+    name: str | None = None
+
+    def make(self) -> 'NamedEmit':
+      return NamedEmit(self, name=self.name)
+
+  config: Config
+
+  @types.check_layer_with_emits
+  def layer_with_emits(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.Emits]:
+    return x, {self.config.emit_name: x}
 
 
 class Dropout(types.PreservesType, types.StatelessPointwise):
