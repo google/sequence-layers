@@ -698,5 +698,403 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         chex.assert_trees_all_equal(y.mask, mask_golden)
 
 
+class Pooling3DTest(test_utils.SequenceLayerTest):
+
+  @parameterized.product(
+      pool_type_kwargs=(
+          ('min', {}),
+          ('max', {}),
+          ('average', {'masked_average': False}),
+          ('average', {'masked_average': True}),
+      ),
+      params=[
+          # 1x1 conv.
+          (1, 1, 1),
+          # even pool_size with smaller, equal and larger strides.
+          (2, 1, 1),
+          (2, 2, 1),
+          (2, 3, 1),
+          # odd pool_size with smaller, equal and larger strides.
+          (3, 2, 1),
+          (3, 3, 1),
+          (3, 4, 1),
+          # pool_size smaller, equal and larger than even dilation_rate.
+          (1, 1, 2),
+          (2, 1, 2),
+          (3, 1, 2),
+          # pool_size smaller, equal and larger than odd dilation_rate.
+          (1, 1, 3),
+          (2, 1, 3),
+          (3, 1, 3),
+      ],
+      time_padding=[
+          'same',
+          'valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
+  )
+  def test_pooling3d(
+      self,
+      pool_type_kwargs,
+      params,
+      time_padding,
+  ):
+    pool_type, kwargs = pool_type_kwargs
+    self._test_pooling3d(
+        pool_type,
+        params,
+        (9, 9),
+        time_padding,
+        'same',
+        jnp.float32,
+        **kwargs,
+    )
+
+  @parameterized.product(
+      pool_type_kwargs=(
+          ('min', {}),
+          ('max', {}),
+          ('average', {'masked_average': False}),
+          ('average', {'masked_average': True}),
+      ),
+      spatial_padding=[
+          'same',
+          'valid',
+          'reverse_causal_valid',
+          'causal',
+          'reverse_causal',
+          'semicausal',
+      ],
+  )
+  def test_spatial_padding(self, pool_type_kwargs, spatial_padding):
+    pool_type, kwargs = pool_type_kwargs
+    return self._test_pooling3d(
+        pool_type,
+        (3, 2, 1),
+        (9, 9),
+        'reverse_causal',
+        spatial_padding,
+        jnp.float32,
+        **kwargs,
+    )
+
+  @parameterized.product(
+      pool_type_kwargs=(
+          ('min', {}),
+          ('max', {}),
+          ('average', {'masked_average': False}),
+          ('average', {'masked_average': True}),
+      ),
+      dtype=(jnp.float32, jnp.int32),
+  )
+  def test_dtypes(self, pool_type_kwargs, dtype):
+    jax.config.update('jax_traceback_filtering', 'off')
+    pool_type, kwargs = pool_type_kwargs
+    return self._test_pooling3d(
+        pool_type,
+        (3, 2, 1),
+        (9, 9),
+        'reverse_causal',
+        'reverse_causal',
+        dtype,
+        **kwargs,
+    )
+
+  @parameterized.product(
+      pool_type_kwargs=(
+          ('min', {}),
+          ('max', {}),
+          ('average', {'masked_average': False}),
+          ('average', {'masked_average': True}),
+      ),
+      channel_shape=(
+          (9, 9),
+          (9, 9, 5),
+          (9, 9, 5, 3),
+      ),
+  )
+  def test_channel_shapes(self, pool_type_kwargs, channel_shape):
+    pool_type, kwargs = pool_type_kwargs
+    return self._test_pooling3d(
+        pool_type,
+        (3, 2, 1),
+        channel_shape,
+        'reverse_causal',
+        'reverse_causal',
+        jnp.float32,
+        **kwargs,
+    )
+
+  @parameterized.product(
+      masked_average=[True, False],
+  )
+  def test_masked_average(self, masked_average):
+    key = jax.random.PRNGKey(1234)
+    pool_size, stride, dilation_rate = (3, 2, 2), (3, 2, 2), (1, 1, 1)
+    time_padding = 'reverse_causal'
+    spatial_padding = 'reverse_causal'
+    l = pooling.AveragePooling3D.Config(
+        pool_size=pool_size,
+        strides=stride,
+        dilation_rate=dilation_rate,
+        time_padding=time_padding,
+        spatial_padding=(spatial_padding, spatial_padding),
+        name='pool_3d',
+        masked_average=masked_average,
+    ).make()
+
+    x_val_2d = jnp.array([
+        [[1, 2], [2, 3], [5, 6], [7, 8], [9, 3], [4, 2]],
+        [[2, 3], [5, 6], [7, 8], [9, 3], [3, 1], [2, 7]],
+        [[5, 2], [7, 3], [0, 3], [3, 1], [2, 6], [1, 2]],
+        [[7, 3], [0, 3], [3, 1], [2, 6], [1, 2], [3, 4]],
+        [[0, 3], [3, 1], [2, 6], [1, 2], [3, 4], [5, 7]],
+    ]).astype(jnp.float32)
+    # x_val_2d shape: (5, 6, 2).
+    # Expand to (5, 6, 2, 2).
+    x_val_3d = jnp.stack([x_val_2d, x_val_2d], axis=-1)
+
+    x_mask = jnp.array([
+        [False, False, False, False, False, False],
+        [True, True, True, False, False, False],
+        [True, True, True, True, False, False],
+        [True, True, True, True, True, False],
+        [True, True, True, True, True, True],
+    ])
+
+    x = types.Sequence(x_val_3d, x_mask)
+    l = self.init_and_bind_layer(key, l, x)
+    y = l(x, training=False)
+
+    if masked_average:
+      expected_y_values_2d = jnp.array([
+          [[0.0], [0.0]],
+          [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
+          [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 2.0]],
+          [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 4.0]],
+          [[(0 + 3 + 2 + 3 + 1 + 6) / 6.0], [(1 + 3 + 5 + 2 + 4 + 7) / 6.0]],
+      ])
+    else:
+      expected_y_values_2d = jnp.array([
+          [[0.0], [0.0]],
+          [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
+          [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 6.0]],
+          [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 6.0]],
+          [[(0 + 3 + 2 + 3 + 1 + 6) / 6.0], [(1 + 3 + 5 + 2 + 4 + 7) / 6.0]],
+      ])
+    # expected_y_values_2d shape: (5, 2, 1).
+    # expected_y_values_3d shape: (5, 2, 1, 1).
+    expected_y_values = jnp.expand_dims(expected_y_values_2d, axis=-1)
+
+    expected_y_mask = jnp.array([
+        [False, False],
+        [True, False],
+        [True, True],
+        [True, True],
+        [True, True],
+    ])
+    expected_y = types.Sequence(expected_y_values, expected_y_mask)
+    self.assertSequencesEqual(y, expected_y)
+
+  def _test_pooling3d(
+      self,
+      pool_type,
+      params,
+      channel_shape,
+      time_padding,
+      spatial_padding,
+      dtype,
+      **kwargs,
+  ):
+    key = jax.random.PRNGKey(1234)
+    pool_size, stride, dilation_rate = params
+    explicit_time_padding = utils.convolution_explicit_padding(
+        time_padding, pool_size, stride, dilation_rate
+    )
+    explicit_spatial_padding = utils.convolution_explicit_padding(
+        spatial_padding, pool_size, stride, dilation_rate
+    )
+    match pool_type:
+      case 'min':
+        l = pooling.MinPooling3D.Config(
+            pool_size=pool_size,
+            strides=stride,
+            dilation_rate=dilation_rate,
+            time_padding=time_padding,
+            spatial_padding=(spatial_padding, spatial_padding),
+            name='pool_3d',
+            **kwargs,
+        ).make()
+        pad_value = np.inf
+        golden_fn = lambda x: nn.pooling.min_pool(
+            x.values,
+            window_shape=(pool_size, pool_size, pool_size),
+            strides=(stride, stride, stride),
+            padding=(
+                explicit_time_padding,
+                explicit_spatial_padding,
+                explicit_spatial_padding,
+            ),
+        )
+      case 'max':
+        l = pooling.MaxPooling3D.Config(
+            pool_size=pool_size,
+            strides=stride,
+            dilation_rate=dilation_rate,
+            time_padding=time_padding,
+            spatial_padding=(spatial_padding, spatial_padding),
+            name='pool_3d',
+            **kwargs,
+        ).make()
+        pad_value = -np.inf
+        golden_fn = lambda x: nn.pooling.max_pool(
+            x.values,
+            window_shape=(pool_size, pool_size, pool_size),
+            strides=(stride, stride, stride),
+            padding=(
+                explicit_time_padding,
+                explicit_spatial_padding,
+                explicit_spatial_padding,
+            ),
+        )
+      case 'average':
+        l = pooling.AveragePooling3D.Config(
+            pool_size=pool_size,
+            strides=stride,
+            dilation_rate=dilation_rate,
+            time_padding=time_padding,
+            spatial_padding=(spatial_padding, spatial_padding),
+            name='pool_3d',
+            **kwargs,
+        ).make()
+        pad_value = 0
+        if kwargs.get('masked_average', False):
+          golden_fn = lambda x: (
+              nn.pooling.avg_pool(
+                  x.values,
+                  window_shape=(pool_size, pool_size, pool_size),
+                  strides=(stride, stride, stride),
+                  padding=(
+                      explicit_time_padding,
+                      explicit_spatial_padding,
+                      explicit_spatial_padding,
+                  ),
+              )
+              / jnp.expand_dims(
+                  nn.pooling.avg_pool(
+                      x.mask.astype(x.values.dtype)[..., jnp.newaxis],
+                      window_shape=(pool_size,),
+                      strides=(stride,),
+                      padding=(explicit_time_padding,),
+                  ),
+                  range(3, x.values.ndim),
+              )
+          )
+        else:
+          golden_fn = lambda x: nn.pooling.avg_pool(
+              x.values,
+              window_shape=(pool_size, pool_size, pool_size),
+              strides=(stride, stride, stride),
+              padding=(
+                  explicit_time_padding,
+                  explicit_spatial_padding,
+                  explicit_spatial_padding,
+              ),
+          )
+      case _:
+        raise NotImplementedError()
+    self.assertEqual(l.block_size, stride)
+    self.assertEqual(1 / l.output_ratio, stride)
+    self.assertEqual(l.name, 'pool_3d')
+    self.assertEqual(
+        l.supports_step,
+        time_padding
+        in (
+            'reverse_causal_valid',
+            'causal',
+            'reverse_causal',
+            'semicausal',
+        ),
+    )
+
+    effective_pool_size = utils.convolution_effective_kernel_size(
+        pool_size, dilation_rate
+    )
+    expected_input_latency = (
+        effective_pool_size - 1
+        if time_padding in ('reverse_causal_valid', 'reverse_causal')
+        else 0
+    )
+    self.assertEqual(l.input_latency, expected_input_latency)
+    self.assertEqual(l.output_latency, expected_input_latency // stride)
+
+    batch_size = 2
+
+    x = test_utils.random_sequence(batch_size, 1, *channel_shape, dtype=dtype)
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertEmpty(l.variables)
+
+    output_spec = l.get_output_spec(x.channel_spec)
+    self.assertEqual(output_spec.dtype, dtype)
+
+    spatial_output_1 = utils.convolution_padding_output_size(
+        x.channel_shape[0], spatial_padding, pool_size, stride, dilation_rate
+    )
+    spatial_output_2 = utils.convolution_padding_output_size(
+        x.channel_shape[1], spatial_padding, pool_size, stride, dilation_rate
+    )
+    self.assertEqual(
+        l.get_output_shape_for_sequence(x),
+        (spatial_output_1, spatial_output_2) + x.channel_shape[2:],
+    )
+
+    for time in range(20 * l.block_size - 1, 20 * l.block_size + 2):
+      x = test_utils.random_sequence(
+          batch_size, time, *channel_shape, dtype=dtype
+      )
+      y = self.verify_contract(
+          l,
+          x,
+          training=False,
+          # JAX does not support reduce_window gradients with dilation_rate > 1.
+          # Don't compute gradients for integer types.
+          test_gradients=dilation_rate == 1 and dtype == jnp.float32,
+          test_receptive_field=dilation_rate == 1 and dtype == jnp.float32,
+      )
+
+      # Only test for flax compatibility on inputs that flax supports.
+      if (
+          len(channel_shape) == 3
+          and dtype == jnp.float32
+          and dilation_rate == 1
+      ):
+
+        # Flax does not have a concept of padding, so replace padded regions
+        # with the pad value manually.
+        x = x.mask_invalid(pad_value)
+
+        values_golden = golden_fn(x)
+
+        mask_golden = convolution.compute_conv_mask(
+            x.mask,
+            pool_size,
+            stride,
+            dilation_rate,
+            time_padding,
+            is_step=False,
+        )
+
+        # Apply masking.
+        values_golden = (
+            types.Sequence(values_golden, mask_golden).mask_invalid().values
+        )
+
+        chex.assert_trees_all_close(y.values, values_golden, atol=1e-5)
+        chex.assert_trees_all_equal(y.mask, mask_golden)
+
+
 if __name__ == '__main__':
   test_utils.main()
