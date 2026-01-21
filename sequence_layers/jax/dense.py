@@ -67,6 +67,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
     einsum_factory: types.EinsumFactoryT | None = None
     # Optional name for the layer.
     name: str | None = None
+    projectable: bool = True
     quantization_provider: types.QuantizationProviderT | None = None
 
     def make(self) -> 'Dense':
@@ -131,7 +132,7 @@ class Dense(types.Stateless, utils.EinsumCommon):
         kernel_sharding=self.config.kernel_sharding,
         bias_init=self.config.bias_init,
         bias_sharding=self.config.bias_sharding,
-        projectable=True,
+        projectable=self.config.projectable,
         axes_types=(meta.AxisType.FANIN, None),
         einsum_factory=self.config.einsum_factory,
         quantization_provider=self.config.quantization_provider,
