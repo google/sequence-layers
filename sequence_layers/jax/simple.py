@@ -68,7 +68,10 @@ __all__ = (
     'Log',
     'Logging',
     'MaskInvalid',
+    'Max',
     'Maximum',
+    'Mean',
+    'Min',
     'Minimum',
     'Mod',
     'MoveAxis',
@@ -86,6 +89,7 @@ __all__ = (
     'Softmax',
     'Softplus',
     'Squeeze',
+    'Sum',
     'SwapAxes',
     'Swish',
     'Tanh',
@@ -454,6 +458,149 @@ class Minimum(StatelessPointwiseBroadcasting):
     self._validate(parameter, x.channel_shape)
     assert isinstance(self.config.minimum, HashableArray)
     return x.apply_values(lambda v: jnp.minimum(v, parameter.astype(v.dtype)))
+
+
+class _ReduceChannels(
+    types.PreservesType, types.Stateless, metaclass=abc.ABCMeta
+):
+  """Abstract base class for reductions over the channels dimension."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Config for _Reduce."""
+
+    # The axis or axes to reduce over. Negative axis values are supported.
+    axis: int | TypingSequence[int] | None = -1
+    keepdims: bool = False
+    name: str | None = None
+
+    def __post_init__(self):
+      # Use hashable types for sequences.
+      if self.axis is None:
+        pass
+      elif isinstance(self.axis, int):
+        object.__setattr__(self, 'axis', (self.axis,))
+      else:
+        object.__setattr__(self, 'axis', tuple(self.axis))
+
+    def make(self) -> '_ReduceChannels':
+      raise NotImplementedError()
+
+  config: Config
+
+  @property
+  @abc.abstractmethod
+  def _reduce_fn(self) -> Callable[..., jax.Array]:
+    ...
+
+  @property
+  def supports_step(self) -> bool:
+    return True
+
+  @nn.nowrap
+  def _validate_axis(self, input_shape: types.ShapeLike) -> tuple[int, ...]:
+    """Validates the axis to reduce over."""
+    rank = len(input_shape) + 2
+    axis = self.config.axis
+    if axis is not None:
+      axis = [a + rank if a < 0 else a for a in axis]
+    else:
+      axis = list(range(2, rank))
+    for a in axis:
+      if a < 2 or a >= rank:
+        raise ValueError(
+            f'Reduction axis {a} is invalid for input shape {input_shape}.'
+            ' The batch and time dimensions cannot be reduced over.'
+        )
+    return tuple(axis)
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    del constants
+    axis = self._validate_axis(input_shape)
+    if self.config.keepdims:
+      return tuple(1 if i + 2 in axis else d for i, d in enumerate(input_shape))
+    else:
+      return tuple(d for i, d in enumerate(input_shape) if i + 2 not in axis)
+
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    del training
+    axis = self._validate_axis(x.channel_shape)
+    return x.apply_values_masked(
+        self._reduce_fn, axis=axis, keepdims=self.config.keepdims
+    )
+
+
+class Mean(_ReduceChannels):
+  """Computes the mean over the specified axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_ReduceChannels.Config):
+    """Config for Mean."""
+
+    def make(self) -> 'Mean':
+      return Mean(self, name=self.name)
+
+  @property
+  def _reduce_fn(self) -> Callable[..., jax.Array]:
+    return jnp.mean
+
+
+class Min(_ReduceChannels):
+  """Computes the minimum over the specified axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_ReduceChannels.Config):
+    """Config for Min."""
+
+    def make(self) -> 'Min':
+      return Min(self, name=self.name)
+
+  @property
+  def _reduce_fn(self) -> Callable[..., jax.Array]:
+    return jnp.min
+
+
+class Max(_ReduceChannels):
+  """Computes the maximum over the specified axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_ReduceChannels.Config):
+    """Config for Max."""
+
+    def make(self) -> 'Max':
+      return Max(self, name=self.name)
+
+  @property
+  def _reduce_fn(self) -> Callable[..., jax.Array]:
+    return jnp.max
+
+
+class Sum(_ReduceChannels):
+  """Computes the sum over the specified axes."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_ReduceChannels.Config):
+    """Config for Sum."""
+
+    def make(self) -> 'Sum':
+      return Sum(self, name=self.name)
+
+  @property
+  def _reduce_fn(self) -> Callable[..., jax.Array]:
+    return jnp.sum
 
 
 class Abs(types.StatelessPointwiseFunctor):
