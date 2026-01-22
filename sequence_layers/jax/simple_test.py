@@ -2009,6 +2009,86 @@ class MaskInvalidTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(x.mask_invalid(), y)
 
 
+class ReduceTest(test_utils.SequenceLayerTest):
+
+  @parameterized.product(
+      [
+          {'layer_config': simple.Mean.Config()},
+          {'layer_config': simple.Min.Config()},
+          {'layer_config': simple.Max.Config()},
+          {'layer_config': simple.Sum.Config()},
+      ],
+      [
+          {'input_shape': (2, 3, 5), 'keepdims': False, 'axis': None},
+          {'input_shape': (2, 3, 5), 'keepdims': False, 'axis': 2},
+          {'input_shape': (2, 3, 5), 'keepdims': False, 'axis': -1},
+          {'input_shape': (2, 3, 5), 'keepdims': False, 'axis': [2]},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': None},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': 2},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': 3},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': -1},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': -2},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': [2, 3]},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': [2, -1]},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': [-2, -1]},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': False, 'axis': [3, 2]},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': True, 'axis': None},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': True, 'axis': 3},
+          {'input_shape': (2, 3, 5, 9), 'keepdims': True, 'axis': [3, 2]},
+      ],
+  )
+  def test_reduce(self, layer_config, input_shape, keepdims, axis):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*input_shape)
+    l = dataclasses.replace(
+        layer_config, axis=axis, keepdims=keepdims, name='reduce'
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'reduce')
+    self.assertEmpty(l.variables)
+
+    y = self.verify_contract(l, x, training=False)
+    if axis is None:
+      jnp_axis = tuple(range(2, x.ndim))
+    else:
+      jnp_axis = axis
+
+    if isinstance(layer_config, simple.Mean.Config):
+      op = jnp.mean
+    elif isinstance(layer_config, simple.Min.Config):
+      op = jnp.min
+    elif isinstance(layer_config, simple.Max.Config):
+      op = jnp.max
+    elif isinstance(layer_config, simple.Sum.Config):
+      op = jnp.sum
+    else:
+      raise ValueError(f'Unknown layer config: {layer_config}')
+
+    y_expected = x.apply_values(
+        op, axis=jnp_axis, keepdims=keepdims
+    ).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
+
+  @parameterized.product(
+      layer_config=(
+          simple.Mean.Config(),
+          simple.Min.Config(),
+          simple.Max.Config(),
+          simple.Sum.Config(),
+      ),
+      axis=(0, 1, -2, -3),
+  )
+  def test_reduce_invalid_axis(self, layer_config, axis):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 3, 5)
+    l = dataclasses.replace(layer_config, axis=axis, name='reduce').make()
+    with self.assertRaises(ValueError):
+      self.init_and_bind_layer(key, l, x)
+
+
 class Has:
   """A simple `HAS(v)` matcher that tests whether something has `v` in it."""
 
