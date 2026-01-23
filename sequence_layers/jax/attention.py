@@ -13,10 +13,11 @@
 # limitations under the License.
 """Attention layers."""
 
+from collections.abc import Sequence as TypingSequence
 import dataclasses
 import functools
 import math
-from typing import Any, Callable, Mapping, Protocol, Sequence as TypingSequence
+from typing import Any, Callable, Mapping, Protocol
 
 from flax import linen as nn
 from flax import struct
@@ -1711,6 +1712,534 @@ def _dot_product_attention_gqa(
       probabilities.shape[4],
   )
   return context_vectors, probabilities
+
+
+@struct.dataclass
+class QBundle:
+  """A bundle of query arrays used for dot product attention."""
+
+  # The queries.
+  queries: jt.Float[jt.ArrayT, 'b t n h']
+  # The segment ids associated with the queries.
+  segment_ids: jt.Float[jt.ArrayT, '#b t'] | None
+  # The position of the queries.
+  position: jt.Float[jt.ArrayT, '#b t'] | None
+  # Optional. The validity mask of the query.
+  mask: jt.Float[jt.ArrayT, '#b t'] | None
+
+
+@struct.dataclass
+class KVBundle:
+  """A bundle of key and value arrays used for dot product attention."""
+
+  # The keys data array.
+  keys: jt.Float[jt.ArrayT, 'b t n h']
+  # The values data array.
+  values: jt.Float[jt.ArrayT, 'b t n h']
+  # The segment ids associated with the keys / values.
+  segment_ids: jt.Float[jt.ArrayT, '#b t'] | None
+  # The position of the keys / values.
+  position: jt.Float[jt.ArrayT, '#b t'] | None
+  # The validity mask of the keys / values. Can be None for key/values that
+  # don't need masking.
+  mask: jt.Float[jt.ArrayT, '#b t'] | None
+
+
+@struct.dataclass
+class _OnlineSoftmaxWeightedSumState:
+  """State for an online softmax weighted sum."""
+
+  # TODO(b/394101048): Generalize this to a pytree of parallel weighted sums.
+  # [b, q_t, num_query_heads_per_kv_head, num_kv_heads, units_per_head]
+  numerator: jax.Array
+  # [b, q_t, num_query_heads_per_kv_head, num_kv_heads, 1]
+  denominator: jax.Array
+  # [b, q_t, num_query_heads_per_kv_head, num_kv_heads, 1]
+  max_so_far: jax.Array
+
+  def to_context(self) -> jax.Array:
+    return utils.divide_no_nan(self.numerator, self.denominator)
+
+
+def _online_softmax_weighted_sum_initial_state(
+    batch_shape: tuple[int, ...],
+    h: int,
+    dtype: types.DType,
+) -> _OnlineSoftmaxWeightedSumState:
+  return _OnlineSoftmaxWeightedSumState(
+      numerator=jnp.zeros((*batch_shape, h), dtype),
+      denominator=jnp.zeros((*batch_shape, 1), dtype),
+      max_so_far=jnp.full(
+          (*batch_shape, 1), jnp.array(_INVALID_LOGIT_VALUE, dtype)
+      ),
+  )
+
+
+def _online_softmax_weighted_sum_step(
+    logits_fn: Callable[[QBundle, KVBundle], tuple[jax.Array, jax.Array]],
+    state: _OnlineSoftmaxWeightedSumState,
+    query_chunk: QBundle,
+    kv_chunk: KVBundle,
+    precision: nn.linear.PrecisionLike,
+) -> _OnlineSoftmaxWeightedSumState:
+  """Computes one step of an online softmax weighted sum."""
+  b, q, nq, h = query_chunk.queries.shape
+  _, k, nk, _ = kv_chunk.keys.shape
+
+  assert nq % nk == 0
+  nqpk = nq // nk
+
+  assert kv_chunk.keys.shape == (b, k, nk, h)
+  assert kv_chunk.values.shape == (b, k, nk, h)
+  assert state.numerator.shape == (b, q, nqpk, nk, h)
+  assert state.denominator.shape == (b, q, nqpk, nk, 1)
+  assert state.max_so_far.shape == (b, q, nqpk, nk, 1)
+
+  logits_chunk, any_valid = logits_fn(query_chunk, kv_chunk)
+  if logits_chunk.shape != (b, q, nqpk, nk, k):
+    raise ValueError(
+        f'Expected {logits_chunk.shape=} to be {(b, q, nqpk, nk, k)=} but got'
+        f' {logits_chunk.shape=}.'
+    )
+  if any_valid.ndim != 4:
+    raise ValueError(f'Expected {any_valid.shape=} to be {(b, q, nqpk, nk)=}.')
+
+  # Maximum logit for each (batch/head/query) slice.
+  chunk_max = logits_chunk.max(axis=-1, keepdims=True)
+  assert chunk_max.shape == (b, q, nqpk, nk, 1)
+
+  max_so_far = jnp.maximum(state.max_so_far, chunk_max)
+  assert max_so_far.shape == (b, q, nqpk, nk, 1)
+  max_so_far = jax.lax.stop_gradient(max_so_far)
+
+  correction = jnp.exp(state.max_so_far - max_so_far)
+  assert correction.shape == (b, q, nqpk, nk, 1)
+
+  corrected_weights = jnp.exp(logits_chunk - max_so_far)
+  assert corrected_weights.shape == (b, q, nqpk, nk, k)
+
+  # Apply correction to numerator. Broadcast across head dim.
+  numerator = state.numerator * correction
+  assert numerator.shape == (b, q, nqpk, nk, h)
+
+  # Clear invalid locations in values to make sure corrected_weights does not
+  # leak invalid values into the numerator.
+  if kv_chunk.mask is not None:
+    values = jnp.where(
+        kv_chunk.mask[:, :, jnp.newaxis, jnp.newaxis],
+        kv_chunk.values,
+        0,
+    )
+  else:
+    values = kv_chunk.values
+
+  # Compute weighted values and add them to the numerator.
+  numerator += jnp.einsum(
+      'BiQNj,BjNH->BiQNH', corrected_weights, values, precision=precision
+  )
+  assert numerator.shape == (b, q, nqpk, nk, h)
+
+  # Apply correction to denominator.
+  denominator = state.denominator * correction
+  # Add sum of all weights for keys to the denominator.
+  # Invalid locations are zero because e^(-inf - max) = 0.
+  denominator += corrected_weights.sum(axis=-1, keepdims=True)
+  assert denominator.shape == (b, q, nqpk, nk, 1)
+
+  new_state = _OnlineSoftmaxWeightedSumState(
+      numerator=numerator,
+      denominator=denominator,
+      max_so_far=max_so_far,
+  )
+
+  # Don't update state for (b, q, nqpk, nk) slices of state that have no valid
+  # keys.
+  any_valid = any_valid[:, :, :, :, jnp.newaxis]
+  new_state = jax.tree.map(
+      lambda a, b: jnp.where(any_valid, a, b), new_state, state
+  )
+
+  return new_state
+
+
+class AttentionMaskFn(Protocol):
+
+  def __call__(
+      self, query: QBundle, key: KVBundle
+  ) -> jt.Bool[jt.ArrayT, '#b #q #k'] | None:
+    ...
+
+
+@dataclasses.dataclass(frozen=True)
+class SegmentMask:
+  """Only allow attention within the same segment ID."""
+
+  def __call__(
+      self, query: QBundle, key: KVBundle
+  ) -> jt.Bool[jt.ArrayT, '#b #q #k'] | None:
+    if query.segment_ids is None or key.segment_ids is None:
+      raise ValueError(
+          'SameSegment requires segment IDs:'
+          f' {query.segment_ids=} {key.segment_ids=}'
+      )
+    return (
+        query.segment_ids[:, :, jnp.newaxis]
+        == key.segment_ids[:, jnp.newaxis, :]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class LocalCausalMask:
+  """Only allow attention within a local causal window."""
+
+  # The maximum number of previous timesteps each query can attend to.
+  # If zero, no past timesteps are visible.
+  # If None, the infinite past is visible.
+  max_past_horizon: int | None
+  # The maximum number of future timesteps each query can attend to.
+  # If zero, no future timesteps are visible.
+  # If None, the infinite future is visible.
+  max_future_horizon: int | None
+
+  def __post_init__(self):
+    if self.max_past_horizon is not None and self.max_past_horizon < 0:
+      raise ValueError(f'{self.max_past_horizon=} must be non-negative.')
+    if self.max_future_horizon is not None and self.max_future_horizon < 0:
+      raise ValueError(f'{self.max_future_horizon=} must be non-negative.')
+
+  def __call__(
+      self, query: QBundle, key: KVBundle
+  ) -> jt.Bool[jt.ArrayT, '#b #q #k'] | None:
+
+    if self.max_past_horizon is None and self.max_future_horizon is None:
+      return None
+
+    distance = (
+        query.position[:, :, jnp.newaxis] - key.position[:, jnp.newaxis, :]
+    )
+
+    masks = []
+
+    # Positive distance: query is ahead of key by distance timesteps.
+    if self.max_past_horizon is not None:
+      masks.append(distance <= self.max_past_horizon)
+
+    # Negative distance: query is behind key by distance timesteps.
+    if self.max_future_horizon is not None:
+      masks.append(distance >= -self.max_future_horizon)
+
+    return functools.reduce(jnp.logical_and, masks)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlockwiseLocalCausalMask:
+  """Allow bidirectional attention within blocks of a specified size."""
+
+  # The size of each block.
+  block_size: int
+  # The number of past blocks the current block can attend to.
+  # If None, all past blocks can be attended to.
+  max_past_horizon_blocks: int | None
+  # The number of future blocks the current block can attend to.
+  # If None, all future blocks can be attended to.
+  max_future_horizon_blocks: int | None
+
+  def __post_init__(self):
+    if self.block_size <= 0:
+      raise ValueError(f'{self.block_size=} must be positive.')
+    if (
+        self.max_past_horizon_blocks is not None
+        and self.max_past_horizon_blocks < 0
+    ):
+      raise ValueError(f'{self.max_past_horizon_blocks=} must be non-negative.')
+    if (
+        self.max_future_horizon_blocks is not None
+        and self.max_future_horizon_blocks < 0
+    ):
+      raise ValueError(
+          f'{self.max_future_horizon_blocks=} must be non-negative.'
+      )
+
+  def __call__(
+      self, query: QBundle, key: KVBundle
+  ) -> jt.Bool[jt.ArrayT, '#b #q #k'] | None:
+
+    if (
+        self.max_past_horizon_blocks is None
+        and self.max_future_horizon_blocks is None
+    ):
+      return None
+
+    query_blocks_ids = query.position // self.block_size
+    key_blocks_ids = key.position // self.block_size
+
+    distance = (
+        query_blocks_ids[:, :, jnp.newaxis] - key_blocks_ids[:, jnp.newaxis, :]
+    )
+
+    masks = []
+
+    # Positive distance: query is ahead of key by distance timesteps.
+    if self.max_past_horizon_blocks is not None:
+      masks.append(distance <= self.max_past_horizon_blocks)
+
+    # Negative distance: query is behind key by distance timesteps.
+    if self.max_future_horizon_blocks is not None:
+      masks.append(distance >= -self.max_future_horizon_blocks)
+
+    return functools.reduce(jnp.logical_and, masks)
+
+
+@jt.typed
+def _multi_key_value_dot_product_flash_attention(
+    *,
+    queries: QBundle,
+    query_block_size: int | None,
+    kv_bundles: TypingSequence[KVBundle],
+    kv_block_sizes: int | None | TypingSequence[int | None],
+    attention_mask_fns: TypingSequence[AttentionMaskFn],
+    attention_logits_soft_cap: float | None,
+    per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+    query_scale: float | jt.ScalarFloat | None,
+    precision: nn.linear.PrecisionLike,
+    compute_dtype: Any | types.DType | None,
+    remat: bool = False,
+) -> jt.Float[jt.ArrayT, 'b q nq h']:
+  """Computes "multi key-value" dot product flash attention with queries.
+
+  This is equivalent to _dot_product_attention but allows providing the keys and
+  values to attend over as a list of multiple arrays, each key/value group
+  having its own mask, positions, and segment IDs.
+
+  Unlike _dot_product_attention, this routine uses an online softmax weighted
+  sum to compute attention context vectors, which reduces peak memory usage and
+  may result in faster execution times at the expense of reduced numerical
+  stability due to computing the softmax online (logit outliers in each block
+  can cause underflow or overflow in the accumulators).
+
+  Args:
+    queries: A [batch, query_time, num_query_heads, units_per_head] tensor of
+      queries.
+    query_block_size: The block size to use when splitting up the query time
+      axis. If None, no query block splitting is performed.
+    kv_bundles: A sequence of KVBundle objects containing keys and values to
+      attend to, as well as their associated arrays (segment IDs, positions,
+      mask). Key/values are shapes [batch, kv_time, num_kv_heads,
+      units_per_head]. If num_kv_heads != num_query_heads, the grouped query
+      attention (GQA) attention algorithm is used.
+    kv_block_sizes: The block sizes to use when splitting up the key/value time
+      axis. If a single int is provided, it is used for all key/value groups. If
+      None is provided, no key/value block splitting is performed.
+    attention_mask_fns: A sequence of functions that take a query and key bundle
+      and return a boolean mask array of shape [batch, query_time, kv_time].
+    attention_logits_soft_cap: If non-zero, a soft cap applied to attention
+      logits to prevent outliers from dominating the softmax. Empirically, 50.0
+      works well across a variety of tasks. Implemented as tanh(logits / cap) *
+      cap.
+    per_dim_scale: A [units_per_head] query scale factor for all query heads.
+      Assuming per_dim_scale is zeros at initialization (or if not specified),
+      the scaling applied to each head is query_scale.
+    query_scale: A float query scale factor for all query heads. If None,
+      queries are scaled by 1/sqrt(units_per_head).
+    precision: Precision config for einsums.
+    compute_dtype: The dtype to use for logit calculations and outputs. All
+      online softmax weighted sum state operations are performed in float32
+      regardless of this value for numerical stability.
+    remat: Whether to rematerialize the logits function.
+
+  Returns:
+    context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
+      array of context vectors for the queries.
+  """
+  b, q_time, nq, h = queries.queries.shape
+
+  if not kv_bundles:
+    raise ValueError('kv_buffers must be non-empty.')
+
+  nks = {kv_buffer.keys.shape[2] for kv_buffer in kv_bundles}
+  if len(nks) != 1:
+    raise ValueError(
+        f'Expected all key bundles to have the same number of heads, got: {nks}'
+    )
+  nk = nks.pop()
+
+  if nq % nk != 0:
+    raise ValueError(f'Expected {nq=} % {nk=} to be zero.')
+  nqpk = nq // nk
+
+  q_dtype = utils.get_promoted_dtype(queries.queries.dtype, dtype=compute_dtype)
+  qk_dtype = utils.get_promoted_dtype(
+      q_dtype,
+      *(k.keys.dtype for k in kv_bundles),
+      dtype=compute_dtype,
+  )
+  qkv_dtype = utils.get_promoted_dtype(
+      qk_dtype, *(k.values.dtype for k in kv_bundles), dtype=compute_dtype
+  )
+  queries = dataclasses.replace(
+      queries,
+      queries=_scale_query(
+          queries.queries.astype(q_dtype), per_dim_scale, query_scale
+      ).astype(qk_dtype),
+  )
+
+  def pad_and_split_blocks(v, pad_amount, num_blocks, block_size):
+    if pad_amount:
+      paddings = [(0, 0)] * v.ndim
+      paddings[1] = (0, pad_amount)
+      v = jnp.pad(v, paddings, mode='constant')
+
+    return utils.split_dimension(v, axis=1, shape=(num_blocks, block_size))
+
+  def transpose_for_scan(v):
+    return jnp.moveaxis(v, 1, 0)
+
+  if query_block_size is None:
+    num_q_blocks = 1
+    q_pad = 0
+  else:
+    num_q_blocks = (q_time + query_block_size - 1) // query_block_size
+    q_pad = num_q_blocks * query_block_size - q_time
+
+  use_query_scan = num_q_blocks > 1
+  if use_query_scan:
+    queries = jax.tree.map(
+        functools.partial(
+            pad_and_split_blocks,
+            pad_amount=q_pad,
+            num_blocks=num_q_blocks,
+            block_size=query_block_size,
+        ),
+        queries,
+    )
+    queries = jax.tree.map(transpose_for_scan, queries)
+
+  def logits_fn(query: QBundle, key: KVBundle) -> tuple[jax.Array, jax.Array]:
+    num_query_heads = query.queries.shape[2]
+    num_key_heads = key.keys.shape[2]
+    assert num_query_heads % num_key_heads == 0
+    query_heads_per_kv_head = num_query_heads // num_key_heads
+
+    query_data = utils.split_dimension(
+        query.queries, axis=2, shape=(query_heads_per_kv_head, num_key_heads)
+    )
+    logits = jnp.einsum(
+        'biqnh,bjnh->biqnj', query_data, key.keys, precision=precision
+    )
+    logits = logits.astype(jnp.float32)
+
+    masks = []
+
+    if key.mask is not None:
+      masks.append(key.mask[:, jnp.newaxis, :])
+
+    for mask_fn in attention_mask_fns:
+      mask = mask_fn(query, key)
+      if mask is not None:
+        masks.append(mask)
+
+    # Cap attention logits before masking.
+    if attention_logits_soft_cap:
+      logits = _soft_cap_attention_logits(logits, attention_logits_soft_cap)
+
+    if masks:
+      mask = functools.reduce(jnp.logical_and, masks)
+      mask = mask[:, :, jnp.newaxis, jnp.newaxis, :]
+      logits = jnp.where(mask, logits, _INVALID_LOGIT_VALUE)
+      any_valid = jnp.any(mask, axis=-1)
+    else:
+      any_valid = jnp.ones((1, 1, 1, 1), jnp.bool_)
+
+    return logits, any_valid
+
+  if isinstance(kv_block_sizes, int) or kv_block_sizes is None:
+    kv_block_sizes = [kv_block_sizes] * len(kv_bundles)
+  elif len(kv_block_sizes) != len(kv_bundles):
+    raise ValueError(
+        f'Expected {len(kv_bundles)=}, key_blocks, got: {kv_block_sizes}'
+    )
+
+  # Always use float32 for online softmax state.
+  if use_query_scan:
+    state_batch_shape = (num_q_blocks, b, query_block_size, nqpk, nk)
+  else:
+    state_batch_shape = (b, q_time, nqpk, nk)
+  state = _online_softmax_weighted_sum_initial_state(
+      state_batch_shape, h, jnp.float32
+  )
+
+  for kv_buffer, key_block_size in zip(kv_bundles, kv_block_sizes, strict=True):
+    # Cast to qk_dtype and qkv_dtype.
+    kv_buffer = dataclasses.replace(
+        kv_buffer,
+        keys=kv_buffer.keys.astype(qk_dtype),
+        values=kv_buffer.values.astype(qkv_dtype),
+    )
+
+    k_time = kv_buffer.keys.shape[1]
+
+    if key_block_size is None:
+      num_k_blocks = 1
+    else:
+      num_k_blocks = (k_time + key_block_size - 1) // key_block_size
+
+    use_key_scan = num_k_blocks > 1
+    if use_key_scan:
+      k_pad = num_k_blocks * key_block_size - k_time
+      kv_buffer = jax.tree.map(
+          functools.partial(
+              pad_and_split_blocks,
+              pad_amount=k_pad,
+              num_blocks=num_k_blocks,
+              block_size=key_block_size,
+          ),
+          kv_buffer,
+      )
+      kv_buffer = jax.tree.map(transpose_for_scan, kv_buffer)
+
+    def q_body(
+        carry, slice_bundle: tuple[_OnlineSoftmaxWeightedSumState, QBundle]
+    ):
+      del carry
+      state_slice, q_slice = slice_bundle
+
+      @functools.partial(jax.checkpoint, prevent_cse=False)
+      def kv_scan_fn(state: _OnlineSoftmaxWeightedSumState, kv_slice: KVBundle):
+        state = _online_softmax_weighted_sum_step(
+            logits_fn, state, q_slice, kv_slice, precision=precision
+        )
+        return state, ()
+
+      if use_key_scan:  # pylint: disable=cell-var-from-loop
+        state_slice, _ = jax.lax.scan(
+            kv_scan_fn, state_slice, kv_buffer, length=num_k_blocks  # pylint: disable=cell-var-from-loop
+        )
+      else:
+        state_slice, _ = kv_scan_fn(state_slice, kv_buffer)  # pylint: disable=cell-var-from-loop
+
+      return (), state_slice
+
+    if remat:
+      q_body = jax.checkpoint(q_body, prevent_cse=False)
+
+    if use_query_scan:
+      _, state = jax.lax.scan(q_body, (), (state, queries), length=num_q_blocks)
+    else:
+      _, state = q_body((), (state, queries))
+
+  c = state.to_context().astype(qkv_dtype)
+
+  if use_query_scan:
+    assert c.shape == (num_q_blocks, b, query_block_size, nqpk, nk, h), c.shape
+    c = jax.tree.map(transpose_for_scan, c)
+    c = c.reshape((b, num_q_blocks * query_block_size, nq, h))
+    # Strip off padded queries (if any).
+    if q_pad:
+      c = c[:, :-q_pad]
+  else:
+    assert c.shape == (b, q_time, nqpk, nk, h), c.shape
+    c = c.reshape((b, q_time, nq, h))
+  return c
 
 
 @jt.typed

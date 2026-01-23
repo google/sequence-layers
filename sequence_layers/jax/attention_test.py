@@ -52,6 +52,93 @@ def _t5_position_bias_mat_init(
   return bias_matrix
 
 
+def _dot_product_attention_reference(
+    query: jax.Array,
+    key: jax.Array,
+    value: jax.Array,
+    query_ids: jax.Array,
+    key_ids: jax.Array,
+    key_mask: jax.Array,
+    query_pos: jax.Array,
+    key_pos: jax.Array,
+    max_past_horizon: int | None,
+    max_future_horizon: int | None,
+    query_scale: jax.Array | None,
+    per_dim_scale: jax.Array | None,
+    attention_logits_soft_cap: float | None = None,
+    compute_dtype: jnp.dtype | None = None,
+) -> jax.Array:
+  assert query_ids.shape == query.shape[:2], (query_ids.shape, query.shape)
+  assert query_pos.shape == query.shape[:2]
+  assert key_ids.shape == key.shape[:2]
+  assert key_mask.shape == key.shape[:2]
+  assert key_pos.shape == key.shape[:2]
+
+  if compute_dtype is not None:
+    query = query.astype(compute_dtype)
+    key = key.astype(compute_dtype)
+    value = value.astype(compute_dtype)
+
+  query = attention._scale_query(query, per_dim_scale, query_scale)
+
+  num_query_heads = query.shape[-2]
+  num_key_heads = key.shape[-2]
+
+  if num_query_heads % num_key_heads != 0:
+    raise ValueError(
+        f'num_query_heads {num_query_heads} must be divisible by num_key_heads'
+        f' {num_key_heads}'
+    )
+
+  query_heads_per_kv_head = num_query_heads // num_key_heads
+  query = utils.split_dimension(
+      query, axis=2, shape=(query_heads_per_kv_head, num_key_heads)
+  )
+
+  logits = jnp.einsum('biqnh,bjnh->bqnij', query, key)
+  logits = logits.astype(jnp.float32)
+
+  if attention_logits_soft_cap is not None:
+    logits = attention_logits_soft_cap * jax.nn.tanh(
+        logits / attention_logits_soft_cap
+    )
+
+  mask = key_mask[:, jnp.newaxis, :]
+  mask &= query_ids[:, :, jnp.newaxis] == key_ids[:, jnp.newaxis, :]
+
+  distance = query_pos[:, :, jnp.newaxis] - key_pos[:, jnp.newaxis, :]
+
+  # Positive distance: query is ahead of key by distance timesteps.
+  if max_past_horizon is not None:
+    mask &= distance <= max_past_horizon
+
+  # Negative distance: query is behind key by distance timesteps.
+  if max_future_horizon is not None:
+    mask &= distance >= -max_future_horizon
+
+  logits = jnp.where(mask[:, jnp.newaxis, jnp.newaxis, :, :], logits, -1e9)
+  probs = jax.nn.softmax(logits, axis=-1)
+  assert probs.dtype == jnp.float32
+
+  value = jnp.where(key_mask[:, :, jnp.newaxis, jnp.newaxis], value, 0)
+  if compute_dtype is not None:
+    assert value.dtype == compute_dtype
+
+  context = jnp.einsum('bqnij,bjnh->biqnh', probs, value)
+
+  context = context.reshape(
+      (*context.shape[:2], num_query_heads, *context.shape[4:])
+  )
+
+  # Handle the case where no keys are valid for a given query.
+  mask = jnp.any(mask, axis=-1, keepdims=True)[:, :, :, jnp.newaxis]
+  context = jnp.where(mask, context, 0)
+
+  context = context.astype(compute_dtype)
+
+  return context
+
+
 def assert_param_dtypes_inits_shapes(
     layer: types.SequenceLayer,
     inputs: types.Sequence,
@@ -2982,6 +3069,575 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
 
     self.assertAllClose(context_vectors, expected_context_vectors)
     self.assertAllClose(probabilities, expected_probabilities)
+
+
+class SameSegmentTest(test_utils.SequenceLayerTest):
+
+  def test_no_segments(self):
+    with self.assertRaises(ValueError):
+      attention.SegmentMask()(
+          attention.QBundle(
+              queries=None,
+              segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
+              position=None,
+              mask=None,
+          ),
+          attention.KVBundle(
+              keys=None,
+              values=None,
+              segment_ids=None,
+              position=None,
+              mask=None,
+          ),
+      )
+    with self.assertRaises(ValueError):
+      attention.SegmentMask()(
+          attention.QBundle(
+              queries=None,
+              segment_ids=None,
+              position=None,
+              mask=None,
+          ),
+          attention.KVBundle(
+              keys=None,
+              values=None,
+              segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
+              position=None,
+              mask=None,
+          ),
+      )
+
+  def test_basic(self):
+    mask_fn = attention.SegmentMask()
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
+            position=None,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=jnp.array([[3, 3, 2], [0, 1, 6]]),
+            position=None,
+            mask=None,
+        ),
+    )
+    self.assertAllEqual(
+        mask,
+        jnp.array([
+            [
+                [False, False, False],
+                [False, False, True],
+                [True, True, False],
+            ],
+            [
+                [False, False, False],
+                [False, False, False],
+                [False, False, True],
+            ],
+        ]),
+    )
+
+
+class LocalCausalMaskTest(test_utils.SequenceLayerTest):
+
+  def test_unbounded(self):
+    mask_fn = attention.LocalCausalMask(None, None)
+
+    query_time = 35
+    key_time = 50
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    self.assertIsNone(mask)
+
+  @parameterized.parameters(
+      (0, 0),
+      (None, 0),
+      (0, None),
+      (None, 5),
+      (3, None),
+      (3, 5),
+      (3, 0),
+      (0, 5),
+  )
+  def test_bounded(self, max_past_horizon, max_future_horizon):
+    mask_fn = attention.LocalCausalMask(max_past_horizon, max_future_horizon)
+
+    query_time = 35
+    key_time = 50
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    num_lower = max_past_horizon if max_past_horizon is not None else key_time
+    num_upper = (
+        max_future_horizon if max_future_horizon is not None else key_time
+    )
+
+    expected = utils.ones_matrix_band_part(
+        query_time,
+        key_time,
+        num_lower=num_lower,
+        num_upper=num_upper,
+        out_dtype=jnp.bool_,
+        out_shape=(1, query_time, key_time),
+    )
+
+    self.assertAllEqual(mask, expected)
+
+
+class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
+
+  def test_no_context(self):
+    mask_fn = attention.BlockwiseLocalCausalMask(
+        block_size=2,
+        max_past_horizon_blocks=0,
+        max_future_horizon_blocks=0,
+    )
+
+    query_time = 10
+    key_time = 10
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    expected = jnp.array([[
+        [True, True, False, False, False, False, False, False, False, False],
+        [True, True, False, False, False, False, False, False, False, False],
+        [False, False, True, True, False, False, False, False, False, False],
+        [False, False, True, True, False, False, False, False, False, False],
+        [False, False, False, False, True, True, False, False, False, False],
+        [False, False, False, False, True, True, False, False, False, False],
+        [False, False, False, False, False, False, True, True, False, False],
+        [False, False, False, False, False, False, True, True, False, False],
+        [False, False, False, False, False, False, False, False, True, True],
+        [False, False, False, False, False, False, False, False, True, True],
+    ]])
+
+    self.assertAllEqual(mask, expected)
+
+  def test_one_block_past_horizon(self):
+    mask_fn = attention.BlockwiseLocalCausalMask(
+        block_size=2,
+        max_past_horizon_blocks=1,
+        max_future_horizon_blocks=0,
+    )
+
+    query_time = 10
+    key_time = 10
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    expected = jnp.array([[
+        [True, True, False, False, False, False, False, False, False, False],
+        [True, True, False, False, False, False, False, False, False, False],
+        [True, True, True, True, False, False, False, False, False, False],
+        [True, True, True, True, False, False, False, False, False, False],
+        [False, False, True, True, True, True, False, False, False, False],
+        [False, False, True, True, True, True, False, False, False, False],
+        [False, False, False, False, True, True, True, True, False, False],
+        [False, False, False, False, True, True, True, True, False, False],
+        [False, False, False, False, False, False, True, True, True, True],
+        [False, False, False, False, False, False, True, True, True, True],
+    ]])
+
+    self.assertAllEqual(mask, expected)
+
+  def test_one_block_future_horizon(self):
+    mask_fn = attention.BlockwiseLocalCausalMask(
+        block_size=2,
+        max_past_horizon_blocks=0,
+        max_future_horizon_blocks=1,
+    )
+
+    query_time = 10
+    key_time = 10
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    expected = jnp.array([[
+        [True, True, True, True, False, False, False, False, False, False],
+        [True, True, True, True, False, False, False, False, False, False],
+        [False, False, True, True, True, True, False, False, False, False],
+        [False, False, True, True, True, True, False, False, False, False],
+        [False, False, False, False, True, True, True, True, False, False],
+        [False, False, False, False, True, True, True, True, False, False],
+        [False, False, False, False, False, False, True, True, True, True],
+        [False, False, False, False, False, False, True, True, True, True],
+        [False, False, False, False, False, False, False, False, True, True],
+        [False, False, False, False, False, False, False, False, True, True],
+    ]])
+
+    self.assertAllEqual(mask, expected)
+
+  def test_infinite_past(self):
+    mask_fn = attention.BlockwiseLocalCausalMask(
+        block_size=2,
+        max_past_horizon_blocks=None,
+        max_future_horizon_blocks=0,
+    )
+
+    query_time = 10
+    key_time = 10
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    expected = jnp.array([[
+        [True, True, False, False, False, False, False, False, False, False],
+        [True, True, False, False, False, False, False, False, False, False],
+        [True, True, True, True, False, False, False, False, False, False],
+        [True, True, True, True, False, False, False, False, False, False],
+        [True, True, True, True, True, True, False, False, False, False],
+        [True, True, True, True, True, True, False, False, False, False],
+        [True, True, True, True, True, True, True, True, False, False],
+        [True, True, True, True, True, True, True, True, False, False],
+        [True, True, True, True, True, True, True, True, True, True],
+        [True, True, True, True, True, True, True, True, True, True],
+    ]])
+
+    self.assertAllEqual(mask, expected)
+
+  def test_infinite_future(self):
+    mask_fn = attention.BlockwiseLocalCausalMask(
+        block_size=2,
+        max_past_horizon_blocks=0,
+        max_future_horizon_blocks=None,
+    )
+
+    query_time = 10
+    key_time = 10
+
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :]
+    key_pos = jnp.arange(key_time)[jnp.newaxis, :]
+
+    mask = mask_fn(
+        attention.QBundle(
+            queries=None,
+            segment_ids=None,
+            position=query_pos,
+            mask=None,
+        ),
+        attention.KVBundle(
+            keys=None,
+            values=None,
+            segment_ids=None,
+            position=key_pos,
+            mask=None,
+        ),
+    )
+
+    x = True
+    o = False
+
+    expected = jnp.array([[
+        [x, x, x, x, x, x, x, x, x, x],
+        [x, x, x, x, x, x, x, x, x, x],
+        [o, o, x, x, x, x, x, x, x, x],
+        [o, o, x, x, x, x, x, x, x, x],
+        [o, o, o, o, x, x, x, x, x, x],
+        [o, o, o, o, x, x, x, x, x, x],
+        [o, o, o, o, o, o, x, x, x, x],
+        [o, o, o, o, o, o, x, x, x, x],
+        [o, o, o, o, o, o, o, o, x, x],
+        [o, o, o, o, o, o, o, o, x, x],
+    ]])
+
+    self.assertAllEqual(mask, expected)
+
+
+class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
+
+  @parameterized.product(
+      use_per_dim_scale=(False, True),
+      horizon=((None, None), (3, 5), (None, 5), (3, None)),
+      attention_logits_soft_cap=(None, 5.0),
+      compute_dtype=(None, jnp.bfloat16),
+      num_query_kv_heads=((7, 7), (8, 4)),
+      query_block_size=(7, None),
+  )
+  def test_online_multi_key_value_dot_product_attention(
+      self,
+      use_per_dim_scale: bool,
+      horizon: tuple[int, int],
+      attention_logits_soft_cap: float | None,
+      compute_dtype: types.DType | None,
+      num_query_kv_heads: tuple[int, int],
+      query_block_size: int | None,
+  ):
+    max_past_horizon, max_future_horizon = horizon
+    num_query_heads, num_kv_heads = num_query_kv_heads
+    batch, query_time, kv_time, units_per_head = 5, 16, 32, 11
+    k1, k2, k3, k4, k5 = jax.random.split(jax.random.PRNGKey(42), 5)
+    queries = jax.random.normal(
+        k1, (batch, query_time, num_query_heads, units_per_head)
+    )
+    keys = jax.random.normal(k2, (batch, kv_time, num_kv_heads, units_per_head))
+    values = jax.random.normal(
+        k3, (batch, kv_time, num_kv_heads, units_per_head)
+    )
+    keys_mask = jax.random.uniform(k5, (batch, kv_time)) > 0.5
+
+    # Reset segment after this many timesteps.
+    segment_length = 5
+    query_pos = jnp.arange(query_time)[jnp.newaxis, :] % segment_length
+    key_pos = jnp.arange(kv_time)[jnp.newaxis, :] % segment_length
+    query_segment_ids = jnp.arange(query_time)[jnp.newaxis, :] // segment_length
+    key_segment_ids = jnp.arange(kv_time)[jnp.newaxis, :] // segment_length
+
+    query_pos = jnp.tile(query_pos, (batch, 1))
+    key_pos = jnp.tile(key_pos, (batch, 1))
+    query_segment_ids = jnp.tile(query_segment_ids, (batch, 1))
+    key_segment_ids = jnp.tile(key_segment_ids, (batch, 1))
+
+    if use_per_dim_scale:
+      per_dim_scale = jax.random.normal(k4, [units_per_head]) / np.sqrt(
+          units_per_head
+      )
+      query_scale = None
+    else:
+      per_dim_scale = None
+      query_scale = 1 / np.sqrt(units_per_head)
+
+    expected_context_vectors = _dot_product_attention_reference(
+        queries,
+        keys,
+        values,
+        query_segment_ids,
+        key_segment_ids,
+        keys_mask,
+        query_pos,
+        key_pos,
+        max_past_horizon,
+        max_future_horizon,
+        query_scale,
+        per_dim_scale,
+        attention_logits_soft_cap,
+        compute_dtype,
+    )
+
+    if compute_dtype is None:
+      atol, rtol = 1e-6, 1e-6
+    else:
+      atol, rtol = 1e-2, 1e-2
+
+    with self.subTest('single KVBundle'):
+      kv_block_sizes = 3
+      context_vectors = attention._multi_key_value_dot_product_flash_attention(
+          queries=attention.QBundle(
+              queries,
+              segment_ids=query_segment_ids,
+              position=query_pos,
+              mask=None,
+          ),
+          query_block_size=query_block_size,
+          kv_bundles=[
+              attention.KVBundle(
+                  keys=keys,
+                  values=values,
+                  segment_ids=key_segment_ids,
+                  position=key_pos,
+                  mask=keys_mask,
+              ),
+          ],
+          kv_block_sizes=kv_block_sizes,
+          attention_mask_fns=[
+              attention.SegmentMask(),
+              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+          ],
+          attention_logits_soft_cap=attention_logits_soft_cap,
+          per_dim_scale=per_dim_scale,
+          query_scale=query_scale,
+          precision=None,
+          compute_dtype=compute_dtype,
+      )
+      self.assertAllClose(
+          context_vectors, expected_context_vectors, atol=atol, rtol=rtol
+      )
+
+    with self.subTest('no key blocking'):
+      kv_block_sizes = None
+      context_vectors = attention._multi_key_value_dot_product_flash_attention(
+          queries=attention.QBundle(
+              queries,
+              segment_ids=query_segment_ids,
+              position=query_pos,
+              mask=None,
+          ),
+          query_block_size=query_block_size,
+          kv_bundles=[
+              attention.KVBundle(
+                  keys=keys,
+                  values=values,
+                  segment_ids=key_segment_ids,
+                  position=key_pos,
+                  mask=keys_mask,
+              ),
+          ],
+          kv_block_sizes=kv_block_sizes,
+          attention_mask_fns=[
+              attention.SegmentMask(),
+              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+          ],
+          attention_logits_soft_cap=attention_logits_soft_cap,
+          per_dim_scale=per_dim_scale,
+          query_scale=query_scale,
+          precision=None,
+          compute_dtype=compute_dtype,
+      )
+      self.assertAllClose(
+          context_vectors, expected_context_vectors, atol=atol, rtol=rtol
+      )
+
+    with self.subTest('multi KVBundle'):
+      kv_block_sizes = (3, 11)
+      keys1, keys2 = jnp.split(keys, 2, axis=1)
+      key_pos1, key_pos2 = jnp.split(key_pos, 2, axis=1)
+      key_segment_ids1, key_segment_ids2 = jnp.split(key_segment_ids, 2, axis=1)
+      values1, values2 = jnp.split(values, 2, axis=1)
+      keys_mask1, keys_mask2 = jnp.split(keys_mask, 2, axis=1)
+
+      context_vectors = attention._multi_key_value_dot_product_flash_attention(
+          queries=attention.QBundle(
+              queries,
+              segment_ids=query_segment_ids,
+              position=query_pos,
+              mask=None,
+          ),
+          query_block_size=query_block_size,
+          kv_bundles=[
+              attention.KVBundle(
+                  keys=keys1,
+                  values=values1,
+                  segment_ids=key_segment_ids1,
+                  position=key_pos1,
+                  mask=keys_mask1,
+              ),
+              attention.KVBundle(
+                  keys=keys2,
+                  values=values2,
+                  segment_ids=key_segment_ids2,
+                  position=key_pos2,
+                  mask=keys_mask2,
+              ),
+          ],
+          kv_block_sizes=kv_block_sizes,
+          attention_mask_fns=[
+              attention.SegmentMask(),
+              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+          ],
+          attention_logits_soft_cap=attention_logits_soft_cap,
+          per_dim_scale=per_dim_scale,
+          query_scale=query_scale,
+          precision=None,
+          compute_dtype=compute_dtype,
+      )
+      self.assertAllClose(
+          context_vectors, expected_context_vectors, atol=atol, rtol=rtol
+      )
 
 
 class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
