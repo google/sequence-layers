@@ -2267,3 +2267,23 @@ def step_with_emits_spec(
   cloned = layer.clone().bind(layer.variables, mutable=True)
   step_fn = functools.partial(nn.jit(step_fn), cloned)
   return jax.eval_shape(step_fn, x_spec, state, constants)
+
+
+def divide_no_nan(x, y):
+  """Divides x by y element-wise, returning 0 where y is 0.
+
+  This is useful for avoiding NaNs in gradients.
+
+  See:
+  https://github.com/tensorflow/probability/blob/main/discussion/where-nan.pdf
+
+  Args:
+    x: The input array.
+    y: The denominator array.
+
+  Returns:
+    The result of x / y.
+  """
+  # Apply jnp.where before div to avoid NaN grad, due to inf x / y, when y == 0.
+  is_zero = y == 0
+  return jnp.where(is_zero, 0, x) / jnp.where(is_zero, 1, y)

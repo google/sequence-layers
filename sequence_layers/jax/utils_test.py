@@ -1861,5 +1861,26 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
     )
 
 
+class DivideNoNanTest(test_utils.SequenceLayerTest):
+
+  def test_divide_no_nan(self):
+    x = jnp.array([1.0, 2.0, 3.0, 4.0])
+    y = jnp.array([2.0, 0.0, 1.0, 0.0])
+    expected = jnp.array([0.5, 0.0, 3.0, 0.0])
+    self.assertAllClose(utils.divide_no_nan(x, y), expected)
+
+    # Test gradients
+    def grad_fn(x, y):
+      return jnp.sum(utils.divide_no_nan(x, y))
+
+    dx, dy = jax.grad(grad_fn, argnums=(0, 1))(x, y)
+
+    expected_dx = jnp.array([0.5, 0.0, 1.0, 0.0])
+    expected_dy = jnp.array([-0.25, 0.0, -3.0, 0.0])
+
+    self.assertTrue(jnp.allclose(dx, expected_dx))
+    self.assertTrue(jnp.allclose(dy, expected_dy))
+
+
 if __name__ == '__main__':
   test_utils.main()
