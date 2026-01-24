@@ -36,12 +36,15 @@ from sequence_layers.jax import utils
 
 __all__ = (
     # go/keep-sorted start
+    'BlockwiseDotProductSelfAttention',
     'CombinedQueryKeyValueProjection',
     'CrossAttentionEmits',
     'DotProductAttention',
     'DotProductSelfAttention',
+    'DotProductSelfAttentionV2',
     'GmmAttention',
     'LocalDotProductSelfAttention',
+    'MultiSourceDotProductAttention',
     'QueryAndKeyValueProjection',
     'QueryAndSharedKeyValueProjection',
     'RelativePositionEmbedding',
@@ -1879,7 +1882,7 @@ class SegmentMask:
   ) -> jt.Bool[jt.ArrayT, '#b #q #k'] | None:
     if query.segment_ids is None or key.segment_ids is None:
       raise ValueError(
-          'SameSegment requires segment IDs:'
+          'SegmentMask requires segment IDs:'
           f' {query.segment_ids=} {key.segment_ids=}'
       )
     return (
@@ -6882,4 +6885,1862 @@ class StreamingLocalDotProductAttention(
     # Context vectors contain invalid data in padding regions.
     context_vectors = types.Sequence(context_vectors, x.mask)
 
+    return context_vectors, emits
+
+
+class DotProductSelfAttentionV2(types.Emitting, AttentionInputProjectionHelper):
+  """A multi-headed dot-product self attention layer.
+
+  This layer is a rewrite of the original DotProductSelfAttention layer with
+  flash attention support.
+  """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Configuration for DotProductSelfAttentionV2."""
+
+    # The number of attention heads. If num_kv_heads is set, num_heads must be
+    # divisible by num_kv_heads.
+    num_heads: int
+    # The number of units per head.
+    units_per_head: int
+    # The number of past timesteps each timestep can see.
+    # -1: Disable masking of the past (all past timesteps are visible)
+    # 0: No past timesteps are visible.
+    # The layer is only steppable when max_past_horizon >= 0.
+    max_past_horizon: int
+    # The number of future timesteps each timestep can see.
+    # -1: Disable masking of the future (all future timesteps are visible)
+    # 0: No future timesteps are visible.
+    # The layer is only steppable when max_future_horizon >= 0.
+    max_future_horizon: int = 0
+
+    # If set, the number of heads to use for key/value projections. If
+    # num_kv_heads is set, num_heads must be divisible by num_kv_heads.
+    num_kv_heads: int | None = None
+
+    # Whether to learn a bias in the query/key/value projection.
+    use_bias: bool = False
+    # Configuration for the query, key and value input projection parameters.
+    # If num_kv_heads is set, must not be CombinedQueryKeyValueProjection.
+    # If shared_kv_projection is set, must be QueryAndSharedKeyValueProjection.
+    input_projection: QueryKeyValueProjectionConfig = dataclasses.field(
+        default_factory=CombinedQueryKeyValueProjection
+    )
+    # Optional query processing network. Useful to apply stateful processing to
+    # the queries, e.g. enabling RoPE.
+    query_network: types.SequenceLayerConfig | None = None
+    # Optional key processing network. Useful to apply stateful processing to
+    # the keys, e.g. enabling RoPE.
+    key_network: types.SequenceLayerConfig | None = None
+    # Optional value processing network. Useful to apply stateful processing to
+    # the values.
+    value_network: types.SequenceLayerConfig | None = None
+    # If non-zero, a soft cap applied to attention logits to prevent outliers
+    # from dominating the softmax. Empirically, 50.0 works well across a variety
+    # of tasks. Implemented as tanh(logits / cap) * cap.
+    attention_logits_soft_cap: float | None = None
+    # Whether to learn a [units_per_head] query scale factor across all query
+    # heads. At initialization (or if per_dim_scale is false), queries are
+    # scaled by 1/sqrt(units_per_head) or query_scale.
+    per_dim_scale: bool = False
+    # Sharding configuration for the per_dim_scale factor.
+    per_dim_scale_sharding: types.Sharding | None = None
+    # A manual query scale to apply. If unset, queries are scaled by
+    # 1/sqrt(units_per_head).
+    query_scale: float | None = None
+    # Precision config to use for einsums.
+    precision: nn.linear.PrecisionLike = None
+    # The dtype of the layer's computations.
+    compute_dtype: types.DType | None = None
+    # The dtype of the layer's parameters.
+    param_dtype: types.DType = jnp.float32
+
+    # Whether to use an experimental ring buffer implementation for the KV cache
+    # updates. This implementation is more compute and memory efficient than the
+    # default implementation on TPU.
+    #
+    # Limitations:
+    # * Incompatible with attention sinks.
+    # * Incompatible with GQA.
+    # * Incompatible with relative_position_embedding.
+    # * Requires streaming step sizes of 1.
+    use_kv_cache_ringbuffer: bool = False
+
+    # If enabled, the name of the segment IDs in the constants. Only timesteps
+    # with the same segment ID will be allowed to attend to each other.
+    segment_ids_name: str | None = None
+    # If enabled, the name of a [b, t] position in the constants. If set, the
+    # position will be provided externally to the layer. If unset, position will
+    # be tracked internally.
+    position_name: str | None = None
+
+    # Flash attention block sizes. If non-None, uses flash attention to split
+    # the attention computation into smaller blocks. This reduces peak memory
+    # usage and may lead to speedups. On TPU, block sizes less than 128 are
+    # typically not worth it.
+    flash_attention_query_block_size: int | None = None
+    flash_attention_key_block_size: int | None = None
+    # Experimental: Whether to remat the entire attention computation.
+    experimental_remat_outer: bool = False
+    # Experimental: Whether ot remat the inner query block calculations.
+    experimental_remat_inner: bool = False
+
+    # An optional name for the layer.
+    name: str | None = None
+
+    def make(self) -> 'DotProductSelfAttentionV2':
+      return DotProductSelfAttentionV2(self, name=self.name)
+
+  config: Config
+
+  def setup(self) -> None:
+    _validate_heads(
+        self.config.num_heads, self.config.units_per_head, self.name
+    )
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    self._setup_projection_layers(
+        self.config.input_projection,
+        num_query_heads=self.config.num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=self.config.units_per_head,
+        use_bias=self.config.use_bias,
+        precision=self.config.precision,
+        compute_dtype=self.config.compute_dtype,
+        param_dtype=self.config.param_dtype,
+    )
+    if self.config.max_past_horizon < -1:
+      raise ValueError(
+          f'Expected max_horizon >= -1 for {self}, got'
+          f' {self.config.max_past_horizon}.'
+      )
+    if self.config.max_future_horizon < -1:
+      raise ValueError(
+          'Expected max_future_horizon >= -1 for '
+          f'{self}, got {self.config.max_future_horizon}.'
+      )
+    if (
+        self.config.max_future_horizon == 0
+        and self.config.max_past_horizon == 0
+    ):
+      raise ValueError(
+          'Both max_horizon and max_future_horizon are 0, which '
+          f'does not make sense for {self}.'
+      )
+
+    if (
+        self.config.attention_logits_soft_cap
+        and self.config.attention_logits_soft_cap < 0.0
+    ):
+      raise ValueError(
+          f'{self.config.attention_logits_soft_cap=} should be None or non-neg.'
+      )
+
+    if self.config.use_kv_cache_ringbuffer:
+      num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+      if num_kv_heads != self.config.num_heads:
+        raise NotImplementedError(
+            'num_kv_heads is not supported with use_kv_cache_ringbuffer.'
+        )
+
+    self.query_network = (
+        self.config.query_network.make() if self.config.query_network else None
+    )
+    if self.query_network and (
+        self.query_network.output_ratio != 1
+        or self.query_network.block_size != 1
+    ):
+      raise ValueError(
+          'Query network must have an output_ratio'
+          f' ({self.query_network.output_ratio}) of 1 and block_size'
+          f' ({self.query_network.block_size}) of 1.'
+      )
+
+    self.key_network = (
+        self.config.key_network.make() if self.config.key_network else None
+    )
+    if self.key_network and (
+        self.key_network.output_ratio != 1 or self.key_network.block_size != 1
+    ):
+      raise ValueError(
+          'Key network must have an output_ratio'
+          f' ({self.key_network.output_ratio}) of 1 and block_size'
+          f' ({self.key_network.block_size}) of 1.'
+      )
+
+    self.value_network = (
+        self.config.value_network.make() if self.config.value_network else None
+    )
+    if self.value_network and (
+        self.value_network.output_ratio != 1
+        or self.value_network.block_size != 1
+    ):
+      raise ValueError(
+          'Value network must have an output_ratio'
+          f' ({self.value_network.output_ratio}) of 1 and block_size'
+          f' ({self.value_network.block_size}) of 1.'
+      )
+
+    self._per_dim_scale = None
+    if self.config.per_dim_scale:
+      self._per_dim_scale = self.param(
+          'per_dim_scale',
+          utils.shard_initializer(
+              nn.initializers.zeros_init(), self.config.per_dim_scale_sharding
+          ),
+          [self.config.units_per_head],
+          self.config.param_dtype,
+      )
+
+  @property
+  def supports_step(self) -> bool:
+    supports_step = (
+        self.config.max_future_horizon >= 0
+        and self.config.max_past_horizon >= 0
+    )
+    if self.query_network:
+      supports_step = supports_step and self.query_network.supports_step
+
+    if self.key_network:
+      supports_step = supports_step and self.key_network.supports_step
+
+    if self.value_network:
+      supports_step = supports_step and self.value_network.supports_step
+
+    return supports_step
+
+  @property
+  def input_latency(self) -> int:
+    # Default to 0 even if the layer is not steppable.
+    return (
+        self.config.max_future_horizon
+        if self.config.max_future_horizon >= 0
+        else 0
+    )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    max_past_horizon = self.config.max_past_horizon
+    max_future_horizon = self.config.max_future_horizon
+    start = -np.inf if max_past_horizon == -1 else -max_past_horizon
+    end = np.inf if max_future_horizon == -1 else max_future_horizon
+    return {0: (start, end)}
+
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: types.ShapeDType,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.State:
+    compute_dtype = self.get_input_projection_output_dtype(
+        self.config.input_projection, input_spec.dtype, constants=constants
+    )
+    # State to contain the max_past_horizon + max_future_horizon projected keys
+    # and values. Note, the initial state is invalid since we don't want to
+    # attend to it.
+    max_past_horizon = max(0, self.config.max_past_horizon)
+    max_future_horizon = max(0, self.config.max_future_horizon)
+    kv_buffer_size = max_past_horizon + max_future_horizon
+
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    kv_zero_values = jnp.zeros(
+        (
+            batch_size,
+            kv_buffer_size,
+            num_kv_heads,
+            self.config.units_per_head,
+        ),
+        dtype=compute_dtype,
+    )
+    kv_zero_mask = jnp.zeros(
+        [batch_size, kv_buffer_size], dtype=types.MASK_DTYPE
+    )
+    kv_zero_ids = jnp.zeros(
+        [batch_size, kv_buffer_size],
+        dtype=jnp.int32,
+    )
+
+    kv_bundle = KVBundle(
+        keys=kv_zero_values,
+        values=kv_zero_values,
+        segment_ids=kv_zero_ids if self.config.segment_ids_name else None,
+        position=kv_zero_ids,
+        mask=kv_zero_mask,
+    )
+
+    # If we have a finite future horizon, we cannot produce outputs for timestep
+    # t until the max_future_horizon KV timesteps have arrived. Store incoming
+    # queries in a delay buffer so we do not compute context vectors for them
+    # until max_future_horizon KV timesteps have arrived.
+    if max_future_horizon:
+      query_delay_buffer = QBundle(
+          queries=jnp.zeros(
+              (
+                  batch_size,
+                  max_future_horizon,
+                  self.config.num_heads,
+                  self.config.units_per_head,
+              ),
+              dtype=compute_dtype,
+          ),
+          segment_ids=jnp.zeros(
+              [batch_size, max_future_horizon], dtype=jnp.int32
+          )
+          if self.config.segment_ids_name
+          else None,
+          position=jnp.zeros([batch_size, max_future_horizon], dtype=jnp.int32),
+          mask=jnp.zeros(
+              [batch_size, max_future_horizon], dtype=types.MASK_DTYPE
+          ),
+      )
+    else:
+      query_delay_buffer = ()
+
+    time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
+
+    query_input_spec = types.ShapeDType(
+        (self.config.num_heads, self.config.units_per_head), compute_dtype
+    )
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    key_value_input_spec = types.ShapeDType(
+        (num_kv_heads, self.config.units_per_head), compute_dtype
+    )
+
+    if self.query_network:
+      query_network_state = self.query_network.get_initial_state(
+          batch_size,
+          query_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      query_network_state = ()
+    if self.key_network:
+      key_network_state = self.key_network.get_initial_state(
+          batch_size,
+          key_value_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      key_network_state = ()
+    if self.value_network:
+      value_network_state = self.value_network.get_initial_state(
+          batch_size,
+          key_value_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      value_network_state = ()
+
+    return (
+        kv_bundle,
+        time_step,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    )
+
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    return utils.get_promoted_dtype(
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
+    )
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    if len(input_shape) != 1:
+      raise ValueError(
+          'DotProductSelfAttention requires rank 3 input got:'
+          f' {(None, None) + tuple(input_shape)}'
+      )
+    return (self.config.num_heads, self.config.units_per_head)
+
+  @types.check_step_with_emits
+  def step_with_emits(
+      self,
+      x: types.Sequence,
+      state: types.State,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.State, types.Emits]:
+    if not self.supports_step:
+      raise ValueError(f'{self} is not steppable.')
+
+    x_values_time = x.shape[1]
+
+    x_queries, x_keys, x_values = self.get_qkv(self.config.input_projection, x)
+
+    # Our params might not match param_dtype, so delegate the compute_dtype to
+    # the output of the QKV layer.
+    compute_dtype = x_queries.dtype
+
+    (
+        kv_bundle,
+        time_step,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    ) = state
+
+    constants = constants or {}
+
+    if self.config.position_name and self.config.position_name in constants:
+      x_position = utils.get_constant_array(
+          self, constants, self.config.position_name
+      )
+    else:
+      x_position = (
+          jnp.arange(x_values_time)[jnp.newaxis, :] + time_step[:, jnp.newaxis]
+      )
+
+    if self.config.segment_ids_name:
+      x_segment_ids = utils.get_constant_array(
+          self, constants, self.config.segment_ids_name
+      )
+    else:
+      x_segment_ids = None
+
+    kv_buffer_size = kv_bundle.keys.shape[1]
+
+    if self.query_network:
+      x_queries, query_network_state = self.query_network.step(
+          x_queries,
+          query_network_state,
+          training=training,
+          constants=constants,
+      )
+    if self.key_network:
+      x_keys, key_network_state = self.key_network.step(
+          x_keys,
+          key_network_state,
+          training=training,
+          constants=constants,
+      )
+    if self.value_network:
+      x_values, value_network_state = self.value_network.step(
+          x_values,
+          value_network_state,
+          training=training,
+      )
+
+    # Guard against NaN/Inf in values, since values are contracted when
+    # computing context vectors.
+    x_values = x_values.mask_invalid()
+
+    # The key and value network could have changed the mask, so we combine the
+    # keys and values mask. This is inexpensive but would be nice to skip.
+    combined_mask = utils.combine_mask(x_keys.mask, x_values.mask)
+
+    new_query_bundle = QBundle(
+        queries=x_queries.values,
+        segment_ids=x_segment_ids,
+        position=x_position,
+        mask=x_queries.mask,
+    )
+    new_kv_bundle = KVBundle(
+        keys=x_keys.values,
+        values=x_values.values,
+        segment_ids=x_segment_ids,
+        position=x_position,
+        # The mask could differ based on key_network / value_network.
+        mask=combined_mask,
+    )
+
+    if self.config.use_kv_cache_ringbuffer:
+      if x_queries.shape[1] != 1:
+        raise ValueError(
+            'use_kv_cache_ringbuffer requires a step size of 1. Got:'
+            f' {x_queries.shape=}'
+        )
+    else:
+      # To process a step, concatenate our kv_buffer_size KV buffer with the
+      # input source.shape[1] timesteps.
+      kv_bundle = jax.tree.map(
+          lambda a, b: jnp.concatenate([a, b], axis=1), kv_bundle, new_kv_bundle
+      )
+
+    # If we have a query delay buffer, we need to insert the current block of
+    # queries into it, and pop the oldest x_values_time queries off. If no query
+    # cache, the below logic is a no-op so we save the compute of running it.
+    if query_delay_buffer:
+      assert self.config.max_future_horizon > 0
+
+      query_delay_buffer = jax.tree.map(
+          lambda a, b: jnp.concatenate([a, b], axis=1),
+          query_delay_buffer,
+          new_query_bundle,
+      )
+      assert (
+          query_delay_buffer.queries.shape[1]
+          == x_values_time + self.config.max_future_horizon
+      )
+
+      # Use the oldest x_values_time queries as the current step's queries. They
+      # each have max_future_horizon context available in
+      # kv_buffer_keys/kv_buffer_values so we can produce valid output for them.
+      new_query_bundle = jax.tree.map(
+          lambda a: a[:, :x_values_time], query_delay_buffer
+      )
+
+      # Preserve the last max_future_horizon queries for the next step.
+      query_delay_buffer = jax.tree.map(
+          lambda a: a[:, -self.config.max_future_horizon :], query_delay_buffer
+      )
+
+    # Compute context vectors:
+    if self.config.use_kv_cache_ringbuffer:
+      kv_buffers = (kv_bundle, new_kv_bundle)
+      key_block_sizes = (
+          self.config.flash_attention_key_block_size,
+          x_keys.shape[1],
+      )
+    else:
+      kv_buffers = (kv_bundle,)
+      key_block_sizes = self.config.flash_attention_key_block_size
+
+    attention_mask_fns = []
+    if (
+        self.config.max_past_horizon != -1
+        or self.config.max_future_horizon != -1
+    ):
+      attention_mask_fns.append(
+          LocalCausalMask(
+              max_past_horizon=None
+              if self.config.max_past_horizon == -1
+              else self.config.max_past_horizon,
+              max_future_horizon=None
+              if self.config.max_future_horizon == -1
+              else self.config.max_future_horizon,
+          )
+      )
+    if self.config.segment_ids_name:
+      attention_mask_fns.append(SegmentMask())
+
+    def fn(query_bundle, kv_bundles):
+      return _multi_key_value_dot_product_flash_attention(
+          queries=query_bundle,
+          query_block_size=self.config.flash_attention_query_block_size,
+          kv_bundles=kv_bundles,
+          kv_block_sizes=key_block_sizes,
+          attention_mask_fns=attention_mask_fns,
+          attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+          per_dim_scale=self._per_dim_scale,
+          query_scale=self.config.query_scale,
+          precision=self.config.precision,
+          compute_dtype=compute_dtype,
+          remat=self.config.experimental_remat_inner,
+      )
+
+    if self.config.experimental_remat_outer:
+      fn = jax.checkpoint(fn, prevent_cse=False)
+
+    context_vectors = fn(
+        dataclasses.replace(new_query_bundle, mask=None), kv_buffers
+    )
+
+    # Update KV caches and state.
+    if self.config.use_kv_cache_ringbuffer:
+      # Write latest keys, values and masks to the appropriate position in the
+      # KV cache ring buffers.
+      i = time_step % kv_buffer_size
+      assert combined_mask.shape[1] == x_keys.shape[1]
+      assert x_values.shape[1] == x_keys.shape[1]
+
+      update_fn = jax.vmap(lambda x, u, i: x.at[i].set(u.squeeze(0)))
+
+      kv_bundle = jax.tree.map(
+          lambda a, b: update_fn(a, b, i), kv_bundle, new_kv_bundle
+      )
+    else:
+      # Preserve last kv_buffer_size timesteps as state for next step.
+      kv_bundle = jax.tree.map(lambda a: a[:, -kv_buffer_size:], kv_bundle)
+
+    state = (
+        kv_bundle,
+        time_step + x_values_time,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    )
+
+    emits = ()
+
+    # Context vectors contain invalid data in padding regions.
+    context_vectors = types.Sequence(context_vectors, new_query_bundle.mask)
+
+    return context_vectors, state, emits
+
+  @types.check_layer_with_emits
+  def layer_with_emits(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.Emits]:
+    values_time = x.shape[1]
+
+    queries, keys, values = self.get_qkv(self.config.input_projection, x)
+
+    if self.config.position_name:
+      x_position = utils.get_constant_array(
+          self, constants, self.config.position_name
+      )
+    else:
+      x_position = jnp.arange(values_time)[jnp.newaxis, :]
+
+    if self.config.segment_ids_name:
+      x_segment_ids = utils.get_constant_array(
+          self,
+          constants,
+          self.config.segment_ids_name,
+      )
+    else:
+      x_segment_ids = None
+
+    # Our params might not match param_dtype, so delegate the compute_dtype to
+    # the output of the QKV layer.
+    compute_dtype = queries.dtype
+
+    if self.query_network:
+      queries = self.query_network.layer(
+          queries,
+          training=training,
+          constants=constants,
+      )
+    if self.key_network:
+      keys = self.key_network.layer(
+          keys,
+          training=training,
+          constants=constants,
+      )
+    if self.value_network:
+      values = self.value_network.layer(
+          values, training=training, constants=constants
+      )
+
+    # The key and value network could have changed the mask, so we combine the
+    # keys and values mask. This is inexpensive but would be nice to skip.
+    combined_mask = utils.combine_mask(keys.mask, values.mask)
+
+    attention_mask_fns = []
+    if (
+        self.config.max_past_horizon != -1
+        or self.config.max_future_horizon != -1
+    ):
+      attention_mask_fns.append(
+          LocalCausalMask(
+              max_past_horizon=None
+              if self.config.max_past_horizon == -1
+              else self.config.max_past_horizon,
+              max_future_horizon=None
+              if self.config.max_future_horizon == -1
+              else self.config.max_future_horizon,
+          )
+      )
+    if self.config.segment_ids_name:
+      attention_mask_fns.append(SegmentMask())
+
+    def fn(query_bundle, kv_bundles):
+      return _multi_key_value_dot_product_flash_attention(
+          queries=query_bundle,
+          query_block_size=self.config.flash_attention_query_block_size,
+          kv_bundles=kv_bundles,
+          kv_block_sizes=self.config.flash_attention_key_block_size,
+          attention_mask_fns=attention_mask_fns,
+          attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+          per_dim_scale=self._per_dim_scale,
+          query_scale=self.config.query_scale,
+          precision=self.config.precision,
+          compute_dtype=compute_dtype,
+          remat=self.config.experimental_remat_inner,
+      )
+
+    if self.config.experimental_remat_outer:
+      fn = jax.checkpoint(fn)
+
+    context_vectors = fn(
+        QBundle(
+            queries.values,
+            segment_ids=x_segment_ids,
+            position=x_position,
+            mask=None,
+        ),
+        (
+            KVBundle(
+                keys=keys.values,
+                values=values.values,
+                segment_ids=x_segment_ids,
+                position=x_position,
+                mask=combined_mask,
+            ),
+        ),
+    )
+
+    emits = ()
+
+    # Context vectors contain invalid data in padding regions.
+    context_vectors = types.Sequence(context_vectors, x.mask)
+
+    return context_vectors, emits
+
+
+class BlockwiseDotProductSelfAttention(
+    types.Emitting, AttentionInputProjectionHelper
+):
+  """A multi-headed blockwise dot-product self attention layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Configuration for BlockwiseDotProductSelfAttention."""
+
+    # The block size of the attention. This determines which groups of timesteps
+    # are modeled with bidirectional attention and the minimum block size of
+    # this layer for stepping.
+    block_size: int
+
+    # The number of attention heads. If num_kv_heads is set, num_heads must be
+    # divisible by num_kv_heads.
+    num_heads: int
+    # The number of units per head.
+    units_per_head: int
+    # The number of past blocks each block can see.
+    # -1: Disable masking of the past (all past blocks are visible)
+    # 0: No past blocks are visible.
+    # The layer is only steppable when max_past_horizon >= 0.
+    max_past_horizon_blocks: int
+    # The number of future blocks each block can see.
+    # -1: Disable masking of the future (all future blocks are visible)
+    # 0: No future blocks are visible.
+    # The layer is only steppable when max_future_horizon >= 0.
+    max_future_horizon_blocks: int = 0
+
+    # If set, the number of heads to use for key/value projections. If
+    # num_kv_heads is set, num_heads must be divisible by num_kv_heads.
+    num_kv_heads: int | None = None
+
+    # Whether to learn a bias in the query/key/value projection.
+    use_bias: bool = False
+    # Configuration for the query, key and value input projection parameters.
+    # If num_kv_heads is set, must not be CombinedQueryKeyValueProjection.
+    # If shared_kv_projection is set, must be QueryAndSharedKeyValueProjection.
+    input_projection: QueryKeyValueProjectionConfig = dataclasses.field(
+        default_factory=CombinedQueryKeyValueProjection
+    )
+    # Optional query processing network. Useful to apply stateful processing to
+    # the queries, e.g. enabling RoPE.
+    query_network: types.SequenceLayerConfig | None = None
+    # Optional key processing network. Useful to apply stateful processing to
+    # the keys, e.g. enabling RoPE.
+    key_network: types.SequenceLayerConfig | None = None
+    # Optional value processing network. Useful to apply stateful processing to
+    # the values.
+    value_network: types.SequenceLayerConfig | None = None
+    # If non-zero, a soft cap applied to attention logits to prevent outliers
+    # from dominating the softmax. Empirically, 50.0 works well across a variety
+    # of tasks. Implemented as tanh(logits / cap) * cap.
+    attention_logits_soft_cap: float | None = None
+    # Whether to learn a [units_per_head] query scale factor across all query
+    # heads. At initialization (or if per_dim_scale is false), queries are
+    # scaled by 1/sqrt(units_per_head) or query_scale.
+    per_dim_scale: bool = False
+    # Sharding configuration for the per_dim_scale factor.
+    per_dim_scale_sharding: types.Sharding | None = None
+    # A manual query scale to apply. If unset, queries are scaled by
+    # 1/sqrt(units_per_head).
+    query_scale: float | None = None
+    # Precision config to use for einsums.
+    precision: nn.linear.PrecisionLike = None
+    # The dtype of the layer's computations.
+    compute_dtype: types.DType | None = None
+    # The dtype of the layer's parameters.
+    param_dtype: types.DType = jnp.float32
+
+    # If enabled, the name of the segment IDs in the constants. Only timesteps
+    # with the same segment ID will be allowed to attend to each other.
+    segment_ids_name: str | None = None
+    # If enabled, the name of a [b, t] position in the constants. If set, the
+    # position will be provided externally to the layer. If unset, position will
+    # be tracked internally.
+    position_name: str | None = None
+
+    # Flash attention block sizes. If non-None, uses flash attention to split
+    # the attention computation into smaller blocks. This reduces peak memory
+    # usage and may lead to speedups. On TPU, block sizes less than 128 are
+    # typically not worth it.
+    flash_attention_query_block_size: int | None = None
+    flash_attention_key_block_size: int | None = None
+
+    # An optional name for the layer.
+    name: str | None = None
+
+    def make(self) -> 'BlockwiseDotProductSelfAttention':
+      return BlockwiseDotProductSelfAttention(self, name=self.name)
+
+  config: Config
+
+  def setup(self) -> None:
+    _validate_heads(
+        self.config.num_heads, self.config.units_per_head, self.name
+    )
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    self._setup_projection_layers(
+        self.config.input_projection,
+        num_query_heads=self.config.num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=self.config.units_per_head,
+        use_bias=self.config.use_bias,
+        precision=self.config.precision,
+        compute_dtype=self.config.compute_dtype,
+        param_dtype=self.config.param_dtype,
+    )
+    if self.config.max_past_horizon_blocks < -1:
+      raise ValueError(
+          f'Expected max_past_horizon_blocks >= -1 for {self}, got'
+          f' {self.config.max_past_horizon_blocks}.'
+      )
+    if self.config.max_future_horizon_blocks < -1:
+      raise ValueError(
+          'Expected max_future_horizon_blocks >= -1 for '
+          f'{self}, got {self.config.max_future_horizon_blocks}.'
+      )
+
+    if (
+        self.config.attention_logits_soft_cap
+        and self.config.attention_logits_soft_cap < 0.0
+    ):
+      raise ValueError(
+          f'{self.config.attention_logits_soft_cap=} should be None or non-neg.'
+      )
+
+    self.query_network = (
+        self.config.query_network.make() if self.config.query_network else None
+    )
+    if self.query_network and (
+        self.query_network.output_ratio != 1
+        or self.config.block_size % self.query_network.block_size != 0
+    ):
+      raise ValueError(
+          'Query network must have an output_ratio'
+          f' ({self.query_network.output_ratio}) of 1 and block_size'
+          f' ({self.query_network.block_size}) divisible by'
+          f' {self.config.block_size}.'
+      )
+
+    self.key_network = (
+        self.config.key_network.make() if self.config.key_network else None
+    )
+    if self.key_network and (
+        self.key_network.output_ratio != 1
+        or self.config.block_size % self.key_network.block_size != 0
+    ):
+      raise ValueError(
+          'Key network must have an output_ratio'
+          f' ({self.key_network.output_ratio}) of 1 and block_size'
+          f' ({self.key_network.block_size}) divisible by'
+          f' {self.config.block_size}.'
+      )
+
+    self.value_network = (
+        self.config.value_network.make() if self.config.value_network else None
+    )
+    if self.value_network and (
+        self.value_network.output_ratio != 1
+        or self.config.block_size % self.value_network.block_size != 0
+    ):
+      raise ValueError(
+          'Value network must have an output_ratio'
+          f' ({self.value_network.output_ratio}) of 1 and block_size'
+          f' ({self.value_network.block_size}) divisible by'
+          f' {self.config.block_size}.'
+      )
+
+    self._per_dim_scale = None
+    if self.config.per_dim_scale:
+      self._per_dim_scale = self.param(
+          'per_dim_scale',
+          utils.shard_initializer(
+              nn.initializers.zeros_init(), self.config.per_dim_scale_sharding
+          ),
+          [self.config.units_per_head],
+          self.config.param_dtype,
+      )
+
+  @property
+  def block_size(self) -> int:
+    return self.config.block_size
+
+  @property
+  def supports_step(self) -> bool:
+    supports_step = (
+        self.config.max_future_horizon_blocks >= 0
+        and self.config.max_past_horizon_blocks >= 0
+    )
+    if self.query_network:
+      supports_step = supports_step and self.query_network.supports_step
+
+    if self.key_network:
+      supports_step = supports_step and self.key_network.supports_step
+
+    if self.value_network:
+      supports_step = supports_step and self.value_network.supports_step
+
+    return supports_step
+
+  @property
+  def input_latency(self) -> int:
+    return max(
+        0, self.config.max_future_horizon_blocks * self.config.block_size
+    )
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    max_past_horizon = (
+        self.config.max_past_horizon_blocks * self.config.block_size
+    )
+    # The total lookahead includes the block_size - 1 samples in the current
+    # block.
+    max_future_horizon = (
+        self.config.max_future_horizon_blocks * self.config.block_size
+    )
+
+    per_step = {}
+
+    for i in range(self.config.block_size):
+      if self.config.max_past_horizon_blocks == -1:
+        start = -np.inf
+      else:
+        start = -max_past_horizon
+      if self.config.max_future_horizon_blocks == -1:
+        end = np.inf
+      else:
+        end = max_future_horizon + self.config.block_size - 1
+      # TODO(b/478101851): This should be offset by -i.
+      per_step[i] = (start, end)
+
+    return per_step
+
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: types.ShapeDType,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.State:
+    compute_dtype = self.get_input_projection_output_dtype(
+        self.config.input_projection, input_spec.dtype, constants=constants
+    )
+    # State to contain the max_past_horizon + max_future_horizon projected keys
+    # and values. Note, the initial state is invalid since we don't want to
+    # attend to it.
+    max_past_horizon = max(
+        0, self.config.max_past_horizon_blocks * self.config.block_size
+    )
+    max_future_horizon = max(
+        0, self.config.max_future_horizon_blocks * self.config.block_size
+    )
+    kv_buffer_size = max_past_horizon + max_future_horizon
+
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    kv_zero_values = jnp.zeros(
+        (
+            batch_size,
+            kv_buffer_size,
+            num_kv_heads,
+            self.config.units_per_head,
+        ),
+        dtype=compute_dtype,
+    )
+    kv_zero_mask = jnp.zeros(
+        [batch_size, kv_buffer_size], dtype=types.MASK_DTYPE
+    )
+    kv_zero_ids = jnp.zeros(
+        [batch_size, kv_buffer_size],
+        dtype=jnp.int32,
+    )
+
+    kv_bundle = KVBundle(
+        keys=kv_zero_values,
+        values=kv_zero_values,
+        segment_ids=kv_zero_ids if self.config.segment_ids_name else None,
+        position=kv_zero_ids,
+        mask=kv_zero_mask,
+    )
+
+    # If we have a finite future horizon, we cannot produce outputs for timestep
+    # t until the max_future_horizon KV timesteps have arrived. Store incoming
+    # queries in a delay buffer so we do not compute context vectors for them
+    # until max_future_horizon KV timesteps have arrived.
+    if max_future_horizon:
+      query_delay_buffer = QBundle(
+          queries=jnp.zeros(
+              (
+                  batch_size,
+                  max_future_horizon,
+                  self.config.num_heads,
+                  self.config.units_per_head,
+              ),
+              dtype=compute_dtype,
+          ),
+          segment_ids=jnp.zeros(
+              [batch_size, max_future_horizon], dtype=jnp.int32
+          )
+          if self.config.segment_ids_name
+          else None,
+          position=jnp.zeros([batch_size, max_future_horizon], dtype=jnp.int32),
+          mask=jnp.zeros(
+              [batch_size, max_future_horizon], dtype=types.MASK_DTYPE
+          ),
+      )
+    else:
+      query_delay_buffer = ()
+
+    time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
+
+    query_input_spec = types.ShapeDType(
+        (self.config.num_heads, self.config.units_per_head), compute_dtype
+    )
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    key_value_input_spec = types.ShapeDType(
+        (num_kv_heads, self.config.units_per_head), compute_dtype
+    )
+
+    if self.query_network:
+      query_network_state = self.query_network.get_initial_state(
+          batch_size,
+          query_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      query_network_state = ()
+    if self.key_network:
+      key_network_state = self.key_network.get_initial_state(
+          batch_size,
+          key_value_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      key_network_state = ()
+    if self.value_network:
+      value_network_state = self.value_network.get_initial_state(
+          batch_size,
+          key_value_input_spec,
+          training=training,
+          constants=constants,
+      )
+    else:
+      value_network_state = ()
+
+    return (
+        kv_bundle,
+        time_step,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    )
+
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    return utils.get_promoted_dtype(
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
+    )
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    if len(input_shape) != 1:
+      raise ValueError(
+          'DotProductSelfAttention requires rank 3 input got:'
+          f' {(None, None) + tuple(input_shape)}'
+      )
+    return (self.config.num_heads, self.config.units_per_head)
+
+  @types.check_step_with_emits
+  def step_with_emits(
+      self,
+      x: types.Sequence,
+      state: types.State,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.State, types.Emits]:
+    if not self.supports_step:
+      raise ValueError(f'{self} is not steppable.')
+
+    x_values_time = x.shape[1]
+
+    x_queries, x_keys, x_values = self.get_qkv(self.config.input_projection, x)
+
+    # Our params might not match param_dtype, so delegate the compute_dtype to
+    # the output of the QKV layer.
+    compute_dtype = x_queries.dtype
+
+    (
+        kv_bundle,
+        time_step,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    ) = state
+
+    if self.config.position_name:
+      x_position = _get_source(
+          self, self.config.position_name, constants, required_rank=2
+      )
+    else:
+      x_position = (
+          jnp.arange(x_values_time)[jnp.newaxis, :] + time_step[:, jnp.newaxis]
+      )
+
+    if self.config.segment_ids_name:
+      x_segment_ids = _get_source(
+          self, self.config.segment_ids_name, constants, required_rank=2
+      )
+    else:
+      x_segment_ids = None
+
+    kv_buffer_size = kv_bundle.keys.shape[1]
+
+    if self.query_network:
+      x_queries, query_network_state = self.query_network.step(
+          x_queries,
+          query_network_state,
+          training=training,
+          constants=constants,
+      )
+    if self.key_network:
+      x_keys, key_network_state = self.key_network.step(
+          x_keys,
+          key_network_state,
+          training=training,
+          constants=constants,
+      )
+    if self.value_network:
+      x_values, value_network_state = self.value_network.step(
+          x_values,
+          value_network_state,
+          training=training,
+      )
+
+    # Guard against NaN/Inf in values, since values are contracted when
+    # computing context vectors.
+    x_values = x_values.mask_invalid()
+
+    # The key and value network could have changed the mask, so we combine the
+    # keys and values mask. This is inexpensive but would be nice to skip.
+    combined_mask = utils.combine_mask(x_keys.mask, x_values.mask)
+
+    new_query_bundle = QBundle(
+        queries=x_queries.values,
+        segment_ids=x_segment_ids,
+        position=x_position,
+        mask=x_queries.mask,
+    )
+    new_kv_bundle = KVBundle(
+        keys=x_keys.values,
+        values=x_values.values,
+        segment_ids=x_segment_ids,
+        position=x_position,
+        # The mask could differ based on key_network / value_network.
+        mask=combined_mask,
+    )
+
+    # To process a step, concatenate our kv_buffer_size KV buffer with the
+    # input source.shape[1] timesteps.
+    kv_bundle = jax.tree.map(
+        lambda a, b: jnp.concatenate([a, b], axis=1), kv_bundle, new_kv_bundle
+    )
+
+    # If we have a query delay buffer, we need to insert the current block of
+    # queries into it, and pop the oldest x_values_time queries off. If no query
+    # cache, the below logic is a no-op so we save the compute of running it.
+    if query_delay_buffer:
+      assert self.config.max_future_horizon_blocks > 0
+
+      max_future_horizon = (
+          self.config.max_future_horizon_blocks * self.config.block_size
+      )
+
+      query_delay_buffer = jax.tree.map(
+          lambda a, b: jnp.concatenate([a, b], axis=1),
+          query_delay_buffer,
+          new_query_bundle,
+      )
+      assert (
+          query_delay_buffer.queries.shape[1]
+          == x_values_time + max_future_horizon
+      )
+
+      # Use the oldest x_values_time queries as the current step's queries. They
+      # each have max_future_horizon context available in
+      # kv_buffer_keys/kv_buffer_values so we can produce valid output for them.
+      new_query_bundle = jax.tree.map(
+          lambda a: a[:, :x_values_time], query_delay_buffer
+      )
+
+      # Preserve the last max_future_horizon queries for the next step.
+      query_delay_buffer = jax.tree.map(
+          lambda a: a[:, -max_future_horizon:], query_delay_buffer
+      )
+
+    # Compute context vectors:
+    kv_buffers = (kv_bundle,)
+    key_block_sizes = self.config.flash_attention_key_block_size
+
+    attention_mask_fns = []
+    if (
+        self.config.max_past_horizon_blocks != -1
+        or self.config.max_future_horizon_blocks != -1
+    ):
+      attention_mask_fns.append(
+          BlockwiseLocalCausalMask(
+              self.config.block_size,
+              max_past_horizon_blocks=None
+              if self.config.max_past_horizon_blocks == -1
+              else self.config.max_past_horizon_blocks,
+              max_future_horizon_blocks=None
+              if self.config.max_future_horizon_blocks == -1
+              else self.config.max_future_horizon_blocks,
+          )
+      )
+    if self.config.segment_ids_name:
+      attention_mask_fns.append(SegmentMask())
+
+    context_vectors = _multi_key_value_dot_product_flash_attention(
+        queries=dataclasses.replace(new_query_bundle, mask=None),
+        query_block_size=self.config.flash_attention_query_block_size,
+        kv_bundles=kv_buffers,
+        kv_block_sizes=key_block_sizes,
+        attention_mask_fns=attention_mask_fns,
+        attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+        per_dim_scale=self._per_dim_scale,
+        query_scale=self.config.query_scale,
+        precision=self.config.precision,
+        compute_dtype=compute_dtype,
+    )
+
+    # Preserve last kv_buffer_size timesteps as state for next step.
+    kv_bundle = jax.tree.map(lambda a: a[:, -kv_buffer_size:], kv_bundle)
+
+    state = (
+        kv_bundle,
+        time_step + x_values_time,
+        query_network_state,
+        key_network_state,
+        value_network_state,
+        query_delay_buffer,
+    )
+
+    emits = ()
+
+    # Context vectors contain invalid data in padding regions.
+    context_vectors = types.Sequence(context_vectors, new_query_bundle.mask)
+
+    return context_vectors, state, emits
+
+  @types.check_layer_with_emits
+  def layer_with_emits(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.Emits]:
+    values_time = x.shape[1]
+
+    queries, keys, values = self.get_qkv(self.config.input_projection, x)
+
+    if self.config.position_name:
+      x_position = _get_source(
+          self, self.config.position_name, constants, required_rank=2
+      )
+    else:
+      x_position = jnp.arange(values_time)[jnp.newaxis, :]
+
+    if self.config.segment_ids_name:
+      x_segment_ids = _get_source(
+          self, self.config.segment_ids_name, constants, required_rank=2
+      )
+    else:
+      x_segment_ids = None
+
+    # Our params might not match param_dtype, so delegate the compute_dtype to
+    # the output of the QKV layer.
+    compute_dtype = queries.dtype
+
+    if self.query_network:
+      queries = self.query_network.layer(
+          queries,
+          training=training,
+          constants=constants,
+      )
+    if self.key_network:
+      keys = self.key_network.layer(
+          keys,
+          training=training,
+          constants=constants,
+      )
+    if self.value_network:
+      values = self.value_network.layer(
+          values, training=training, constants=constants
+      )
+
+    # The key and value network could have changed the mask, so we combine the
+    # keys and values mask. This is inexpensive but would be nice to skip.
+    combined_mask = utils.combine_mask(keys.mask, values.mask)
+
+    attention_mask_fns = []
+    if (
+        self.config.max_past_horizon_blocks != -1
+        or self.config.max_future_horizon_blocks != -1
+    ):
+      attention_mask_fns.append(
+          BlockwiseLocalCausalMask(
+              block_size=self.config.block_size,
+              max_past_horizon_blocks=None
+              if self.config.max_past_horizon_blocks == -1
+              else self.config.max_past_horizon_blocks,
+              max_future_horizon_blocks=None
+              if self.config.max_future_horizon_blocks == -1
+              else self.config.max_future_horizon_blocks,
+          )
+      )
+    if self.config.segment_ids_name:
+      attention_mask_fns.append(SegmentMask())
+
+    context_vectors = _multi_key_value_dot_product_flash_attention(
+        queries=QBundle(
+            queries=queries.values,
+            segment_ids=x_segment_ids,
+            position=x_position,
+            mask=None,
+        ),
+        query_block_size=self.config.flash_attention_query_block_size,
+        kv_bundles=(
+            KVBundle(
+                keys=keys.values,
+                values=values.values,
+                segment_ids=x_segment_ids,
+                position=x_position,
+                mask=combined_mask,
+            ),
+        ),
+        kv_block_sizes=self.config.flash_attention_key_block_size,
+        attention_mask_fns=attention_mask_fns,
+        attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+        per_dim_scale=self._per_dim_scale,
+        query_scale=self.config.query_scale,
+        precision=self.config.precision,
+        compute_dtype=compute_dtype,
+    )
+
+    emits = ()
+
+    # Context vectors contain invalid data in padding regions.
+    context_vectors = types.Sequence(context_vectors, x.mask)
+
+    return context_vectors, emits
+
+
+class MultiSourceDotProductAttention(
+    types.Emitting, AttentionInputProjectionHelper
+):
+  """Multi-source dot product attention."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    """Configuration for MultiSourceDotProductAttention."""
+
+    # The name(s) of the constant(s) containing the source sequences to attend
+    # to.
+    source_names: str | TypingSequence[str]
+
+    # The number of attention heads.
+    num_heads: int
+
+    # The number of units per head.
+    units_per_head: int
+
+    # The number of key/value heads. If None, defaults to num_heads.
+    num_kv_heads: int | None = None
+
+    # Flash attention block sizes. If non-None, uses flash attention to split
+    # the attention computation into smaller blocks. This reduces peak memory
+    # usage and may lead to speedups. On TPU, block sizes less than 128 are
+    # typically not worth it.
+    flash_attention_query_block_size: int | None = None
+    flash_attention_source_block_sizes: int | TypingSequence[int] | None = None
+
+    # The name of the constant containing the query positions. If unset,
+    # positions are created from the time step.
+    query_positions_name: str | None = None
+    # The name of the constant containing the query segment ids. If unset,
+    # no segment IDs are used for attention masking.
+    query_segment_ids_name: str | None = None
+    # The name(s) of the constant(s) containing the source positions. If unset,
+    # positions are created from the time step.
+    source_position_names: str | TypingSequence[str] | None = None
+    # The name(s) of the constant(s) containing the source segment ids. If
+    # unset, no segment IDs are used for attention masking.
+    source_segment_ids_names: str | TypingSequence[str] | None = None
+
+    # Whether to learn a bias in the query/key/value projection.
+    use_bias: bool = False
+    # Configuration for the query, key and value input projections.
+    input_projection: (
+        QueryAndKeyValueProjection
+        | SeparateQueryKeyValueProjection
+        | QueryAndSharedKeyValueProjection
+    ) = dataclasses.field(default_factory=QueryAndKeyValueProjection)
+    # Optional query processing network. Useful to apply stateful processing to
+    # the queries, e.g. enabling RoPE.
+    query_network: types.SequenceLayerConfig | None = None
+    # Optional key processing network. Useful to apply stateful processing to
+    # the keys, e.g. enabling RoPE.
+    key_network: types.SequenceLayerConfig | None = None
+    # Optional value processing network. Useful to apply stateful processing to
+    # the values.
+    value_network: types.SequenceLayerConfig | None = None
+    # Whether to learn a [units_per_head] query scale factor across all query
+    # heads. At initialization (or if per_dim_scale is false), queries are
+    # scaled by 1/sqrt(units_per_head) or query_scale.
+    per_dim_scale: bool = False
+    # Sharding configuration for the per_dim_scale factor.
+    per_dim_scale_sharding: types.Sharding | None = None
+    # A manual query scale to apply. If unset, queries are scaled by
+    # 1/sqrt(units_per_head).
+    query_scale: float | None = None
+    # If non-zero, a soft cap applied to attention logits to prevent outliers
+    # from dominating the softmax. Empirically, 50.0 works well across a variety
+    # of tasks. Implemented as tanh(logits / cap) * cap.
+    attention_logits_soft_cap: float | None = None
+    # Precision config to use for einsums.
+    precision: nn.linear.PrecisionLike = None
+    # The dtype of the layer's computations.
+    compute_dtype: types.DType | None = None
+    # The dtype of the layer's parameters.
+    param_dtype: types.DType = jnp.float32
+    # An optional name for the layer.
+    name: str | None = None
+
+    def make(self) -> 'MultiSourceDotProductAttention':
+      return MultiSourceDotProductAttention(self, name=self.name)
+
+  config: Config
+
+  @property
+  def _source_names(self) -> TypingSequence[str]:
+    if isinstance(self.config.source_names, str):
+      return (self.config.source_names,)
+    else:
+      return self.config.source_names
+
+  def setup(self) -> None:
+    for source_name in self._source_names:
+      if not source_name:
+        raise ValueError('Source name cannot be empty.')
+    _validate_attention(
+        'unused',
+        self.config.num_heads,
+        self.config.units_per_head,
+        self.name,
+    )
+    if (
+        self.config.attention_logits_soft_cap
+        and self.config.attention_logits_soft_cap < 0.0
+    ):
+      raise ValueError(
+          f'{self.config.attention_logits_soft_cap=} should be None or non-neg.'
+      )
+
+    self._per_dim_scale = None
+    if self.config.per_dim_scale:
+      self._per_dim_scale = self.param(
+          'per_dim_scale',
+          utils.shard_initializer(
+              nn.initializers.zeros_init(), self.config.per_dim_scale_sharding
+          ),
+          [self.config.units_per_head],
+          self.config.param_dtype,
+      )
+
+    num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+    self._setup_projection_layers(
+        self.config.input_projection,
+        num_query_heads=self.config.num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=self.config.units_per_head,
+        use_bias=self.config.use_bias,
+        precision=self.config.precision,
+        compute_dtype=self.config.compute_dtype,
+        param_dtype=self.config.param_dtype,
+        # Not possible for cross attention.
+        allow_combined_qkv=False,
+    )
+
+    self.query_network = (
+        self.config.query_network.make() if self.config.query_network else None
+    )
+    if self.query_network and (
+        self.query_network.output_ratio != 1
+        or self.query_network.block_size != 1
+    ):
+      raise ValueError(
+          'Query network must have an output_ratio'
+          f' ({self.query_network.output_ratio}) of 1 and block_size'
+          f' ({self.query_network.block_size}) of 1.'
+      )
+
+    self.key_network = (
+        self.config.key_network.make() if self.config.key_network else None
+    )
+    if self.key_network and (
+        self.key_network.output_ratio != 1 or self.key_network.block_size != 1
+    ):
+      raise ValueError(
+          'Key network must have an output_ratio'
+          f' ({self.key_network.output_ratio}) of 1 and block_size'
+          f' ({self.key_network.block_size}) of 1.'
+      )
+
+    self.value_network = (
+        self.config.value_network.make() if self.config.value_network else None
+    )
+    if self.value_network and (
+        self.value_network.output_ratio != 1
+        or self.value_network.block_size != 1
+    ):
+      raise ValueError(
+          'Value network must have an output_ratio'
+          f' ({self.value_network.output_ratio}) of 1 and block_size'
+          f' ({self.value_network.block_size}) of 1.'
+      )
+
+  @property
+  def supports_step(self) -> bool:
+    supports_step = True
+
+    if self.query_network:
+      supports_step = supports_step and self.query_network.supports_step
+
+    return supports_step
+
+  @property
+  def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
+    if self.query_network:
+      return self.query_network.receptive_field_per_step
+    else:
+      return {0: (0, 0)}
+
+  def _get_query_positions_from_constants(
+      self, constants: types.Constants | None
+  ) -> types.Sequence:
+    return _get_source(
+        self, self.config.query_positions_name, constants, required_rank=2
+    )
+
+  @jt.typed
+  @nn.nowrap
+  def _get_query_positions(
+      self,
+      batch_size: int,
+      queries_seq_length: int,
+      constants: types.Constants | None = None,
+      time_step: jt.Int[jt.ArrayT, '#b'] | int = 0,
+  ) -> jaxtyping.Num[jt.ArrayT, '#b q']:
+    """Returns query positions for relative position biases."""
+    if self.config.query_positions_name:
+      # Use the position constant as query position.
+      query_positions = self._get_query_positions_from_constants(
+          constants
+      ).values
+      if query_positions.shape != (batch_size, queries_seq_length):
+        raise ValueError(
+            f'Query positions shape {query_positions.shape} does not match'
+            f' expected shape ({batch_size}, {queries_seq_length}).'
+        )
+    else:
+      if isinstance(time_step, int):
+        time_step = jnp.full((1,), time_step, dtype=jnp.int32)
+      query_positions = (
+          time_step[:, jnp.newaxis]
+          + jnp.arange(queries_seq_length)[jnp.newaxis, :]
+      )
+    return query_positions
+
+  def _get_kv_bundles(
+      self, training: bool, constants: types.Constants | None
+  ) -> list[KVBundle]:
+    """Returns key/value bundles for all sources."""
+    kv_bundles = []
+
+    source_position_names = self.config.source_position_names
+    if source_position_names is None:
+      source_position_names = [None] * len(self._source_names)
+    elif isinstance(source_position_names, str):
+      source_position_names = [source_position_names] * len(self._source_names)
+    source_segment_ids_names = self.config.source_segment_ids_names
+    if source_segment_ids_names is None:
+      source_segment_ids_names = [None] * len(self._source_names)
+    elif isinstance(source_segment_ids_names, str):
+      source_segment_ids_names = [source_segment_ids_names] * len(
+          self._source_names
+      )
+    if len(source_position_names) != len(self._source_names):
+      raise ValueError(
+          'source_position_names must be the same length as source_names.'
+      )
+    if len(source_segment_ids_names) != len(self._source_names):
+      raise ValueError(
+          'source_segment_ids_names must be the same length as source_names.'
+      )
+
+    source_channel_shapes = {
+        _get_source(self, source_name, constants).channel_shape
+        for source_name in self._source_names
+    }
+
+    if len(source_channel_shapes) != 1:
+      raise ValueError(
+          'All sources must have the same channel shape, got:'
+          f' {source_channel_shapes=} for {self._source_names=}'
+      )
+
+    for source_name, position_name, segment_ids_name in zip(
+        self._source_names,
+        source_position_names,
+        source_segment_ids_names,
+        strict=True,
+    ):
+      # Pre-process sources with key/value projections and networks.
+      source = _get_source(self, source_name, constants)
+      keys, values = self.get_kv(self.config.input_projection, source)
+      if self.key_network:
+        keys = self.key_network.layer(
+            keys, training=training, constants=constants
+        )
+
+      if self.value_network:
+        values = self.value_network.layer(
+            values, training=training, constants=constants
+        )
+
+      if position_name:
+        positions = _get_source(self, position_name, constants, required_rank=2)
+      else:
+        positions = jnp.arange(keys.shape[1])[jnp.newaxis, :]
+
+      if segment_ids_name:
+        segment_ids = _get_source(
+            self, segment_ids_name, constants, required_rank=2
+        )
+      else:
+        segment_ids = None
+
+      # Mask before storing in state:
+      keys = keys.mask_invalid()
+      values = values.mask_invalid()
+      combined_mask = utils.combine_mask(keys.mask, values.mask)
+
+      kv_bundles.append(
+          KVBundle(
+              keys.values, values.values, segment_ids, positions, combined_mask
+          )
+      )
+    return kv_bundles
+
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: types.ShapeDType,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.State:
+    kv_bundles = self._get_kv_bundles(training, constants)
+
+    if self.query_network:
+      query_state = self.query_network.get_initial_state(
+          batch_size,
+          types.ShapeDType(
+              (self.config.num_heads, self.config.units_per_head),
+              input_spec.dtype,
+          ),
+          training=training,
+          constants=constants,
+      )
+    else:
+      query_state = ()
+
+    time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
+    return (kv_bundles, query_state, time_step)
+
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    return utils.get_promoted_dtype(
+        input_dtype, self.config.param_dtype, dtype=self.config.compute_dtype
+    )
+
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    if len(input_shape) != 1:
+      raise ValueError(
+          'DotProductAttention requires rank 3 input got:'
+          f' {(None, None) + tuple(input_shape)}'
+      )
+    return (self.config.num_heads, self.config.units_per_head)
+
+  @types.check_step_with_emits
+  def step_with_emits(
+      self,
+      x: types.Sequence,
+      state: types.State,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.State, types.Emits]:
+    kv_bundles, query_state, time_step = state
+
+    x_num_timesteps = x.shape[1]
+
+    # No mask required, since query timesteps are independent.
+    queries = self.get_q(self.config.input_projection, x)
+
+    if self.query_network:
+      queries, query_state = self.query_network.step(
+          queries, query_state, training=training, constants=constants
+      )
+
+    y, emits = self._attention(
+        queries,
+        kv_bundles,
+        constants=constants,
+        time_step=time_step,
+    )
+    time_step += x_num_timesteps
+    state = (kv_bundles, query_state, time_step)
+    return y, state, emits
+
+  @types.check_layer_with_emits
+  def layer_with_emits(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.Emits]:
+    kv_bundles = self._get_kv_bundles(training, constants)
+
+    # No mask required, since query timesteps are independent.
+    queries = self.get_q(self.config.input_projection, x)
+
+    if self.query_network:
+      queries = self.query_network.layer(
+          queries,
+          training=training,
+          constants=constants,
+      )
+
+    return self._attention(
+        queries,
+        kv_bundles,
+        constants=constants,
+    )
+
+  @nn.nowrap
+  def _attention(
+      self,
+      query: types.Sequence,
+      kv_bundles: list[KVBundle],
+      constants: types.Constants | None = None,
+      time_step: jaxtyping.Num[jt.ArrayT, 'b k'] | int = 0,
+  ) -> tuple[types.Sequence, types.Emits]:
+    compute_dtype = utils.get_promoted_dtype(
+        query.values.dtype,
+        *[k.keys.dtype for k in kv_bundles],
+        dtype=self.config.compute_dtype,
+    )
+
+    query_positions = self._get_query_positions(
+        query.shape[0], query.shape[1], constants, time_step
+    )
+
+    if self.config.query_segment_ids_name:
+      query_segment_ids = _get_source(
+          self,
+          self.config.query_segment_ids_name,
+          constants,
+          required_rank=2,
+      )
+    else:
+      query_segment_ids = None
+
+    query_bundle = QBundle(
+        queries=query.values,
+        segment_ids=query_segment_ids,
+        position=query_positions,
+        mask=None,
+    )
+
+    attention_mask_fns = []
+    if self.config.query_segment_ids_name:
+      attention_mask_fns.append(SegmentMask())
+
+    context_vectors = _multi_key_value_dot_product_flash_attention(
+        queries=query_bundle,
+        query_block_size=self.config.flash_attention_query_block_size,
+        kv_bundles=kv_bundles,
+        kv_block_sizes=self.config.flash_attention_source_block_sizes,
+        attention_mask_fns=attention_mask_fns,
+        attention_logits_soft_cap=self.config.attention_logits_soft_cap,
+        precision=self.config.precision,
+        per_dim_scale=self._per_dim_scale,
+        query_scale=self.config.query_scale,
+        compute_dtype=compute_dtype,
+    )
+    emits = ()
+    # Context vectors contain invalid data in padding regions.
+    context_vectors = types.Sequence(context_vectors, query.mask)
     return context_vectors, emits
