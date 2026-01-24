@@ -1852,7 +1852,7 @@ def _get_constant(
       return None
     else:
       raise ValueError(
-          f'{layer} requires the constant {name} to be provided via '
+          f'{type(layer)} requires the constant {name} to be provided via '
           f'constants, got: {constants}'
       )
 
@@ -1868,7 +1868,7 @@ def _get_constant(
   wrong_dtype = expected_dtype is not None and value.dtype != expected_dtype
   if wrong_shape or wrong_dtype:
     raise ValueError(
-        f'{layer} requires the constant {name} to have shape'
+        f'{type(layer)} requires the constant {name} to have shape'
         f' {expected_shape} dtype {expected_dtype}, got:'
         f' {value.shape=} {value.dtype=}'
     )
@@ -1899,7 +1899,8 @@ def get_constant_array(
     value = value.values
   if not isinstance(value, jax.Array):
     raise ValueError(
-        f'{layer} requires the constant {name} to be an array, got: {value}'
+        f'{type(layer)} requires the constant {name} to be an array, got:'
+        f' {value}'
     )
   return value
 

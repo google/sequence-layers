@@ -907,12 +907,13 @@ class Steppable(metaclass=abc.ABCMeta):
     property is a helper to compute the overall receptive field of a layer and
     the receptive field of a composition of layers.
 
-    Infinite receptive field is represtend with +/-np.inf. E.g., RNNs have
+    Infinite receptive field is represented with +/-np.inf. E.g., RNNs have
     (-np.inf, 0) receptive field.
 
     No receptive field is represented as None. E.g., Conv1DTranspose with
-    kernel_size=1, stirde=2, produces None receptive on every other steps.
+    kernel_size=1, stride=2, produces None receptive field for every other step.
     """
+
     # To avoid circular dependency, the logic here is copied from utils.py, can
     # we dedup?
     rf_per_step = self.receptive_field_per_step
