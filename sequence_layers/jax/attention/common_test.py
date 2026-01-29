@@ -15,10 +15,10 @@ from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
-from sequence_layers.jax import attention
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+from sequence_layers.jax.attention import common
 
 
 def _dot_product_attention_reference(
@@ -48,7 +48,7 @@ def _dot_product_attention_reference(
     key = key.astype(compute_dtype)
     value = value.astype(compute_dtype)
 
-  query = attention._scale_query(query, per_dim_scale, query_scale)
+  query = common._scale_query(query, per_dim_scale, query_scale)
 
   num_query_heads = query.shape[-2]
   num_key_heads = key.shape[-2]
@@ -137,7 +137,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
       per_dim_scale = None
       queries_scaled = queries * query_scale
 
-    _, probabilities = attention._dot_product_attention(
+    _, probabilities = common.dot_product_attention(
         queries,
         keys,
         values,
@@ -195,7 +195,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         jnp.bool_,
     )
 
-    _, probabilities = attention._dot_product_attention(
+    _, probabilities = common.dot_product_attention(
         queries,
         keys,
         values,
@@ -241,7 +241,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         [False, False, False, False, False],
     ]]])
 
-    context_vectors, _ = attention._dot_product_attention(
+    context_vectors, _ = common.dot_product_attention(
         queries,
         keys,
         values,
@@ -292,7 +292,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
       per_dim_scale = None
 
     expected_context_vectors, expected_probabilities = (
-        attention._dot_product_attention(
+        common.dot_product_attention(
             queries,
             keys,
             values,
@@ -318,7 +318,7 @@ class DotProductAttentionHelperTest(test_utils.SequenceLayerTest):
     valid_mask1, valid_mask2 = jnp.split(valid_mask, 2, axis=3)
 
     context_vectors, (probabilities1, probabilities2) = (
-        attention._multi_key_value_dot_product_attention(
+        common.multi_key_value_dot_product_attention(
             queries,
             (
                 (keys1, values1, valid_mask1),
@@ -346,14 +346,14 @@ class SameSegmentTest(test_utils.SequenceLayerTest):
 
   def test_no_segments(self):
     with self.assertRaises(ValueError):
-      attention.SegmentMask()(
-          attention.QBundle(
+      common.SegmentMask()(
+          common.QBundle(
               queries=None,
               segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
               position=None,
               mask=None,
           ),
-          attention.KVBundle(
+          common.KVBundle(
               keys=None,
               values=None,
               segment_ids=None,
@@ -362,14 +362,14 @@ class SameSegmentTest(test_utils.SequenceLayerTest):
           ),
       )
     with self.assertRaises(ValueError):
-      attention.SegmentMask()(
-          attention.QBundle(
+      common.SegmentMask()(
+          common.QBundle(
               queries=None,
               segment_ids=None,
               position=None,
               mask=None,
           ),
-          attention.KVBundle(
+          common.KVBundle(
               keys=None,
               values=None,
               segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
@@ -379,16 +379,16 @@ class SameSegmentTest(test_utils.SequenceLayerTest):
       )
 
   def test_basic(self):
-    mask_fn = attention.SegmentMask()
+    mask_fn = common.SegmentMask()
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=jnp.array([[1, 2, 3], [4, 5, 6]]),
             position=None,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=jnp.array([[3, 3, 2], [0, 1, 6]]),
@@ -416,7 +416,7 @@ class SameSegmentTest(test_utils.SequenceLayerTest):
 class LocalCausalMaskTest(test_utils.SequenceLayerTest):
 
   def test_unbounded(self):
-    mask_fn = attention.LocalCausalMask(None, None)
+    mask_fn = common.LocalCausalMask(None, None)
 
     query_time = 35
     key_time = 50
@@ -425,13 +425,13 @@ class LocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -453,7 +453,7 @@ class LocalCausalMaskTest(test_utils.SequenceLayerTest):
       (0, 5),
   )
   def test_bounded(self, max_past_horizon, max_future_horizon):
-    mask_fn = attention.LocalCausalMask(max_past_horizon, max_future_horizon)
+    mask_fn = common.LocalCausalMask(max_past_horizon, max_future_horizon)
 
     query_time = 35
     key_time = 50
@@ -462,13 +462,13 @@ class LocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -497,7 +497,7 @@ class LocalCausalMaskTest(test_utils.SequenceLayerTest):
 class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
 
   def test_no_context(self):
-    mask_fn = attention.BlockwiseLocalCausalMask(
+    mask_fn = common.BlockwiseLocalCausalMask(
         block_size=2,
         max_past_horizon_blocks=0,
         max_future_horizon_blocks=0,
@@ -510,13 +510,13 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -541,7 +541,7 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(mask, expected)
 
   def test_one_block_past_horizon(self):
-    mask_fn = attention.BlockwiseLocalCausalMask(
+    mask_fn = common.BlockwiseLocalCausalMask(
         block_size=2,
         max_past_horizon_blocks=1,
         max_future_horizon_blocks=0,
@@ -554,13 +554,13 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -585,7 +585,7 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(mask, expected)
 
   def test_one_block_future_horizon(self):
-    mask_fn = attention.BlockwiseLocalCausalMask(
+    mask_fn = common.BlockwiseLocalCausalMask(
         block_size=2,
         max_past_horizon_blocks=0,
         max_future_horizon_blocks=1,
@@ -598,13 +598,13 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -629,7 +629,7 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(mask, expected)
 
   def test_infinite_past(self):
-    mask_fn = attention.BlockwiseLocalCausalMask(
+    mask_fn = common.BlockwiseLocalCausalMask(
         block_size=2,
         max_past_horizon_blocks=None,
         max_future_horizon_blocks=0,
@@ -642,13 +642,13 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -673,7 +673,7 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(mask, expected)
 
   def test_infinite_future(self):
-    mask_fn = attention.BlockwiseLocalCausalMask(
+    mask_fn = common.BlockwiseLocalCausalMask(
         block_size=2,
         max_past_horizon_blocks=0,
         max_future_horizon_blocks=None,
@@ -686,13 +686,13 @@ class BlockwiseLocalCausalMaskTest(test_utils.SequenceLayerTest):
     key_pos = jnp.arange(key_time)[jnp.newaxis, :]
 
     mask = mask_fn(
-        attention.QBundle(
+        common.QBundle(
             queries=None,
             segment_ids=None,
             position=query_pos,
             mask=None,
         ),
-        attention.KVBundle(
+        common.KVBundle(
             keys=None,
             values=None,
             segment_ids=None,
@@ -795,10 +795,10 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
     else:
       atol, rtol = 1e-2, 1e-2
 
-    with self.subTest('single KVBundle'):
+    with self.subTest('single functions.KVBundle'):
       kv_block_sizes = 3
-      context_vectors = attention._multi_key_value_dot_product_flash_attention(
-          queries=attention.QBundle(
+      context_vectors = common.multi_key_value_dot_product_flash_attention(
+          queries=common.QBundle(
               queries,
               segment_ids=query_segment_ids,
               position=query_pos,
@@ -806,7 +806,7 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ),
           query_block_size=query_block_size,
           kv_bundles=[
-              attention.KVBundle(
+              common.KVBundle(
                   keys=keys,
                   values=values,
                   segment_ids=key_segment_ids,
@@ -816,8 +816,8 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ],
           kv_block_sizes=kv_block_sizes,
           attention_mask_fns=[
-              attention.SegmentMask(),
-              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+              common.SegmentMask(),
+              common.LocalCausalMask(max_past_horizon, max_future_horizon),
           ],
           attention_logits_soft_cap=attention_logits_soft_cap,
           per_dim_scale=per_dim_scale,
@@ -831,8 +831,8 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
 
     with self.subTest('no key blocking'):
       kv_block_sizes = None
-      context_vectors = attention._multi_key_value_dot_product_flash_attention(
-          queries=attention.QBundle(
+      context_vectors = common.multi_key_value_dot_product_flash_attention(
+          queries=common.QBundle(
               queries,
               segment_ids=query_segment_ids,
               position=query_pos,
@@ -840,7 +840,7 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ),
           query_block_size=query_block_size,
           kv_bundles=[
-              attention.KVBundle(
+              common.KVBundle(
                   keys=keys,
                   values=values,
                   segment_ids=key_segment_ids,
@@ -850,8 +850,8 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ],
           kv_block_sizes=kv_block_sizes,
           attention_mask_fns=[
-              attention.SegmentMask(),
-              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+              common.SegmentMask(),
+              common.LocalCausalMask(max_past_horizon, max_future_horizon),
           ],
           attention_logits_soft_cap=attention_logits_soft_cap,
           per_dim_scale=per_dim_scale,
@@ -863,7 +863,7 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           context_vectors, expected_context_vectors, atol=atol, rtol=rtol
       )
 
-    with self.subTest('multi KVBundle'):
+    with self.subTest('multi functions.KVBundle'):
       kv_block_sizes = (3, 11)
       keys1, keys2 = jnp.split(keys, 2, axis=1)
       key_pos1, key_pos2 = jnp.split(key_pos, 2, axis=1)
@@ -871,8 +871,8 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
       values1, values2 = jnp.split(values, 2, axis=1)
       keys_mask1, keys_mask2 = jnp.split(keys_mask, 2, axis=1)
 
-      context_vectors = attention._multi_key_value_dot_product_flash_attention(
-          queries=attention.QBundle(
+      context_vectors = common.multi_key_value_dot_product_flash_attention(
+          queries=common.QBundle(
               queries,
               segment_ids=query_segment_ids,
               position=query_pos,
@@ -880,14 +880,14 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ),
           query_block_size=query_block_size,
           kv_bundles=[
-              attention.KVBundle(
+              common.KVBundle(
                   keys=keys1,
                   values=values1,
                   segment_ids=key_segment_ids1,
                   position=key_pos1,
                   mask=keys_mask1,
               ),
-              attention.KVBundle(
+              common.KVBundle(
                   keys=keys2,
                   values=values2,
                   segment_ids=key_segment_ids2,
@@ -897,8 +897,8 @@ class OnlineMultiKeyValueDotProductTest(test_utils.SequenceLayerTest):
           ],
           kv_block_sizes=kv_block_sizes,
           attention_mask_fns=[
-              attention.SegmentMask(),
-              attention.LocalCausalMask(max_past_horizon, max_future_horizon),
+              common.SegmentMask(),
+              common.LocalCausalMask(max_past_horizon, max_future_horizon),
           ],
           attention_logits_soft_cap=attention_logits_soft_cap,
           per_dim_scale=per_dim_scale,
@@ -945,7 +945,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
     block_size = 2
     context_size = block_size + max_past_horizon + max_future_horizon
 
-    _, probabilities = attention._local_dot_product_attention(
+    _, probabilities = common.local_dot_product_attention(
         queries,
         keys,
         keys_mask,
@@ -967,7 +967,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
         sink_value_embeddings=None,
     )
 
-    keys_blocks = attention._extract_block_context(
+    keys_blocks = common._extract_block_context(
         keys,
         block_size=block_size,
         left_context=max_past_horizon,
@@ -975,11 +975,11 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
     )
 
     # [B, T, N, H] -> [B, U, W, N, H]; (U = T/W).
-    queries_blocks = attention._convert_to_block(
+    queries_blocks = common._convert_to_block(
         queries_scaled, block_size=block_size
     )
 
-    valid_mask_blocked = attention._extract_block_context(
+    valid_mask_blocked = common._extract_block_context(
         keys_mask,
         block_size=block_size,
         left_context=max_past_horizon,
@@ -1013,7 +1013,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
     logits = jnp.where(
         valid_mask_blocked,
         logits,
-        attention._INVALID_LOGIT_VALUE,
+        common._INVALID_LOGIT_VALUE,
     )
     logits = logits.transpose((0, 2, 3, 1, 4)).reshape(
         (batch, -1, num_heads, context_size)
@@ -1030,7 +1030,7 @@ class LocalDotProductAttentionHelperTest(test_utils.SequenceLayerTest):
 
     keys_mask = jnp.asarray([[False, True, True, True, True]])
 
-    context_vectors, _ = attention._local_dot_product_attention(
+    context_vectors, _ = common.local_dot_product_attention(
         queries,
         keys,
         keys_mask,
