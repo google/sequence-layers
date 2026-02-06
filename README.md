@@ -16,6 +16,11 @@ with our intro notebook:
 **Note:** Only Jax support is installed by default. Use
 `pip install sequence_layers[tensorflow]` for TensorFlow.
 
+**We welcome contributions!** To do this, clone the repo and install developer
+dependencies via `pip install -e .[dev]` (or `.[dev,tensorflow]`, etc.) to allow
+running tests, e.g., `pytest -n auto sequence_layers/jax` to do so over multiple
+workers. See the [contributing guide](CONTRIBUTING.md).
+
 **Disclaimer:** This is not an officially supported Google product.
 
 ## Streamable networks, out of the box
