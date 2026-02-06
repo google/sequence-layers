@@ -46,6 +46,9 @@ tensorflow = [
     "tensorflow",
     "tf_keras",
 ]
+mlx = [
+    "mlx",
+]
 dev = [
     "absl-py",
     "chex",
