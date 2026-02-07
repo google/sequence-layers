@@ -1,6 +1,6 @@
 import mlx.core as mx
 import numpy as np
-import sequence_layers.mlx.basic_types as types
+from sequence_layers.mlx import types
 from absl.testing import parameterized
 from absl.testing import absltest
 
