@@ -93,6 +93,10 @@ class StreamingLocalDotProductAttention(
     # heads. At initialization (or if per_dim_scale is false), queries are
     # scaled by 1/sqrt(units_per_head) or query_scale.
     per_dim_scale: bool = False
+    # Whether to learn a [units_per_head] key scale factor across all key
+    # heads. At initialization (or if per_dim_key_scale is false), keys are
+    # not scaled.
+    per_dim_key_scale: bool = False
     # Sharding configuration for the per_dim_scale factor.
     per_dim_scale_sharding: types.Sharding | None = None
     # A manual query scale to apply. If unset, queries are scaled by
@@ -291,6 +295,17 @@ class StreamingLocalDotProductAttention(
           'per_dim_scale',
           utils.shard_initializer(
               nn.initializers.zeros_init(), self.config.per_dim_scale_sharding
+          ),
+          [self.config.units_per_head],
+          self.config.param_dtype,
+      )
+    self._per_dim_key_scale = None
+    if self.config.per_dim_key_scale:
+      self._per_dim_key_scale = self.param(
+          'per_dim_key_scale',
+          utils.shard_initializer(
+              nn.initializers.zeros_init(),
+              self.config.per_dim_scale_sharding,
           ),
           [self.config.units_per_head],
           self.config.param_dtype,
@@ -664,6 +679,7 @@ class StreamingLocalDotProductAttention(
               attention_logits_soft_cap=self.config.attention_logits_soft_cap,
               attention_probabilities_dropout=self._attention_probabilities_dropout,
               per_dim_scale=self._per_dim_scale,
+              per_dim_key_scale=self._per_dim_key_scale,
               query_scale=self.config.query_scale,
               precision=self.config.precision,
               get_logits_fn=None,
@@ -683,6 +699,7 @@ class StreamingLocalDotProductAttention(
           attention_logits_soft_cap=self.config.attention_logits_soft_cap,
           attention_probabilities_dropout=self._attention_probabilities_dropout,
           per_dim_scale=self._per_dim_scale,
+          per_dim_key_scale=self._per_dim_key_scale,
           query_scale=self.config.query_scale,
           precision=self.config.precision,
           get_logits_fn=get_logits_fn,
@@ -811,6 +828,7 @@ class StreamingLocalDotProductAttention(
         attention_probabilities_dropout=self._attention_probabilities_dropout,
         precision=self.config.precision,
         per_dim_scale=self._per_dim_scale,
+        per_dim_key_scale=self._per_dim_key_scale,
         query_scale=self.config.query_scale,
         get_logits_fn=get_logits_fn,
         zero_fully_masked=self.config.zero_fully_masked,

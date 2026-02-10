@@ -691,6 +691,7 @@ def dot_product_attention(
     attention_logits_soft_cap: float | None,
     attention_probabilities_dropout: simple.Dropout | None,
     per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+    per_dim_key_scale: jt.Float[jt.ArrayT, 'h'] | None,
     query_scale: float | jt.ScalarFloat | None,
     precision: nn.linear.PrecisionLike,
     get_logits_fn: (
@@ -730,6 +731,7 @@ def dot_product_attention(
     per_dim_scale: A [units_per_head] query scale factor for all query heads.
       Assuming per_dim_scale is zeros at initialization (or if not specified),
       the scaling applied to each head is query_scale.
+    per_dim_key_scale: A [units_per_head] key scale factor for all key heads.
     query_scale: A float query scale factor for all query heads. If None,
       queries are scaled by 1/sqrt(units_per_head).
     precision: Precision config for einsums.
@@ -773,6 +775,7 @@ def dot_product_attention(
         attention_logits_soft_cap,
         attention_probabilities_dropout,
         per_dim_scale,
+        per_dim_key_scale,
         query_scale,
         precision,
         zero_fully_masked,
@@ -788,6 +791,7 @@ def dot_product_attention(
       qk_dtype, values.dtype, dtype=compute_dtype
   )
   queries = _scale_query(queries.astype(q_dtype), per_dim_scale, query_scale)
+  keys = _scale_key(keys.astype(q_dtype), per_dim_key_scale)
   queries = queries.astype(qk_dtype)
   keys = keys.astype(qk_dtype)
   if get_logits_fn is None:
@@ -878,6 +882,7 @@ def multi_key_value_dot_product_attention(
     attention_logits_soft_cap: float | None,
     attention_probabilities_dropout: simple.Dropout | None,
     per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+    per_dim_key_scale: jt.Float[jt.ArrayT, 'h'] | None,
     query_scale: float | jt.ScalarFloat | None,
     precision: nn.linear.PrecisionLike,
     get_logits_fn: (
@@ -916,6 +921,7 @@ def multi_key_value_dot_product_attention(
     per_dim_scale: A [units_per_head] query scale factor for all query heads.
       Assuming per_dim_scale is zeros at initialization (or if not specified),
       the scaling applied to each head is query_scale.
+    per_dim_key_scale: A [units_per_head] key scale factor for all key heads.
     query_scale: A float query scale factor for all query heads. If None,
       queries are scaled by 1/sqrt(units_per_head).
     precision: Precision config for einsums.
@@ -963,6 +969,7 @@ def multi_key_value_dot_product_attention(
       qk_dtype, values[0].dtype, dtype=compute_dtype
   )
   queries = _scale_query(queries.astype(q_dtype), per_dim_scale, query_scale)
+  keys = _scale_key(keys, per_dim_key_scale)
 
   queries = queries.astype(qk_dtype)
 
@@ -1041,6 +1048,7 @@ def _dot_product_attention_gqa(
     attention_logits_soft_cap: float | None,
     attention_probabilities_dropout: simple.Dropout | None,
     per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+    per_dim_key_scale: jt.Float[jt.ArrayT, 'h'] | None,
     query_scale: float | jt.ScalarFloat | None,
     precision: nn.linear.PrecisionLike,
     zero_fully_masked: bool,
@@ -1076,6 +1084,7 @@ def _dot_product_attention_gqa(
     per_dim_scale: A [units_per_head] query scale factor for all query heads.
       Assuming per_dim_scale is zeros at initialization (or if not specified),
       the scaling applied to each head is query_scale.
+    per_dim_key_scale: A [units_per_head] key scale factor for all key heads.
     query_scale: A float query scale factor for all query heads. If None,
       queries are scaled by 1/sqrt(units_per_head).
     precision: Precision config for einsums.
@@ -1110,6 +1119,7 @@ def _dot_product_attention_gqa(
       qk_dtype, values.dtype, dtype=compute_dtype
   )
   queries = _scale_query(queries.astype(q_dtype), per_dim_scale, query_scale)
+  keys = _scale_key(keys.astype(qk_dtype), per_dim_key_scale)
   queries = queries.astype(qk_dtype)
   keys = keys.astype(qk_dtype)
 
@@ -1756,6 +1766,7 @@ def local_dot_product_attention(
     attention_logits_soft_cap: float | None,
     attention_probabilities_dropout: simple.Dropout | None,
     per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+    per_dim_key_scale: jt.Float[jt.ArrayT, 'h'] | None,
     query_scale: float | jt.ScalarFloat | None,
     precision: nn.linear.PrecisionLike | None,
     get_logits_fn: (
@@ -1818,6 +1829,7 @@ def local_dot_product_attention(
     per_dim_scale: A [units_per_head] query scale factor for all query heads.
       Assuming per_dim_scale is zeros at initialization (or if not specified),
       the scaling applied to each head is query_scale.
+    per_dim_key_scale: A [units_per_head] key scale factor for all key heads.
     query_scale: A float query scale factor for all query heads. If None,
       queries are scaled by 1/sqrt(units_per_head).
     precision: Precision config for einsums.
@@ -1860,6 +1872,7 @@ def local_dot_product_attention(
   assert max_future_horizon >= 0
 
   queries = _scale_query(queries.astype(q_dtype), per_dim_scale, query_scale)
+  keys = _scale_key(keys.astype(q_dtype), per_dim_key_scale)
 
   batch_size, original_query_time = queries.shape[:2]
   num_sink_embeddings = (
@@ -2243,3 +2256,15 @@ def _scale_query(
   else:
     queries *= jnp.array(query_scale, queries.dtype)
   return queries
+
+
+def _scale_key(
+    keys: jt.Float[jt.ArrayT, 'b q n h'],
+    per_dim_scale: jt.Float[jt.ArrayT, 'h'] | None,
+) -> jt.Float[jt.ArrayT, 'b q n h']:
+  """Scales keys with per_dim_scale or 1.0."""
+
+  if per_dim_scale is not None:
+    r_softplus_0 = jnp.array(1.442695041, keys.dtype)
+    keys *= r_softplus_0 * jax.nn.softplus(per_dim_scale.astype(keys.dtype))
+  return keys
