@@ -24,9 +24,7 @@ from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
 
 
-class DotProductAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
-):
+class DotProductAttention(types.Emitting):
   """Dot product attention."""
 
   @dataclasses.dataclass(frozen=True)
@@ -171,8 +169,7 @@ class DotProductAttention(
     # TODO(b/394829779): Support GQA for DotProductAttention.
     num_kv_heads = self.config.num_heads
 
-    self._setup_projection_layers(
-        self.config.input_projection,
+    self.input_projection = self.config.input_projection.make(
         num_query_heads=self.config.num_heads,
         num_kv_heads=num_kv_heads,
         units_per_head=self.config.units_per_head,
@@ -183,6 +180,7 @@ class DotProductAttention(
         # Not possible for cross attention.
         allow_combined_qkv=False,
     )
+    nn.share_scope(self, self.input_projection)
 
     if (
         hasattr(self.config, 'num_sink_embeddings')
@@ -359,7 +357,7 @@ class DotProductAttention(
     # Pre-process the source with key/value projections and networks.
     source = self._get_source(constants)
 
-    keys, values = self.get_kv(self.config.input_projection, source)
+    keys, values = self.input_projection.get_kv(source)
 
     if self.key_network:
       keys = self.key_network.layer(
@@ -432,7 +430,7 @@ class DotProductAttention(
     x_num_timesteps = x.shape[1]
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     if self.query_network:
       queries, query_state = self.query_network.step(
@@ -462,7 +460,7 @@ class DotProductAttention(
   ) -> tuple[types.Sequence, types.Emits]:
     source = self._get_source(constants)
 
-    keys, values = self.get_kv(self.config.input_projection, source)
+    keys, values = self.input_projection.get_kv(source)
 
     if self.key_network:
       keys = self.key_network.layer(
@@ -475,7 +473,7 @@ class DotProductAttention(
       )
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     if self.query_network:
       queries = self.query_network.layer(

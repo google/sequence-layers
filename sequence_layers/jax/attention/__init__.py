@@ -39,6 +39,7 @@ __all__ = (
     'DotProductSelfAttention',
     'DotProductSelfAttentionV2',
     'GmmAttention',
+    'InputProjectionModule',
     'LocalDotProductSelfAttention',
     'MultiSourceDotProductAttention',
     'QueryAndKeyValueProjection',

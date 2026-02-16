@@ -24,9 +24,7 @@ from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
 
 
-class LocalDotProductSelfAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
-):
+class LocalDotProductSelfAttention(types.Emitting):
   """A multi-headed dot-product self attention layer."""
 
   @dataclasses.dataclass(frozen=True)
@@ -139,8 +137,7 @@ class LocalDotProductSelfAttention(
     # TODO(b/394829779): Support GQA for LocalDotProductSelfAttention.
     num_kv_heads = self.config.num_heads
 
-    self._setup_projection_layers(
-        self.config.input_projection,
+    self.input_projection = self.config.input_projection.make(
         num_query_heads=self.config.num_heads,
         num_kv_heads=num_kv_heads,
         units_per_head=self.config.units_per_head,
@@ -149,6 +146,7 @@ class LocalDotProductSelfAttention(
         compute_dtype=self.config.compute_dtype,
         param_dtype=self.config.param_dtype,
     )
+    nn.share_scope(self, self.input_projection)
     if self.config.max_past_horizon < 1:
       raise ValueError(
           f'Expected {self.config.max_past_horizon=} >= 1 for {self.name}.'
@@ -367,8 +365,8 @@ class LocalDotProductSelfAttention(
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.State:
-    compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype, constants=constants
+    compute_dtype = self.input_projection.get_input_projection_output_dtype(
+        input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -499,7 +497,7 @@ class LocalDotProductSelfAttention(
     batch_size = x.shape[0]
     x_values_time = x.shape[1]
 
-    x_queries, x_keys, x_values = self.get_qkv(self.config.input_projection, x)
+    x_queries, x_keys, x_values = self.input_projection.get_qkv(x)
 
     # Our params might not match param_dtype, so delegate the compute_dtype to
     # the output of the QKV layer.
@@ -727,7 +725,7 @@ class LocalDotProductSelfAttention(
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Emits]:
-    queries, keys, values = self.get_qkv(self.config.input_projection, x)
+    queries, keys, values = self.input_projection.get_qkv(x)
 
     # Our params might not match param_dtype, so delegate the compute_dtype to
     # the output of the QKV layer.

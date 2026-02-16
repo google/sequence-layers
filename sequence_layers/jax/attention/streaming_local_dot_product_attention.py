@@ -23,9 +23,7 @@ from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
 
 
-class StreamingLocalDotProductAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
-):
+class StreamingLocalDotProductAttention(types.Emitting):
   """A multi-headed streaming local dot-product attention layer.
 
   Unlike most SequenceLayers, this cross-attention layer assumes that when using
@@ -177,8 +175,7 @@ class StreamingLocalDotProductAttention(
     # TODO(b/394829779): Support GQA for StreamingLocalDotProductAttention.
     num_kv_heads = self.config.num_heads
 
-    self._setup_projection_layers(
-        self.config.input_projection,
+    self.input_projection = self.config.input_projection.make(
         num_query_heads=self.config.num_heads,
         num_kv_heads=num_kv_heads,
         units_per_head=self.config.units_per_head,
@@ -189,6 +186,7 @@ class StreamingLocalDotProductAttention(
         # Not possible for cross attention.
         allow_combined_qkv=False,
     )
+    nn.share_scope(self, self.input_projection)
 
     if self.config.num_sink_embeddings > 0 and self.config.use_sink_scalars:
       raise ValueError('Cannot use both sink embeddings and sink scalars.')
@@ -382,8 +380,8 @@ class StreamingLocalDotProductAttention(
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.State:
-    compute_dtype = self.get_input_projection_output_dtype(
-        self.config.input_projection, input_spec.dtype, constants=constants
+    compute_dtype = self.input_projection.get_input_projection_output_dtype(
+        input_spec.dtype, constants=constants
     )
     # State to contain the max_past_horizon + max_future_horizon projected keys
     # and values. Note, the initial state is invalid since we don't want to
@@ -537,7 +535,7 @@ class StreamingLocalDotProductAttention(
       raise ValueError(f'Expected {x.shape[1]=} to match {source.shape[1]=}')
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     # Our params might not match param_dtype, so delegate the compute_dtype to
     # the output of the QKV layer.
@@ -551,7 +549,7 @@ class StreamingLocalDotProductAttention(
           constants=constants,
       )
 
-    keys, values = self.get_kv(self.config.input_projection, source)
+    keys, values = self.input_projection.get_kv(source)
 
     if self.key_network:
       keys, key_network_state = self.key_network.step(
@@ -762,7 +760,7 @@ class StreamingLocalDotProductAttention(
     source = common.get_source(self, self.config.source_name, constants)
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     # Our params might not match param_dtype, so delegate the compute_dtype to
     # the output of the QKV layer.
@@ -775,7 +773,7 @@ class StreamingLocalDotProductAttention(
           constants=constants,
       )
 
-    keys, values = self.get_kv(self.config.input_projection, source)
+    keys, values = self.input_projection.get_kv(source)
 
     if self.key_network:
       keys = self.key_network.layer(

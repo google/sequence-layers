@@ -24,9 +24,7 @@ from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
 
 
-class MultiSourceDotProductAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
-):
+class MultiSourceDotProductAttention(types.Emitting):
   """Multi-source dot product attention."""
 
   @dataclasses.dataclass(frozen=True)
@@ -147,8 +145,7 @@ class MultiSourceDotProductAttention(
       )
 
     num_kv_heads = self.config.num_kv_heads or self.config.num_heads
-    self._setup_projection_layers(
-        self.config.input_projection,
+    self.input_projection = self.config.input_projection.make(
         num_query_heads=self.config.num_heads,
         num_kv_heads=num_kv_heads,
         units_per_head=self.config.units_per_head,
@@ -159,6 +156,7 @@ class MultiSourceDotProductAttention(
         # Not possible for cross attention.
         allow_combined_qkv=False,
     )
+    nn.share_scope(self, self.input_projection)
 
     self.query_network = (
         self.config.query_network.make() if self.config.query_network else None
@@ -296,7 +294,7 @@ class MultiSourceDotProductAttention(
     ):
       # Pre-process sources with key/value projections and networks.
       source = common.get_source(self, source_name, constants)
-      keys, values = self.get_kv(self.config.input_projection, source)
+      keys, values = self.input_projection.get_kv(source)
       if self.key_network:
         keys = self.key_network.layer(
             keys, training=training, constants=constants
@@ -398,7 +396,7 @@ class MultiSourceDotProductAttention(
     x_num_timesteps = x.shape[1]
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     if self.query_network:
       queries, query_state = self.query_network.step(
@@ -426,7 +424,7 @@ class MultiSourceDotProductAttention(
     kv_bundles = self._get_kv_bundles(training, constants)
 
     # No mask required, since query timesteps are independent.
-    queries = self.get_q(self.config.input_projection, x)
+    queries = self.input_projection.get_q(x)
 
     if self.query_network:
       queries = self.query_network.layer(
