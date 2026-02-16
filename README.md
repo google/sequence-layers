@@ -22,6 +22,8 @@ dependencies via `pip install -e .[dev]` (or `.[dev,tensorflow]`, etc.) to allow
 running tests, e.g., `pytest -n auto sequence_layers/jax` to do so over multiple
 workers. See the [contributing guide](CONTRIBUTING.md).
 
+For MLX usage (inference on Apple Silicon), see the [MLX Backend Guide](docs/mlx_guide.md).
+
 **Disclaimer:** This is not an officially supported Google product.
 
 ## Streamable networks, out of the box

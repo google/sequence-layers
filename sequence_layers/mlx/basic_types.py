@@ -131,3 +131,8 @@ def mask_invalid(
 
 # Defined outside of Sequence so that mask_invalid can return a MaskedSequence.
 Sequence.mask_invalid = mask_invalid
+
+# For backward compatibility during rebase
+from sequence_layers.mlx.types import PaddingMode
+from sequence_layers.mlx.types import ShapeDType
+

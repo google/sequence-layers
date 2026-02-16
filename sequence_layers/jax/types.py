@@ -1466,7 +1466,52 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
   of the specific SequenceLayer in use. This allows easy swapping of
   implementations based on behaviors (steppability, output ratio, latency,
   etc.).
+
+  The make() method supports an optional ``backend`` keyword argument.  When
+  ``backend`` is not None (e.g. ``'mlx'``), make() looks up a registered
+  factory for the given backend and config class (walking the MRO) and calls
+  it instead of the Linen implementation.
+
+  Backend factories are registered via::
+
+      SequenceLayerConfig.register_backend_factory(
+          'mlx', SomeLinen.Config, some_mlx_factory_fn,
+      )
   """
+
+  # Backend factory registry: {(backend_name, config_class): factory_fn}
+  _backend_factories: dict[tuple[str, type], Callable] = {}
+
+  @classmethod
+  def register_backend_factory(
+      cls,
+      backend: str,
+      config_cls: type['SequenceLayerConfig'],
+      factory: Callable[['SequenceLayerConfig'], Any],
+  ) -> None:
+    """Register a factory function for a (backend, config_class) pair."""
+    cls._backend_factories[(backend, config_cls)] = factory
+
+  def __init_subclass__(cls, **kwargs):
+    super().__init_subclass__(**kwargs)
+    if 'make' in cls.__dict__:
+      original_make = cls.__dict__['make']
+
+      @functools.wraps(original_make)
+      def _wrapped_make(self, *, backend=None, _orig=original_make):
+        if backend is not None:
+          for klass in type(self).__mro__:
+            key = (backend, klass)
+            factory = SequenceLayerConfig._backend_factories.get(key)
+            if factory is not None:
+              return factory(self)
+          raise ValueError(
+              f'No {backend!r} backend registered for'
+              f' {type(self).__qualname__}'
+          )
+        return _orig(self)
+
+      cls.make = _wrapped_make
 
   @abc.abstractmethod
   def make(self) -> SequenceLayer:
