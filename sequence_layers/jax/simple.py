@@ -40,6 +40,7 @@ __all__ = (
     # go/keep-sorted start
     'Abs',
     'Add',
+    'AddNoise',
     'Affine',
     'ApplySharding',
     'Argmax',
@@ -2395,6 +2396,94 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
   ) -> types.Sequence:
     # No mask status change since dropout only zeros values.
     return x.apply_values_masked(self.apply_dropout, training=training)
+
+
+class AddNoise(types.PreservesType, types.StatelessPointwise):
+  """Adds noise to inputs from a specified distribution.
+
+  The noise distribution is specified by the NoiseSampler interface, and
+  Uniform, Normal, and TruncatedNormal samplers are provided due to their common
+  use.
+  """
+
+  class NoiseSampler(metaclass=abc.ABCMeta):
+
+    @abc.abstractmethod
+    def sample(self, spec: types.ShapeDType, rng: jax.Array) -> jax.Array:
+      pass
+
+  @dataclasses.dataclass(frozen=True)
+  class Uniform(NoiseSampler):
+    minval: float
+    maxval: float
+
+    def sample(self, spec: types.ShapeDType, rng: jax.Array) -> jax.Array:
+      return jax.random.uniform(
+          rng,
+          spec.shape,
+          minval=jnp.array(self.minval, spec.dtype),
+          maxval=jnp.array(self.maxval, spec.dtype),
+          dtype=spec.dtype,
+      )
+
+  @dataclasses.dataclass(frozen=True)
+  class Normal(NoiseSampler):
+    mean: float
+    stddev: float
+
+    def sample(self, spec: types.ShapeDType, rng: jax.Array) -> jax.Array:
+      return jax.random.normal(
+          rng,
+          spec.shape,
+          dtype=spec.dtype,
+      ) * jnp.array(
+          self.stddev, spec.dtype
+      ) + jnp.array(self.mean, spec.dtype)
+
+  @dataclasses.dataclass(frozen=True)
+  class TruncatedNormal(NoiseSampler):
+    mean: float
+    stddev: float
+
+    def sample(self, spec: types.ShapeDType, rng: jax.Array) -> jax.Array:
+      return jax.random.truncated_normal(
+          rng,
+          lower=-2.0,
+          upper=2.0,
+          shape=spec.shape,
+          dtype=spec.dtype,
+      ) * jnp.array(self.stddev, spec.dtype) + jnp.array(self.mean, spec.dtype)
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    # A NoiseSampler that is used to generate the noise to add.
+    sampler: 'AddNoise.NoiseSampler'
+    # If true, only apply noise in training.
+    training_only: bool
+    # Flax RNG collection to use.
+    rng_collection: str = 'params'
+    # An optional name for the layer.
+    name: str | None = None
+
+    def make(self) -> 'AddNoise':
+      return AddNoise(self, name=self.name)
+
+  config: Config
+
+  @nn.compact
+  @types.check_layer
+  def layer(
+      self,
+      x: types.Sequence,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> types.Sequence:
+    if self.config.training_only and not training:
+      return x
+    rng = self.make_rng(self.config.rng_collection)
+    noise = self.config.sampler.sample(types.ShapeDType(x.shape, x.dtype), rng)
+    return x.apply_values(lambda v: v + noise)
 
 
 class Downsample1D(types.PreservesType, types.PreservesShape, types.Stateless):

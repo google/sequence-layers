@@ -435,6 +435,83 @@ class DropoutTest(test_utils.SequenceLayerTest):
     self.assertTrue(jnp.all(jnp.logical_or(y.values == 1, y.values == 0)))
 
 
+class AddNoiseTest(test_utils.SequenceLayerTest):
+
+  @parameterized.parameters(
+      itertools.product(
+          ((2, 3),
+           (2, 3, 5),
+           (2, 3, 5, 9)),
+          (simple.AddNoise.Uniform(-1.0, 1.0),
+           simple.AddNoise.Normal(0.0, 1.0),
+           simple.AddNoise.TruncatedNormal(0.0, 1.0))))  # pyformat: disable
+  def test_noise(self, shape, sampler):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(*shape)
+    l = simple.AddNoise.Config(
+        sampler, training_only=True, rng_collection='foo', name='noise'
+    ).make()
+    # Pass RNGs to init_and_bind_layer for a stateful layer if needed,
+    # but AddNoise is stateless so it's not strictly necessary here.
+    l = self.init_and_bind_layer(key, l, x)
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
+    self.assertEqual(l.name, 'noise')
+    self.verify_contract(l, x, training=False)
+    self.assertEmpty(l.variables)
+
+    # Check that noise is not applied when training=False.
+    y = l.apply({}, x, training=False)
+    self.assertSequencesEqual(y, x)
+
+    # Check that noise is applied when training=True.
+    rng = jax.random.PRNGKey(5678)
+    y = l.apply({}, x, training=True, rngs={l.config.rng_collection: rng})
+    self.assertSequencesNotEqual(y, x)
+
+    # Check that the noise is deterministic with the same key.
+    y2 = l.apply({}, x, training=True, rngs={l.config.rng_collection: rng})
+    self.assertSequencesEqual(y, y2)
+
+  def test_noise_training_only(self):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 3, 5)
+    # Sampler with zero stddev will add mean.
+    sampler = simple.AddNoise.Normal(1.0, 0.0)
+    l = simple.AddNoise.Config(sampler, training_only=True, name='noise').make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    # Noise should be applied when training=True.
+    y = l.apply({}, x, training=True, rngs={l.config.rng_collection: key})
+    y_expected = x.apply_values(lambda v: v + 1.0).mask_invalid()
+    self.assertSequencesClose(y, y_expected)
+
+    # Noise should not be applied when training=False.
+    y = l.apply({}, x, training=False)
+    self.assertSequencesEqual(y, x)
+
+  def test_noise_always(self):
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 3, 5)
+    # Sampler with zero stddev will add mean.
+    sampler = simple.AddNoise.Normal(1.0, 0.0)
+    l = simple.AddNoise.Config(
+        sampler, training_only=False, name='noise'
+    ).make()
+    l = self.init_and_bind_layer(key, l, x)
+
+    y_expected = x.apply_values(lambda v: v + 1.0).mask_invalid()
+
+    # Noise should be applied when training=True.
+    y = l.apply({}, x, training=True, rngs={l.config.rng_collection: key})
+    self.assertSequencesClose(y, y_expected)
+
+    # Noise should also be applied when training=False.
+    y = l.apply({}, x, training=False, rngs={l.config.rng_collection: key})
+    self.assertSequencesClose(y, y_expected)
+
+
 class SliceTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(((2, 3, 5),), ((2, 3, 5, 9),))
@@ -1399,9 +1476,7 @@ class SnakeTest(test_utils.SequenceLayerTest):
   def test_snake(self, shape, separate_beta: bool):
     key = jax.random.PRNGKey(1234)
     x = test_utils.random_sequence(*shape)
-    l = simple.Snake.Config(
-        separate_beta=separate_beta, name='snake'
-    ).make()
+    l = simple.Snake.Config(separate_beta=separate_beta, name='snake').make()
     l = self.init_and_bind_layer(key, l, x)
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
@@ -1420,9 +1495,7 @@ class SnakeTest(test_utils.SequenceLayerTest):
       expected_params['params']['beta_log'] = jnp.zeros(
           x.channel_shape, dtype=jnp.float32
       )
-    chex.assert_trees_all_equal_shapes_and_dtypes(
-        variables, expected_params
-    )
+    chex.assert_trees_all_equal_shapes_and_dtypes(variables, expected_params)
 
 
 class AffineTest(test_utils.SequenceLayerTest):
