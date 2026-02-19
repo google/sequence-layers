@@ -1,15 +1,17 @@
 """Basic sequence types and hierarchy for MLX."""
 
 import abc
+import dataclasses
 import enum
 import fractions
 import functools
-from typing import Callable, Generic, Iterable, TypeVar
+from typing import Callable, Generic, Iterable, TypeVar, override
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
+from sequence_layers.abstract import types
 
 # Type aliases.
 MASK_DTYPE = mx.bool_
@@ -30,6 +32,40 @@ Emits = object
 # Receptive field.
 ReceptiveField = tuple[float | int, float | int] | None
 
+
+__all__ = (
+    # go/keep-sorted start
+    'ChannelSpec',
+    'Constants',
+    'DType',
+    'Emits',
+    'Emitting',
+    'ExpandedMaskT',
+    'LengthsT',
+    'MASK_DTYPE',
+    'MaskT',
+    'MaskedSequence',
+    'PaddingMode',
+    'PreservesShape',
+    'PreservesType',
+    'ReceptiveField',
+    'Sequence',
+    'SequenceLayer',
+    'SequenceLayerConfig',
+    'Shape',
+    'ShapeDType',
+    'ShapeLike',
+    'State',
+    'Stateless',
+    'StatelessEmitting',
+    'StatelessPointwise',
+    'StatelessPointwiseFunctor',
+    'Steppable',
+    'ValuesT',
+    'check_layer',
+    'check_step',
+    # go/keep-sorted end
+)
 
 class ShapeDType:
   """Lightweight replacement for jax.ShapeDtypeStruct."""
@@ -52,23 +88,14 @@ class ShapeDType:
 
 ChannelSpec = ShapeDType
 
-
-class PaddingMode(enum.Enum):
-  VALID = 'valid'
-  SAME = 'same'
-  CAUSAL_VALID = 'causal_valid'
-  REVERSE_CAUSAL_VALID = 'reverse_causal_valid'
-  CAUSAL = 'causal'
-  REVERSE_CAUSAL = 'reverse_causal'
-  SEMICAUSAL = 'semicausal'
-  SEMICAUSAL_FULL = 'semicausal_full'
+PaddingMode = types.PaddingMode
 
 
 def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
   return mx.arange(maxlen)[None, :] < mx.array(lengths)[:, None]
 
 
-class Sequence(Generic[ValuesT, MaskT]):
+class Sequence(types.Sequence[ValuesT, MaskT]):
   """A generic sequence container that preserves masking information."""
 
   values: ValuesT
@@ -79,16 +106,19 @@ class Sequence(Generic[ValuesT, MaskT]):
     self.mask = mask
 
   @property
+  @override
   def shape(self) -> Shape:
     """Returns the shape of the sequence values."""
     return self.values.shape
 
   @property
+  @override
   def ndim(self) -> int:
     """Returns the rank of the sequence values."""
     return self.values.ndim
 
   @property
+  @override
   def channel_shape(self) -> Shape:
     """Returns the channel shape (the shape without batch and time)."""
     return self.values.shape[2:]
@@ -99,11 +129,13 @@ class Sequence(Generic[ValuesT, MaskT]):
     return ChannelSpec(self.channel_shape, self.dtype)
 
   @property
+  @override
   def dtype(self) -> DType:
     """Returns the dtype of the sequence values."""
     return self.values.dtype
 
   @classmethod
+  @override
   def from_values(cls, values: ValuesT) -> 'MaskedSequence':
     """Returns a MaskedSequence assuming every timestep is valid."""
     if values.ndim < 2:
@@ -111,6 +143,7 @@ class Sequence(Generic[ValuesT, MaskT]):
     return MaskedSequence(values, mx.ones(values.shape[:2], dtype=mx.bool_))
 
   @classmethod
+  @override
   def concatenate_sequences(cls, sequences: Iterable['Sequence']) -> 'Sequence':
     """Concatenates sequences and their masks on the time axis."""
     values = []
@@ -127,10 +160,12 @@ class Sequence(Generic[ValuesT, MaskT]):
         mx.concatenate(masks, axis=1),
     )
 
+  @override
   def expanded_mask(self) -> ExpandedMaskT:
     """Returns the Sequence mask expanded to match values rank."""
     return self.mask.reshape(self.mask.shape + (1,) * (self.values.ndim - 2))
 
+  @override
   def apply_values(
       self,
       values_fn: Callable[..., ValuesT],
@@ -140,6 +175,7 @@ class Sequence(Generic[ValuesT, MaskT]):
     """Transforms values, assuming result is unmasked."""
     return Sequence(values_fn(self.values, *args, **kwargs), self.mask)
 
+  @override
   def apply_values_masked(
       self: SequenceSelf,
       values_fn: Callable[..., ValuesT],
@@ -149,6 +185,7 @@ class Sequence(Generic[ValuesT, MaskT]):
     """Transforms values, preserving masked state."""
     return type(self)(values_fn(self.values, *args, **kwargs), self.mask)
 
+  @override
   def apply(
       self,
       apply_fn: Callable[..., tuple[ValuesT, MaskT]],
@@ -159,6 +196,7 @@ class Sequence(Generic[ValuesT, MaskT]):
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
     return Sequence(values, mask)
 
+  @override
   def apply_masked(
       self: SequenceSelf,
       apply_fn: Callable[..., tuple[ValuesT, MaskT]],
@@ -169,16 +207,19 @@ class Sequence(Generic[ValuesT, MaskT]):
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
     return type(self)(values, mask)
 
+  @override
   def astype(self: SequenceSelf, dtype: DType | None) -> SequenceSelf:
     """Returns a copy with values cast to dtype."""
     if dtype is None:
       return self
     return type(self)(self.values.astype(dtype), self.mask)
 
+  @override
   def lengths(self) -> mx.array:
     """Returns the number of valid timesteps per batch item."""
     return mx.sum(self.mask.astype(mx.int32), axis=1)
 
+  @override
   def __getitem__(
       self: SequenceSelf,
       the_slice,
@@ -191,6 +232,7 @@ class Sequence(Generic[ValuesT, MaskT]):
         self.mask.__getitem__(the_slice[:2]),
     )
 
+  @override
   def pad_time(
       self: SequenceSelf,
       pad_left: int,
@@ -215,6 +257,7 @@ class Sequence(Generic[ValuesT, MaskT]):
     )
     return type(self)(values, mask)
 
+  @override
   def concatenate(self, other: 'Sequence') -> 'Sequence':
     """Concatenates with other on the time dimension."""
     values = mx.concatenate([self.values, other.values], axis=1)
@@ -222,10 +265,12 @@ class Sequence(Generic[ValuesT, MaskT]):
     return_type = type(self) if type(self) is type(other) else Sequence
     return return_type(values, mask)
 
+  @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
     """Returns a sequence with invalid timesteps replaced."""
     raise NotImplementedError('Replaced below.')
 
+  @override
   def unmask(self) -> 'Sequence':
     """Returns an unmasked version with unchanged values."""
     return self
@@ -234,11 +279,13 @@ class Sequence(Generic[ValuesT, MaskT]):
 class MaskedSequence(Sequence[ValuesT, MaskT]):
   """Sequence whose invalid timesteps are masked to zero."""
 
+  @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
     if mask_value is None:
       return self
     return mask_invalid(self, mask_value)
 
+  @override
   def unmask(self) -> Sequence:
     return Sequence(self.values, self.mask)
 
@@ -328,30 +375,36 @@ def check_step(step_fn):
 # ---------------------------------------------------------------------------
 
 
-class Steppable(metaclass=abc.ABCMeta):
+class Steppable(types.Steppable):
   """A sequence processing layer that supports layer and step modes."""
 
   @property
+  @override
   def block_size(self) -> int:
     return 1
 
   @property
+  @override
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(1)
 
   @property
+  @override
   def supports_step(self) -> bool:
     return True
 
   @property
+  @override
   def input_latency(self) -> int:
     return 0
 
   @property
+  @override
   def output_latency(self) -> int:
     return int(self.input_latency * self.output_ratio)
 
   @abc.abstractmethod
+  @override
   def layer(
       self, x: Sequence, *, constants: Constants | None = None
   ) -> Sequence:
@@ -363,6 +416,7 @@ class Steppable(metaclass=abc.ABCMeta):
     return self.layer(x, constants=constants), ()
 
   @abc.abstractmethod
+  @override
   def step(
       self,
       x: Sequence,
@@ -383,6 +437,7 @@ class Steppable(metaclass=abc.ABCMeta):
     return y, state, ()
 
   @abc.abstractmethod
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -393,6 +448,7 @@ class Steppable(metaclass=abc.ABCMeta):
     """Returns the initial state for step-wise processing."""
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self,
       input_shape: ShapeLike,
@@ -402,6 +458,7 @@ class Steppable(metaclass=abc.ABCMeta):
     """Returns the output channel shape for an input channel shape."""
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self,
       input_dtype: DType,
@@ -428,6 +485,18 @@ class Steppable(metaclass=abc.ABCMeta):
 
 class SequenceLayer(nn.Module, Steppable):
   """Base MLX Module for Sequence Layers."""
+
+class SequenceLayerConfig(types.SequenceLayerConfig):
+  """Base class for SequenceLayer configuration objects."""
+
+  @abc.abstractmethod
+  def make(self) -> SequenceLayer:
+    """Builds a SequenceLayer from this config."""
+
+  def copy(self, **kwargs) -> 'SequenceLayerConfig':
+    """Returns a copy of the config with updated fields."""
+    return dataclasses.replace(self, **kwargs)
+
 
 
 # ---------------------------------------------------------------------------

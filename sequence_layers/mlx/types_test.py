@@ -1,31 +1,60 @@
 import mlx.core as mx
 import numpy as np
+from sequence_layers.abstract import types_test_base
 from sequence_layers.mlx import types
 from absl.testing import parameterized
 from absl.testing import absltest
 
 
-class TypesTest(parameterized.TestCase):
+class SequenceTest(types_test_base.SequenceTest):
 
-  @parameterized.named_parameters(
-      ('mask_value=None', 0.0),
-      ('mask_value=0.0', 0.0),
-      ('mask_value=-1.0', -1.0),
-  )
-  def test_mask_invalid(self, mask_value):
-    values = mx.array([
-        [1.0, 2.0, 3.0, 4.0],
-        [10.0, 20.0, 30.0, 40.0],
-    ])
-    mask = mx.array([[True, True, False, False], [False, False, False, True]])
+  def get_backend(self):
+    return mx
 
-    output = types.Sequence(values, mask).mask_invalid(mask_value)
-    expected_values = mx.array([
-        [1.0, 2.0, mask_value, mask_value],
-        [mask_value, mask_value, mask_value, 40.0],
-    ])
-    self.assertTrue(np.allclose(output.values, expected_values))
-    self.assertTrue(np.array_equal(output.mask, mask))
+  def create_sequence(self, values, mask):
+    return types.Sequence(values, mask)
+
+  def create_masked_sequence(self, values, mask):
+    return types.MaskedSequence(values, mask)
+
+  def assertAllEqual(self, a, b):
+    a = np.array(a) if isinstance(a, mx.array) else a
+    b = np.array(b) if isinstance(b, mx.array) else b
+    np.testing.assert_array_equal(a, b)
+
+  def assertSequencesEqual(self, a, b):
+    self.assertAllEqual(a.values, b.values)
+    self.assertAllEqual(a.mask, b.mask)
+
+
+class SteppableTest(types_test_base.SteppableTest):
+
+  def create_steppable(self):
+
+    class DefaultSteppable(types.Steppable):
+
+      def layer(self, x, *, constants=None):
+        return x
+
+      def step(self, x, state, *, constants=None):
+        return x, state
+
+      def get_initial_state(self, batch_size, input_spec, *, constants=None):
+        return ()
+
+      def get_output_shape(self, input_shape, *, constants=None):
+        return input_shape
+
+      def get_output_dtype(self, input_dtype, *, constants=None):
+        return input_dtype
+
+    return DefaultSteppable()
+
+
+class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
+
+  def get_config_base_cls(self):
+    return types.SequenceLayerConfig
 
 
 if __name__ == '__main__':
