@@ -4,6 +4,7 @@ from sequence_layers.mlx import types
 from absl.testing import parameterized
 from absl.testing import absltest
 
+
 class TypesTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
@@ -20,11 +21,12 @@ class TypesTest(parameterized.TestCase):
 
     output = types.Sequence(values, mask).mask_invalid(mask_value)
     expected_values = mx.array([
-            [1.0, 2.0, mask_value, mask_value],
-            [mask_value, mask_value, mask_value, 40.0],
-        ])
+        [1.0, 2.0, mask_value, mask_value],
+        [mask_value, mask_value, mask_value, 40.0],
+    ])
     self.assertTrue(np.allclose(output.values, expected_values))
     self.assertTrue(np.array_equal(output.mask, mask))
+
 
 if __name__ == '__main__':
   absltest.main()
