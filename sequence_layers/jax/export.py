@@ -288,7 +288,7 @@ def tflite_convert(
     signature_keys: list[str] | None = None,
     tags: list[str] | None = None,
 ) -> bytes:
-  """Converts the provided TesnorFlow saved model to a tf.lite model.
+  """Converts the provided TensorFlow saved model to a tf.lite model.
 
   Args:
     saved_model_path: The path to the saved model to convert.
