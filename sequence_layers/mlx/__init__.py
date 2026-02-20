@@ -13,4 +13,4 @@
 # limitations under the License.
 """Sequence layers in MLX."""
 
-from sequence_layers.mlx.basic_types import *
+from sequence_layers.mlx.types import *
