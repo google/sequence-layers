@@ -201,9 +201,7 @@ class SerialCombinatorMixin:
   @functools.cached_property
   def receptive_field(self) -> types.ReceptiveField:
     """Returns the receptive field of the serial combinator."""
-    return utils.reduce_receptive_field_per_step(
-        self.receptive_field_per_step, self.output_ratio
-    )
+    return utils.reduce_receptive_field_per_step(self.receptive_field_per_step)
 
   @functools.cached_property
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
@@ -848,9 +846,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
 
   @functools.cached_property
   def receptive_field(self) -> types.ReceptiveField:
-    return utils.reduce_receptive_field_per_step(
-        self.receptive_field_per_step, self.output_ratio
-    )
+    return utils.reduce_receptive_field_per_step(self.receptive_field_per_step)
 
   @functools.cached_property
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
@@ -863,7 +859,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
     steps = range(math.lcm(len(layers_rf_per_step), len(shortcut_rf_per_step)))
     rf_per_step = {}
     for step in steps:
-      rf_per_step[step] = utils.receptive_field_union(
+      rf_abs = utils.receptive_field_union(
           utils.receptive_field_at(
               layers_rf_per_step, layers_output_ratio, step
           ),
@@ -871,6 +867,11 @@ class Residual(SerialCombinatorMixin, types.Emitting):
               shortcut_rf_per_step, shortcut_output_ratio, step
           ),
       )
+      if rf_abs is not None:
+        offset = step // layers_output_ratio
+        rf_per_step[step] = (rf_abs[0] - offset, rf_abs[1] - offset)
+      else:
+        rf_per_step[step] = None
     types.validate_receptive_field_per_step(rf_per_step)
     return rf_per_step
 
@@ -1158,10 +1159,15 @@ class Repeat(types.Emitting):
     self._build_child_layer_scanner(scan_fn)(self.child_layer, (), ())
 
     overall_rf_per_step = layer_rf_per_step[0]
+    accumulated_ratio = layer_output_ratio[0]
     for _ in range(self.config.num_repeats - 1):
       overall_rf_per_step = utils.propagate_receptive_field_to_prev_layer(
-          overall_rf_per_step, layer_rf_per_step[0], layer_output_ratio[0]
+          overall_rf_per_step,
+          layer_rf_per_step[0],
+          layer_output_ratio[0],
+          accumulated_ratio,
       )
+      accumulated_ratio *= layer_output_ratio[0]
     return overall_rf_per_step
 
   def get_accumulated_input_latency(self, input_latency: int) -> int:

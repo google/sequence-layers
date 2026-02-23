@@ -2049,11 +2049,11 @@ def receptive_field_at(
   """Returns the receptive field of the layer at the given output step."""
   rf_per_step = layer_receptive_field_per_step
   types.validate_receptive_field_per_step(rf_per_step)
-  # `output_step` can take any value, and we shift it to the range of values in
-  # rf_per_step to compute the relative receptive field, and apply the reverse
-  # shift in the input steps to get the actual input range for `output_step`.
+  # `output_step` can take any value. We normalize it to find the matching entry
+  # in rf_per_step (which is step-relative), then shift by `output_step`'s
+  # corresponding input position to get the absolute input range.
   normalized_step = output_step % len(rf_per_step)
-  shift = (output_step - normalized_step) // layer_output_ratio
+  shift = output_step // layer_output_ratio
   rf = rf_per_step[normalized_step]
   if rf is None:
     return None
@@ -2073,13 +2073,11 @@ def layer_receptive_field_at(
 
 def reduce_receptive_field_per_step(
     rf_per_step: dict[int, types.ReceptiveField],
-    output_ratio: fractions.Fraction,
 ) -> types.ReceptiveField:
   """Returns the union of the receptive fields in rf_per_step.
 
   Args:
     rf_per_step: The receptive field per step.
-    output_ratio: The output ratio of the layer.
 
   Returns:
     The overall union of the receptive fields.
@@ -2095,10 +2093,8 @@ def reduce_receptive_field_per_step(
   # Compute the overall union of the receptive fields.
   min_start = np.inf
   max_end = -np.inf
-  for step, rf in rf_per_step.items():
+  for rf in rf_per_step.values():
     start, end = rf
-    start -= step // output_ratio
-    end -= step // output_ratio
     min_start = min(min_start, start)
     max_end = max(max_end, end)
   return min_start, max_end
@@ -2133,6 +2129,7 @@ def propagate_receptive_field_to_prev_layer(
     layer_rf_per_step_next: dict[int, types.ReceptiveField],
     layer_rf_per_step_prev: dict[int, types.ReceptiveField],
     layer_output_ratio_prev: fractions.Fraction,
+    layer_output_ratio_next: fractions.Fraction = fractions.Fraction(1),
 ) -> dict[int, types.ReceptiveField]:
   """Propagates the receptive field of the next layer to the previous layer.
 
@@ -2144,10 +2141,12 @@ def propagate_receptive_field_to_prev_layer(
     layer_rf_per_step_next: The receptive field of the next layer.
     layer_rf_per_step_prev: The receptive field of the previous layer.
     layer_output_ratio_prev: The output ratio of the previous layer.
+    layer_output_ratio_next: The output ratio of the next (accumulated) layer.
 
   Returns:
     The receptive field per step of the Serial([previous, next]) layers.
   """
+  composed_ratio = layer_output_ratio_prev * layer_output_ratio_next
   expanded_rf_per_step = {}
   for step_next, rf_next in layer_rf_per_step_next.items():
     if rf_next is None:
@@ -2155,6 +2154,10 @@ def propagate_receptive_field_to_prev_layer(
       continue
     types.validate_receptive_field(rf_next)
     start, end = rf_next
+
+    next_input_offset = step_next // layer_output_ratio_next
+    start += next_input_offset
+    end += next_input_offset
 
     rf_prev_list = []
 
@@ -2166,12 +2169,8 @@ def propagate_receptive_field_to_prev_layer(
       if end == np.inf:
         rf_prev_list.append((np.inf, np.inf))
 
-      # Is +1 enough when one side is +/-inf?
       start = start if start != -np.inf else end
       end = end + 1 if end != np.inf else start + 1
-      # There is a possibility of optimizing by only considering
-      # the first (start) and last (end) steps in computation below, but need
-      # to verify that it works for the case of layers with varying rf per step.
       rf_prev_list.extend([
           receptive_field_at(layer_rf_per_step_prev, layer_output_ratio_prev, i)
           for i in range(start, end)
@@ -2188,7 +2187,12 @@ def propagate_receptive_field_to_prev_layer(
       start_prev, end_prev = rf_prev
       min_start = min(min_start, start_prev)
       max_end = max(max_end, end_prev)
-    expanded_rf_per_step[step_next] = (min_start, max_end)
+
+    composed_offset = step_next // composed_ratio
+    expanded_rf_per_step[step_next] = (
+        min_start - composed_offset,
+        max_end - composed_offset,
+    )
   return expanded_rf_per_step
 
 
@@ -2205,14 +2209,15 @@ def receptive_field_per_step_of_serial_layers(
   # Note extra steps does not affect the result, and LCM is the
   # upperbound of what we need, and we can reduce it to speed up computation.
   num_steps = math.lcm(*[len(r) for r in receptive_field_per_step_list])
-  rf_per_step = {k: (k, k) for k in range(num_steps)}
-  # Start from the last layer and work our way to the first.
+  rf_per_step = {k: (0, 0) for k in range(num_steps)}
+  accumulated_ratio = fractions.Fraction(1)
   for output_ratio_i, rf_per_step_i in zip(
       reversed(output_ratio_list), reversed(receptive_field_per_step_list)
   ):
     rf_per_step = propagate_receptive_field_to_prev_layer(
-        rf_per_step, rf_per_step_i, output_ratio_i
+        rf_per_step, rf_per_step_i, output_ratio_i, accumulated_ratio
     )
+    accumulated_ratio *= output_ratio_i
   return rf_per_step
 
 

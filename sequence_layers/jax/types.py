@@ -928,11 +928,7 @@ class Steppable(metaclass=abc.ABCMeta):
     # Compute the overall union of the receptive fields.
     min_start = np.inf
     max_end = -np.inf
-    output_ratio = self.output_ratio
-    for output_step, (start, end) in rf_list.items():
-      input_step = output_step // output_ratio
-      start -= input_step
-      end -= input_step
+    for start, end in rf_list.values():
       min_start = min(min_start, start)
       max_end = max(max_end, end)
     return min_start, max_end

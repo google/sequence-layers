@@ -248,12 +248,11 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
       if self.config.max_past_horizon_blocks == -1:
         start = -np.inf
       else:
-        start = -max_past_horizon
+        start = -max_past_horizon - i
       if self.config.max_future_horizon_blocks == -1:
         end = np.inf
       else:
-        end = max_future_horizon + self.config.block_size - 1
-      # TODO(b/478101851): This should be offset by -i.
+        end = max_future_horizon + self.config.block_size - 1 - i
       per_step[i] = (start, end)
 
     return per_step

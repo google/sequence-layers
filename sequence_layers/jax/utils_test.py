@@ -1482,7 +1482,7 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
           {0: (0, 0), 1: (-1, 1)},
           1,
           1,
-          (-1, 1),
+          (0, 2),
       ),
       (
           'ratio_2_upsample_step_0',
@@ -1576,7 +1576,7 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
           'multiple_rf_overlap',
           {0: (0, 2), 1: (-1, 1)},
           fractions.Fraction(1, 1),
-          (-2, 2),  # (0,2) -> (0,2), (-1,1) -> (-2,0). Union is (-2,2)
+          (-1, 2),  # Union of (0,2) and (-1,1).
       ),
       (
           'multiple_rf_disjoint',
@@ -1584,14 +1584,14 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
           fractions.Fraction(1, 1),
           (
               0,
-              3,
-          ),  # (0,1) -> (0,1), (3,4) -> (2,3).
+              4,
+          ),  # Union of (0,1) and (3,4).
       ),
       (
           'multiple_rf_with_none',
           {0: (0, 1), 1: None, 2: (-2, -1)},
           fractions.Fraction(1, 1),
-          (-4, 1),  # (0,1)->(0,1), (-2,-1)->(-4,-3). Union is (-4,1)
+          (-2, 1),  # Union of (0,1) and (-2,-1).
       ),
       (
           'output_ratio_2',
@@ -1606,16 +1606,16 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
           {0: (0, 1), 1: (-1, 0)},
           fractions.Fraction(1, 2),
           (
-              -3,
+              -1,
               1,
-          ),  # (0,1)->(0,1), (-1,0)->(-3,-2). Union is (-3,1).
+          ),  # Union of (0,1) and (-1,0).
       ),
   )
   def test_reduce_receptive_field_per_step(
       self, rf_per_step, output_ratio, expected_rf
   ):
     self.assertEqual(
-        utils.reduce_receptive_field_per_step(rf_per_step, output_ratio),
+        utils.reduce_receptive_field_per_step(rf_per_step),
         expected_rf,
     )
 
@@ -1758,7 +1758,7 @@ class ReceptiveFieldUtilsTest(test_utils.SequenceLayerTest):
               ),
               _MockSequenceLayer({0: (-1, 0)}, fractions.Fraction(1, 1)),
           ],
-          {0: (-2, 0), 1: (0, 0)},
+          {0: (-1, 0), 1: (-1, 0)},
       ),
   )
   def test_receptive_field_per_step_of_serial_layers(
