@@ -352,30 +352,56 @@ class DotProductSelfAttention(types.Emitting):
     x_time = x.shape[1]
     kv_buffer_size = kv_buf_k.shape[1]
 
-    # Append new K/V to buffer and trim to buffer size.
-    new_k = mx.concatenate([kv_buf_k, keys.values], axis=1)
-    new_v = mx.concatenate([kv_buf_v, values.values], axis=1)
-    new_mask = mx.concatenate([kv_buf_mask, x.mask], axis=1)
+    if kv_buffer_size > 0:
+      # Ring buffer write: insert new K/V at rotating positions.
+      # Uses put_along_axis to scatter into pre-allocated buffers,
+      # compatible with mx.compile / mx.export_function (no Python
+      # int conversion needed).
+      t0 = time_step[0]  # MLX scalar, no eval.
+      positions = (t0 + mx.arange(x_time)) % kv_buffer_size  # [x_time]
 
-    # Keep only the last kv_buffer_size entries.
-    new_k = new_k[:, -kv_buffer_size:]
-    new_v = new_v[:, -kv_buffer_size:]
-    new_mask = new_mask[:, -kv_buffer_size:]
+      # Scatter K/V into buffer at ring positions.
+      idx_4d = mx.broadcast_to(
+          positions.reshape(1, x_time, 1, 1), keys.values.shape
+      )
+      kv_buf_k = mx.put_along_axis(kv_buf_k, idx_4d, keys.values, axis=1)
+      kv_buf_v = mx.put_along_axis(kv_buf_v, idx_4d, values.values, axis=1)
 
-    # Build visibility mask: [b, 1, q_time, kv_time].
-    kv_valid = new_mask[:, None, None, :]  # [b,1,1,kvt]
+      # Scatter mask into buffer.
+      idx_2d = mx.broadcast_to(positions.reshape(1, x_time), x.mask.shape)
+      kv_buf_mask = mx.put_along_axis(kv_buf_mask, idx_2d, x.mask, axis=1)
 
-    # Add causal mask for multi-step queries.
-    if x_time > 1:
-      causal = _causal_mask(x_time, new_k.shape[1])
-      kv_valid = kv_valid & causal
+      # Build visibility mask: [b, 1, 1, kv_buffer_size].
+      kv_valid = kv_buf_mask[:, None, None, :]
 
-    context = self._compute_attention(queries.values, new_k, new_v, kv_valid)
+      # Add causal mask for multi-step queries (respects ring buffer order).
+      if x_time > 1:
+        newest_time = t0 + x_time - 1
+        newest_pos = newest_time % kv_buffer_size
+        phys = mx.arange(kv_buffer_size)
+        dist = (newest_pos - phys + kv_buffer_size) % kv_buffer_size
+        temporal = newest_time - dist
+        q_times = t0 + mx.arange(x_time)
+        causal = temporal[None, :] <= q_times[:, None]
+        kv_valid = kv_valid & causal.reshape(1, 1, x_time, kv_buffer_size)
+
+      context = self._compute_attention(
+          queries.values, kv_buf_k, kv_buf_v, kv_valid
+      )
+    else:
+      # Degenerate: no history buffer, attend only to current step.
+      kv_valid = x.mask[:, None, None, :]
+      if x_time > 1:
+        causal = _causal_mask(x_time, x_time)
+        kv_valid = kv_valid & causal
+      context = self._compute_attention(
+          queries.values, keys.values, values.values, kv_valid
+      )
 
     new_state = (
-        new_k,
-        new_v,
-        new_mask,
+        kv_buf_k,
+        kv_buf_v,
+        kv_buf_mask,
         time_step + x_time,
         q_net_state,
         k_net_state,
