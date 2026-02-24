@@ -29,6 +29,7 @@ import jax
 import jax.ad_checkpoint
 import jax.numpy as jnp
 import numpy as np
+from sequence_layers.jax import meta
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
@@ -1675,7 +1676,9 @@ class Embedding(types.Stateless):
     self.embedding = self.param(
         self.config.embedding_param_name,
         utils.shard_initializer(
-            self.config.embedding_init, self.config.embedding_sharding
+            self.config.embedding_init,
+            self.config.embedding_sharding,
+            labels=frozenset([meta.IS_EMBEDDING]),
         ),
         (self.config.num_embeddings, self.config.dimension),
         self.config.param_dtype,
