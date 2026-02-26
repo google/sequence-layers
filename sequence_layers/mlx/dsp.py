@@ -1,5 +1,6 @@
 """DSP layers for MLX."""
 
+import dataclasses
 import fractions
 import math
 
@@ -9,6 +10,7 @@ import numpy as np
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import convolution as conv_utils
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -181,10 +183,16 @@ def linear_to_mel_weight_matrix(
 
 
 class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
-  """Delays input by `length` timesteps.
+  """Delays input by `length` timesteps."""
 
-  Inserts `length` invalid timesteps at the start of the sequence.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    length: int = 0
+    delay_layer_output: bool = True
+    name: str | None = None
+
+    def make(self) -> 'Delay':
+      return Delay.from_config(self)
 
   def __init__(self, *, length, delay_layer_output=True):
     super().__init__()
@@ -246,6 +254,15 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
 
 class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
   """Drops the first `length` timesteps from the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    length: int = 0
+    preserve_length_in_layer: bool = False
+    name: str | None = None
+
+    def make(self) -> 'Lookahead':
+      return Lookahead.from_config(self)
 
   def __init__(self, *, length, preserve_length_in_layer=False):
     super().__init__()
@@ -904,10 +921,21 @@ class IRFFT(types.Stateless):
 
 
 class STFT(types.SequenceLayer):
-  """Short-Time Fourier Transform.
+  """Short-Time Fourier Transform."""
 
-  Composes Frame -> Window -> RFFT.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    frame_length: int = 0
+    frame_step: int = 0
+    fft_length: int = 0
+    window_fn: object = None
+    time_padding: str = 'reverse_causal_valid'
+    fft_padding: str = 'right'
+    output_magnitude: bool = False
+    name: str | None = None
+
+    def make(self) -> 'STFT':
+      return STFT.from_config(self)
 
   def __init__(
       self,
@@ -1018,10 +1046,20 @@ class STFT(types.SequenceLayer):
 
 
 class InverseSTFT(types.SequenceLayer):
-  """Inverse Short-Time Fourier Transform.
+  """Inverse Short-Time Fourier Transform."""
 
-  Composes IRFFT -> Window -> OverlapAdd.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    frame_length: int = 0
+    frame_step: int = 0
+    fft_length: int = 0
+    window_fn: object = None
+    time_padding: str = 'causal'
+    fft_padding: str = 'right'
+    name: str | None = None
+
+    def make(self) -> 'InverseSTFT':
+      return InverseSTFT.from_config(self)
 
   def __init__(
       self,

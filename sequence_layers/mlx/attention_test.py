@@ -92,6 +92,60 @@ class DotProductSelfAttentionTest(parameterized.TestCase):
     self.assertEqual(y.shape, (1, 5, 2, 4))
 
 
+  def test_per_dim_scale(self):
+    """Test per_dim_scale creates parameter and affects output."""
+    layer = attention.DotProductSelfAttention(
+        in_features=8,
+        num_heads=2,
+        units_per_head=4,
+        max_past_horizon=32,
+        per_dim_scale=True,
+    )
+    self.assertIsNotNone(layer._per_dim_scale)
+    self.assertEqual(layer._per_dim_scale.shape, (4,))
+    np.testing.assert_array_equal(layer._per_dim_scale, np.zeros(4))
+
+    # At initialization (zeros), output should match per_dim_scale=False.
+    layer_no_pds = attention.DotProductSelfAttention(
+        in_features=8,
+        num_heads=2,
+        units_per_head=4,
+        max_past_horizon=32,
+        per_dim_scale=False,
+    )
+    # Copy weights so projections match.
+    layer_no_pds.q_proj = layer.q_proj
+    layer_no_pds.k_proj = layer.k_proj
+    layer_no_pds.v_proj = layer.v_proj
+
+    x = test_utils.random_sequence(1, 5, 8)
+    y_pds = layer.layer(x)
+    y_no_pds = layer_no_pds.layer(x)
+    np.testing.assert_allclose(
+        np.array(y_pds.values), np.array(y_no_pds.values), atol=1e-5
+    )
+
+    # After modifying per_dim_scale, output should differ.
+    layer._per_dim_scale = mx.ones((4,))
+    y_modified = layer.layer(x)
+    self.assertFalse(
+        np.allclose(
+            np.array(y_pds.values), np.array(y_modified.values), atol=1e-5
+        )
+    )
+
+  def test_per_dim_scale_step(self):
+    """Test per_dim_scale works in step mode."""
+    layer = attention.DotProductSelfAttention(
+        in_features=8,
+        num_heads=2,
+        units_per_head=4,
+        max_past_horizon=10,
+        per_dim_scale=True,
+    )
+    test_utils.verify_contract(self, layer, (8,), atol=1e-4, rtol=1e-4)
+
+
 class DeferredDotProductSelfAttentionTest(parameterized.TestCase):
 
   def test_from_config(self):

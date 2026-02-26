@@ -1,11 +1,14 @@
 """Normalization layers for MLX."""
 
+import dataclasses
+
 import mlx.core as mx
 import mlx.nn as nn
 
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 
@@ -55,12 +58,23 @@ class L2Normalize(types.PreservesType, types.StatelessPointwise):
 
 
 class RMSNormalization(types.PreservesType, types.StatelessPointwise):
-  """RMS Normalization backed by mlx.nn.RMSNorm.
+  """RMS Normalization backed by mlx.nn.RMSNorm."""
 
-  For simple axis=-1 normalization with a learned scale, this delegates
-  to mlx.nn.RMSNorm (which uses the optimized mx.fast.rms_norm).
-  Falls back to manual computation for multi-axis or no-scale cases.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    axis: int | tuple[int, ...] = -1
+    epsilon: float = 1e-6
+    use_scale: bool = True
+    scale_init: object = None
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def __post_init__(self):
+      if not isinstance(self.axis, int):
+        object.__setattr__(self, 'axis', tuple(self.axis))
+
+    def make(self) -> 'RMSNormalization':
+      return RMSNormalization.from_config(self)
 
   def __init__(
       self,
@@ -105,7 +119,9 @@ class RMSNormalization(types.PreservesType, types.StatelessPointwise):
     self._ensure_initialized(x.values.shape)
 
     if self._use_builtin and self._rms_norm is not None:
-      return Sequence(self._rms_norm(x.values), x.mask)
+      # Cast back to input dtype to preserve bfloat16 compute.
+      result = self._rms_norm(x.values).astype(x.values.dtype)
+      return Sequence(result, x.mask)
 
     values = x.values
     axes = _normalize_axes(self._axis, values.shape)
@@ -150,6 +166,25 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
   Falls back to manual computation for multi-axis cases.
   """
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    axis: int | tuple[int, ...] = -1
+    epsilon: float = 1e-6
+    use_bias: bool = True
+    use_scale: bool = True
+    # Accepted for JAX compatibility but ignored: MLX always reduces in fp32.
+    reductions_in_at_least_fp32: bool = True
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def __post_init__(self):
+      if not isinstance(self.axis, int):
+        object.__setattr__(self, 'axis', tuple(self.axis))
+
+    def make(self) -> 'LayerNormalization':
+      return LayerNormalization.from_config(self)
+
+
   def __init__(
       self,
       *,
@@ -158,6 +193,7 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
       use_bias: bool = True,
       use_scale: bool = True,
       param_dtype=mx.float32,
+      reductions_in_at_least_fp32: bool = True,
   ):
     super().__init__()
     self._axis = axis
@@ -165,6 +201,7 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
     self.use_bias = use_bias
     self.use_scale = use_scale
     self._param_dtype = param_dtype
+    self.reductions_in_at_least_fp32 = reductions_in_at_least_fp32
     self._layer_norm = None
     self._use_builtin = False
     self._manual_scale = None
@@ -199,7 +236,13 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
     self._ensure_initialized(x.values.shape)
 
     if self._use_builtin and self._layer_norm is not None:
-      return Sequence(self._layer_norm(x.values), x.mask)
+      x_values = x.values
+      original_dtype = x_values.dtype
+      if self.reductions_in_at_least_fp32:
+        x_values = x_values.astype(mx.float32)
+      # Cast back to input dtype to preserve bfloat16 compute.
+      result = self._layer_norm(x_values).astype(original_dtype)
+      return Sequence(result, x.mask)
 
     values = x.values
     axes = _normalize_axes(self._axis, values.shape)
@@ -241,6 +284,7 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
         use_bias=config.use_bias,
         use_scale=config.use_scale,
         param_dtype=_to_mx_dtype(config.param_dtype),
+        reductions_in_at_least_fp32=config.reductions_in_at_least_fp32
     )
 
 

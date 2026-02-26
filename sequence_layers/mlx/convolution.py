@@ -877,10 +877,10 @@ class DeferredConv1D(types.SequenceLayer):
   def __init__(self, config):
     super().__init__()
     self._config = config
-    self._inner = None
+    self.inner = None
 
   def _ensure_initialized(self, in_features):
-    if self._inner is not None:
+    if self.inner is not None:
       return
     c = self._config
     compute_dtype = getattr(c, 'compute_dtype', None)
@@ -888,7 +888,7 @@ class DeferredConv1D(types.SequenceLayer):
       compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
     param_dtype = init_mapping._to_mx_dtype(c.param_dtype)
     activation = init_mapping.map_activation(getattr(c, 'activation', None))
-    self._inner = Conv1D(
+    self.inner = Conv1D(
         in_features=in_features,
         filters=c.filters,
         kernel_size=c.kernel_size,
@@ -944,17 +944,17 @@ class DeferredConv1D(types.SequenceLayer):
 
   def get_initial_state(self, batch_size, input_spec, *, constants=None):
     self._ensure_initialized(input_spec.shape[-1])
-    return self._inner.get_initial_state(
+    return self.inner.get_initial_state(
         batch_size, input_spec, constants=constants
     )
 
   def layer(self, x, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.layer(x, constants=constants)
+    return self.inner.layer(x, constants=constants)
 
   def step(self, x, state, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.step(x, state, constants=constants)
+    return self.inner.step(x, state, constants=constants)
 
 
 class DeferredDepthwiseConv1D(types.SequenceLayer):
@@ -963,10 +963,10 @@ class DeferredDepthwiseConv1D(types.SequenceLayer):
   def __init__(self, config):
     super().__init__()
     self._config = config
-    self._inner = None
+    self.inner = None
 
   def _ensure_initialized(self, in_features):
-    if self._inner is not None:
+    if self.inner is not None:
       return
     c = self._config
     compute_dtype = getattr(c, 'compute_dtype', None)
@@ -974,7 +974,7 @@ class DeferredDepthwiseConv1D(types.SequenceLayer):
       compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
     param_dtype = init_mapping._to_mx_dtype(c.param_dtype)
     activation = init_mapping.map_activation(getattr(c, 'activation', None))
-    self._inner = DepthwiseConv1D(
+    self.inner = DepthwiseConv1D(
         in_features=in_features,
         kernel_size=c.kernel_size,
         depth_multiplier=c.depth_multiplier,
@@ -1029,17 +1029,17 @@ class DeferredDepthwiseConv1D(types.SequenceLayer):
 
   def get_initial_state(self, batch_size, input_spec, *, constants=None):
     self._ensure_initialized(input_spec.shape[-1])
-    return self._inner.get_initial_state(
+    return self.inner.get_initial_state(
         batch_size, input_spec, constants=constants
     )
 
   def layer(self, x, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.layer(x, constants=constants)
+    return self.inner.layer(x, constants=constants)
 
   def step(self, x, state, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.step(x, state, constants=constants)
+    return self.inner.step(x, state, constants=constants)
 
 
 class DeferredConv1DTranspose(types.SequenceLayer):
@@ -1048,10 +1048,10 @@ class DeferredConv1DTranspose(types.SequenceLayer):
   def __init__(self, config):
     super().__init__()
     self._config = config
-    self._inner = None
+    self.inner = None
 
   def _ensure_initialized(self, in_features):
-    if self._inner is not None:
+    if self.inner is not None:
       return
     c = self._config
     compute_dtype = getattr(c, 'compute_dtype', None)
@@ -1059,7 +1059,7 @@ class DeferredConv1DTranspose(types.SequenceLayer):
       compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
     param_dtype = init_mapping._to_mx_dtype(c.param_dtype)
     activation = init_mapping.map_activation(getattr(c, 'activation', None))
-    self._inner = Conv1DTranspose(
+    self.inner = Conv1DTranspose(
         in_features=in_features,
         filters=c.filters,
         kernel_size=c.kernel_size,
@@ -1100,14 +1100,14 @@ class DeferredConv1DTranspose(types.SequenceLayer):
 
   def get_initial_state(self, batch_size, input_spec, *, constants=None):
     self._ensure_initialized(input_spec.shape[-1])
-    return self._inner.get_initial_state(
+    return self.inner.get_initial_state(
         batch_size, input_spec, constants=constants
     )
 
   def layer(self, x, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.layer(x, constants=constants)
+    return self.inner.layer(x, constants=constants)
 
   def step(self, x, state, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.step(x, state, constants=constants)
+    return self.inner.step(x, state, constants=constants)

@@ -1,5 +1,6 @@
 """Conditioning layers for MLX."""
 
+import dataclasses
 import enum
 import math
 
@@ -11,6 +12,7 @@ from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -166,6 +168,21 @@ class Conditioning(types.SequenceLayer):
     AFFINE_SCALE = 5
     MUL = 6
     CONCAT_BEFORE = 7
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    conditioning_name: str = ''
+    projection: 'Conditioning.Projection' = None
+    combination: 'Conditioning.Combination' = None
+    projection_channel_shape: tuple[int, ...] | None = None
+    streaming: bool = False
+    affine_scale_offset: complex = 1.0
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def make(self) -> 'Conditioning':
+      return Conditioning.from_config(self)
 
   def __init__(
       self,

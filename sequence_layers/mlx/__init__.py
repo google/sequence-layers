@@ -32,10 +32,12 @@ from sequence_layers.mlx.types import State
 # Re-export basic_types TypeVars used in type annotations.
 from sequence_layers.mlx.types import MaskT
 
-# Re-export attention projection configs (from JAX, used to configure attention).
-from sequence_layers.jax.attention.common import CombinedQueryKeyValueProjection
-from sequence_layers.jax.attention.common import QueryAndKeyValueProjection
-from sequence_layers.jax.attention.common import SeparateQueryKeyValueProjection
+# Re-export attention projection configs (MLX-native, no JAX dependency).
+from sequence_layers.mlx.projection_configs import CombinedQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryAndKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryAndSharedKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryKeyValueProjectionConfig
+from sequence_layers.mlx.projection_configs import SeparateQueryKeyValueProjection
 
 # Re-export MLX layer hierarchy.
 from sequence_layers.mlx.types import ChannelSpec
@@ -117,6 +119,15 @@ from sequence_layers.mlx.convolution import DeferredConv1DTranspose
 from sequence_layers.mlx.convolution import DeferredDepthwiseConv1D
 from sequence_layers.mlx.convolution import DepthwiseConv1D
 
+# Re-export 2D convolution/pooling/upsampling layers.
+from sequence_layers.mlx.convolution2d import AveragePooling2D
+from sequence_layers.mlx.convolution2d import Conv2D
+from sequence_layers.mlx.convolution2d import Conv2DTranspose
+from sequence_layers.mlx.convolution2d import DeferredConv2D
+from sequence_layers.mlx.convolution2d import DeferredConv2DTranspose
+from sequence_layers.mlx.convolution2d import ParallelChannels
+from sequence_layers.mlx.convolution2d import Upsample2D
+
 # Re-export DSP layers.
 from sequence_layers.mlx.dsp import Delay
 from sequence_layers.mlx.dsp import FFT
@@ -137,6 +148,8 @@ from sequence_layers.mlx.combinators import Parallel
 from sequence_layers.mlx.combinators import Repeat
 from sequence_layers.mlx.combinators import Residual
 from sequence_layers.mlx.combinators import Serial
+from sequence_layers.mlx.combinators import SerialCombinatorMixin
+from sequence_layers.mlx.combinators import SerialModules
 
 # Re-export conditioning.
 from sequence_layers.mlx.conditioning import Conditioning
@@ -148,6 +161,9 @@ from sequence_layers.mlx import weight_converter
 # ---------------------------------------------------------------------------
 # Backend factory registration
 # ---------------------------------------------------------------------------
+# Re-export SequenceLayerConfig (lives in JAX types but is backend-agnostic).
+from sequence_layers.jax.types import SequenceLayerConfig
+
 from sequence_layers.jax.types import SequenceLayerConfig as _SLC
 
 
@@ -188,6 +204,7 @@ def _register_backends():
   from sequence_layers.mlx import pooling as mlx_pool
   from sequence_layers.mlx import dsp as mlx_dsp
   from sequence_layers.mlx import combinators as mlx_comb
+  from sequence_layers.mlx import convolution2d as mlx_conv2d
 
   reg = _SLC.register_backend_factory
 
@@ -338,6 +355,19 @@ def _register_backends():
       mlx_conv.Conv1DTranspose.from_config,
   )
 
+  # 2D Convolution.
+  reg('mlx', jax_conv.Conv2D.Config, mlx_conv2d.Conv2D.from_config)
+  reg('mlx', jax_conv.Conv2DTranspose.Config, mlx_conv2d.Conv2DTranspose.from_config)
+
+  # 2D Pooling.
+  reg('mlx', jax_pool.AveragePooling2D.Config, mlx_conv2d.AveragePooling2D.from_config)
+
+  # 2D Upsampling.
+  reg('mlx', jax_simple.Upsample2D.Config, mlx_conv2d.Upsample2D.from_config)
+
+  # ParallelChannels.
+  reg('mlx', jax_comb.ParallelChannels.Config, mlx_conv2d.ParallelChannels.from_config)
+
   # Pooling.
   reg('mlx', jax_pool.MaxPooling1D.Config, mlx_pool.MaxPooling1D.from_config)
   reg('mlx', jax_pool.MinPooling1D.Config, mlx_pool.MinPooling1D.from_config)
@@ -370,6 +400,46 @@ def _register_backends():
   reg('mlx', jax_comb.Residual.Config, mlx_comb.Residual.from_config)
   reg('mlx', jax_comb.Repeat.Config, mlx_comb.Repeat.from_config)
   reg('mlx', jax_comb.Parallel.Config, mlx_comb.Parallel.from_config)
+
+  # ---------------------------------------------------------------
+  # MLX-native Config classes.
+  # These mirror the JAX Configs but are defined directly on the MLX
+  # layer classes, so they also need backend registration.
+  # ---------------------------------------------------------------
+  reg('mlx', mlx_simple.Identity.Config, mlx_simple.Identity.from_config)
+  reg('mlx', mlx_simple.Dropout.Config, mlx_simple.Dropout.from_config)
+  reg('mlx', mlx_simple.CheckpointName.Config, mlx_simple.CheckpointName.from_config)
+  reg('mlx', mlx_simple.GatedUnit.Config, mlx_simple.GatedUnit.from_config)
+  reg('mlx', mlx_dense.DenseDeferred.Config, mlx_dense.DenseDeferred.from_config)
+  reg('mlx', mlx_dense.EinsumDense.Config, mlx_dense.EinsumDense.from_config)
+  reg('mlx', mlx_norm.RMSNormalization.Config, mlx_norm.RMSNormalization.from_config)
+  reg('mlx', mlx_pos.ApplyRotaryPositionalEncoding.Config, mlx_pos.ApplyRotaryPositionalEncoding.from_config)
+  reg('mlx', mlx_dsp.Delay.Config, mlx_dsp.Delay.from_config)
+  reg('mlx', mlx_comb.Serial.Config, mlx_comb.Serial.from_config)
+  reg('mlx', mlx_comb.Residual.Config, mlx_comb.Residual.from_config)
+  reg('mlx', mlx_cond.Conditioning.Config, mlx_cond.Conditioning.from_config)
+  reg('mlx', mlx_attn.DotProductSelfAttention.Config, mlx_attn.DotProductSelfAttention.from_config)
+  reg('mlx', mlx_attn.DotProductAttention.Config, mlx_attn.DotProductAttention.from_config)
+  reg('mlx', mlx_attn.StreamingDotProductAttention.Config, mlx_attn.StreamingDotProductAttention.from_config)
+  reg('mlx', mlx_attn.LocalDotProductSelfAttention.Config, mlx_attn.LocalDotProductSelfAttention.from_config)
+  reg('mlx', mlx_simple.Elu.Config, mlx_simple.Elu.from_config)
+  reg('mlx', mlx_simple.Cast.Config, mlx_simple.Cast.from_config)
+  reg('mlx', mlx_simple.Flatten.Config, mlx_simple.Flatten.from_config)
+  reg('mlx', mlx_simple.Reshape.Config, mlx_simple.Reshape.from_config)
+  reg('mlx', mlx_simple.ExpandDims.Config, mlx_simple.ExpandDims.from_config)
+  reg('mlx', mlx_simple.Lambda.Config, mlx_simple.Lambda.from_config)
+  reg('mlx', mlx_dsp.Lookahead.Config, mlx_dsp.Lookahead.from_config)
+  reg('mlx', mlx_dsp.STFT.Config, mlx_dsp.STFT.from_config)
+  reg('mlx', mlx_dsp.InverseSTFT.Config, mlx_dsp.InverseSTFT.from_config)
+  reg('mlx', mlx_conv2d.Conv2D.Config, mlx_conv2d.Conv2D.from_config)
+  reg('mlx', mlx_conv2d.Conv2DTranspose.Config, mlx_conv2d.Conv2DTranspose.from_config)
+  reg('mlx', mlx_conv2d.AveragePooling2D.Config, mlx_conv2d.AveragePooling2D.from_config)
+  reg('mlx', mlx_conv2d.Upsample2D.Config, mlx_conv2d.Upsample2D.from_config)
+  reg('mlx', mlx_conv2d.ParallelChannels.Config, mlx_conv2d.ParallelChannels.from_config)
+  reg('mlx', mlx_simple.Embedding.Config, mlx_simple.Embedding.from_config)
+  reg('mlx', mlx_simple.Scale.Config, mlx_simple.Scale.from_config)
+  reg('mlx', mlx_simple.Logging.Config, mlx_simple.Logging.from_config)
+  reg('mlx', mlx_norm.LayerNormalization.Config, mlx_norm.LayerNormalization.from_config)
 
 
 _register_backends()

@@ -1,6 +1,9 @@
 """Simple sequence layers for MLX."""
 
+import dataclasses
 import math
+
+from typing import Callable
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -9,6 +12,7 @@ import numpy as np
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -21,6 +25,13 @@ MaskedSequence = bt.MaskedSequence
 
 class Identity(types.PreservesType, types.StatelessPointwise):
   """Identity pass-through of the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Identity':
+      return Identity.from_config(self)
 
   @types.check_layer
   def layer(self, x, *, constants=None):
@@ -133,6 +144,14 @@ class LeakyRelu(types.PreservesType, types.StatelessPointwiseFunctor):
 class Elu(types.PreservesType, types.StatelessPointwiseFunctor):
   """An ELU activation layer."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    alpha: complex = 1.0
+    name: str | None = None
+
+    def make(self) -> 'Elu':
+      return Elu.from_config(self)
+
   def __init__(self, alpha=1.0):
     super().__init__()
     self._alpha = alpha
@@ -197,6 +216,14 @@ class Softplus(types.PreservesType, types.StatelessPointwiseFunctor):
 class Cast(types.StatelessPointwiseFunctor):
   """Cast input values to the specified type."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    dtype: object = mx.float32
+    name: str | None = None
+
+    def make(self) -> 'Cast':
+      return Cast.from_config(self)
+
   def __init__(self, dtype):
     super().__init__()
     self._dtype = dtype
@@ -220,6 +247,14 @@ class Cast(types.StatelessPointwiseFunctor):
 
 class Scale(types.PreservesType, types.StatelessPointwise):
   """Scales the input by a provided constant or array."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    scale: object = 1.0
+    name: str | None = None
+
+    def make(self) -> 'Scale':
+      return Scale.from_config(self)
 
   def __init__(self, scale):
     super().__init__()
@@ -302,6 +337,15 @@ class MaskInvalid(types.PreservesType, types.StatelessPointwise):
 class GatedUnit(types.PreservesType, types.Stateless):
   """Computes a generalized Gated Unit, reducing input channels by 2x."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    feature_activation: Callable | None = None
+    gate_activation: Callable | None = None
+    name: str | None = None
+
+    def make(self) -> 'GatedUnit':
+      return GatedUnit.from_config(self)
+
   def __init__(self, feature_activation=None, gate_activation=None):
     super().__init__()
     self._feature_activation = feature_activation
@@ -366,11 +410,14 @@ class GatedTanhUnit(GatedUnit):
 
 
 class Flatten(types.PreservesType, types.StatelessPointwise):
-  """Flattens the channel dimensions of the input sequence.
+  """Flattens the channel dimensions of the input sequence."""
 
-  An input sequence with shape [batch_size, time, ...] is reshaped to
-  [batch_size, time, prod(...)]. The mask is unchanged.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Flatten':
+      return Flatten.from_config(self)
 
   def get_output_shape(self, input_shape, *, constants=None):
     return (math.prod(input_shape),)
@@ -391,6 +438,17 @@ class Flatten(types.PreservesType, types.StatelessPointwise):
 
 class Reshape(types.PreservesType, types.Stateless):
   """Reshapes the channels dimension of the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    output_shape: tuple[int, ...] = ()
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'output_shape', tuple(self.output_shape))
+
+    def make(self) -> 'Reshape':
+      return Reshape.from_config(self)
 
   def __init__(self, output_shape):
     super().__init__()
@@ -425,6 +483,18 @@ class Reshape(types.PreservesType, types.Stateless):
 
 class ExpandDims(types.PreservesType, types.Stateless):
   """Expands channel dimensions of the input sequence."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    axis: int | tuple[int, ...] = 0
+    name: str | None = None
+
+    def __post_init__(self):
+      if not isinstance(self.axis, int):
+        object.__setattr__(self, 'axis', tuple(self.axis))
+
+    def make(self) -> 'ExpandDims':
+      return ExpandDims.from_config(self)
 
   def __init__(self, axis):
     super().__init__()
@@ -585,6 +655,17 @@ class Embedding(types.Stateless):
   Backed by mlx.nn.Embedding.
   """
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    num_embeddings: int = 1
+    dimension: int = 1
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def make(self) -> 'Embedding':
+      return Embedding.from_config(self)
+
   def __init__(
       self,
       *,
@@ -640,6 +721,15 @@ class Embedding(types.Stateless):
 
 class Dropout(types.PreservesType, types.StatelessPointwise):
   """Dropout layer (pass-through during inference)."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    rate: float = 0.0
+    broadcast_dims: tuple[int, ...] = ()
+    name: str | None = None
+
+    def make(self) -> 'Dropout':
+      return Dropout.from_config(self)
 
   def __init__(self, rate=0.0):
     super().__init__()
@@ -726,6 +816,14 @@ class Upsample1D(types.PreservesType, types.Stateless):
 class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
   """Identity pass-through (checkpoint naming is JAX-only)."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    checkpoint_name: str = ''
+    name: str | None = None
+
+    def make(self) -> 'CheckpointName':
+      return CheckpointName.from_config(self)
+
   def __init__(self, checkpoint_name=''):
     super().__init__()
     self._checkpoint_name = checkpoint_name
@@ -750,16 +848,62 @@ class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
 class Lambda(types.Stateless):
   """A SequenceLayer that wraps a Python callable."""
 
-  def __init__(self, fn, *, sequence_input=False, mask_required=True):
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    fn: Callable = None
+    sequence_input: bool = False
+    mask_required: bool = True
+    # Accepted for JAX compatibility but ignored by MLX Lambda.
+    expected_input_spec: object = None
+    expected_output_spec: object = None
+    name: str | None = None
+
+    def make(self) -> 'Lambda':
+      return Lambda.from_config(self)
+
+  def __init__(self, fn, *, sequence_input=False, mask_required=True,
+               expected_output_spec=None):
     super().__init__()
     self._fn = fn
     self._sequence_input = sequence_input
     self._mask_required = mask_required
+    self._expected_output_spec = expected_output_spec
+    self._cached_output_spec = None
+
+  def _probe_output(self, input_shape, input_dtype):
+    """Probe the function with a dummy to infer output shape/dtype."""
+    if self._expected_output_spec is not None:
+      return self._expected_output_spec
+    if self._cached_output_spec is not None:
+      return self._cached_output_spec
+    try:
+      dummy_values = mx.zeros((1, 1) + tuple(input_shape), dtype=input_dtype)
+      dummy_mask = mx.ones((1, 1), dtype=mx.bool_)
+      if self._sequence_input:
+        result = self._fn(Sequence(dummy_values, dummy_mask))
+        out_shape = result.values.shape[2:]
+        out_dtype = result.values.dtype
+      else:
+        out_values = self._fn(dummy_values)
+        out_shape = out_values.shape[2:]
+        out_dtype = out_values.dtype
+      self._cached_output_spec = bt.ShapeDType(out_shape, out_dtype)
+      return self._cached_output_spec
+    except Exception:
+      return None
 
   def get_output_shape(self, input_shape, *, constants=None):
+    spec = self._probe_output(input_shape, mx.float32)
+    if spec is not None:
+      return tuple(spec.shape)
     return tuple(input_shape)
 
-  @types.check_layer
+  def get_output_dtype(self, input_dtype, *, constants=None):
+    spec = self._probe_output((1,), input_dtype)
+    if spec is not None:
+      return spec.dtype
+    return input_dtype
+
   def layer(self, x, *, constants=None):
     if self._sequence_input:
       result = self._fn(x)
@@ -781,6 +925,7 @@ class Lambda(types.Stateless):
         fn=config.fn,
         sequence_input=config.sequence_input,
         mask_required=config.mask_required,
+        expected_output_spec=getattr(config, 'expected_output_spec', None),
     )
 
 
@@ -791,6 +936,15 @@ class Lambda(types.Stateless):
 
 class Logging(types.PreservesType, types.StatelessPointwise):
   """Logs input info and returns the input unchanged."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    prefix: str = ''
+    dump_tensors: bool = False
+    name: str | None = None
+
+    def make(self) -> 'Logging':
+      return Logging.from_config(self)
 
   def __init__(self, prefix='', dump_tensors=False):
     super().__init__()

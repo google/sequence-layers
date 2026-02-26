@@ -1,6 +1,9 @@
 """Dense sequence layer for MLX."""
 
+import dataclasses
 import math
+
+from typing import Callable
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -10,6 +13,7 @@ from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 
@@ -164,12 +168,20 @@ class Dense(types.Stateless):
 
 
 class DenseDeferred(types.Stateless):
-  """Dense layer that defers weight creation until first use.
+  """Dense layer that defers weight creation until first use."""
 
-  This is needed because Linen Dense.Config doesn't specify in_features;
-  it is inferred from the first input. This wrapper creates the actual
-  Dense layer on first call.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    """MLX-native configuration for Dense."""
+    features: int = 1
+    use_bias: bool = True
+    activation: Callable | None = None
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def make(self) -> 'DenseDeferred':
+      return DenseDeferred.from_config(self)
 
   def __init__(
       self,
@@ -186,12 +198,12 @@ class DenseDeferred(types.Stateless):
     self.activation = activation
     self.compute_dtype = compute_dtype
     self._param_dtype = param_dtype
-    self._inner = None
+    self.inner = None
 
   def _ensure_initialized(self, in_features: int):
-    if self._inner is not None:
+    if self.inner is not None:
       return
-    self._inner = Dense(
+    self.inner = Dense(
         in_features=in_features,
         features=self.features,
         use_bias=self._use_bias,
@@ -215,7 +227,7 @@ class DenseDeferred(types.Stateless):
   @types.check_layer
   def layer(self, x, *, constants=None):
     self._ensure_initialized(x.shape[-1])
-    return self._inner.layer(x, constants=constants)
+    return self.inner.layer(x, constants=constants)
 
   @classmethod
   def from_config(cls, config):
@@ -233,11 +245,24 @@ class DenseDeferred(types.Stateless):
 
 
 class EinsumDense(types.Stateless):
-  """Dense layer using Einstein summation notation.
+  """Dense layer using Einstein summation notation."""
 
-  Equation must be of the form '...ab,bc->...ac' where the leading '...'
-  broadcasts over batch and time dimensions.
-  """
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    """MLX-native configuration for EinsumDense."""
+    equation: str = ''
+    output_shape: tuple[int | None, ...] = ()
+    bias_axes: str = ''
+    activation: Callable | None = None
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'output_shape', tuple(self.output_shape))
+
+    def make(self) -> 'EinsumDense':
+      return EinsumDense.from_config(self)
 
   def __init__(
       self,
@@ -314,3 +339,7 @@ class EinsumDense(types.Stateless):
         compute_dtype=compute_dtype,
         param_dtype=_to_mx_dtype(config.param_dtype),
     )
+
+
+# Alias so that sl.Dense.Config(...) works like sl_jax.Dense.Config(...).
+Dense.Config = DenseDeferred.Config

@@ -236,7 +236,7 @@ def _slice_params(params, index):
 def _load_residual(mlx_residual, linen_params, config, batch_stats=None):
   """Load Residual: body is layers_{i}, shortcut is shortcut_layer."""
   # Body is a Serial inside the Residual.
-  body = mlx_residual._body
+  body = mlx_residual.body
   for i, layer_config in enumerate(config.layers):
     key = f'layers_{i}'
     child_params = linen_params.get(key, {})
@@ -256,7 +256,7 @@ def _load_residual(mlx_residual, linen_params, config, batch_stats=None):
       sc_key = f'layers_{i}'
       sc_bs = shortcut_bs.get(sc_key, {}) if shortcut_bs else None
       _load_config(
-          mlx_residual._shortcut,
+          mlx_residual.shortcut,
           shortcut_params.get(sc_key, {}),
           sc_config,
           batch_stats=sc_bs,
@@ -267,8 +267,8 @@ def _load_dense(mlx_dense, linen_params, config):
   """Load Dense: transpose kernel [in, out] → [out, in]."""
   # Handle DenseDeferred wrapper.
   inner = mlx_dense
-  if hasattr(inner, '_inner') and inner._inner is not None:
-    inner = inner._inner
+  if hasattr(inner, 'inner') and inner.inner is not None:
+    inner = inner.inner
 
   kernel = linen_params.get('kernel')
   if kernel is not None:
@@ -304,15 +304,16 @@ def _load_attention(mlx_attn, linen_params, config):
         value_projection/kernel [in, kv_heads, uph]
   """
   from sequence_layers.jax.attention import common as attn_common
+  from sequence_layers.mlx import projection_configs as mlx_proj
 
   # Handle Deferred wrapper.
   inner = mlx_attn
-  if hasattr(inner, '_inner') and inner._inner is not None:
-    inner = inner._inner
+  if hasattr(inner, 'inner') and inner.inner is not None:
+    inner = inner.inner
 
   input_projection = config.input_projection
 
-  if isinstance(input_projection, attn_common.CombinedQueryKeyValueProjection):
+  if isinstance(input_projection, (attn_common.CombinedQueryKeyValueProjection, mlx_proj.CombinedQueryKeyValueProjection)):
     # Combined QKV: kernel [in, 3, heads, uph] → separate q/k/v.
     qkv_params = linen_params.get('query_key_value_projection', {})
     combined_kernel = qkv_params.get('kernel')
@@ -331,7 +332,7 @@ def _load_attention(mlx_attn, linen_params, config):
       inner.v_bias = mx.array(vb.reshape(-1))
 
   elif isinstance(
-      input_projection, attn_common.SeparateQueryKeyValueProjection
+      input_projection, (attn_common.SeparateQueryKeyValueProjection, mlx_proj.SeparateQueryKeyValueProjection)
   ):
     # Separate Q/K/V projections (used for GQA where num_kv_heads < num_heads).
     q_params = linen_params.get('query_projection', {})
@@ -361,6 +362,11 @@ def _load_attention(mlx_attn, linen_params, config):
     if v_bias is not None:
       inner.v_bias = mx.array(v_bias.reshape(-1))
 
+  # per_dim_scale: learned [units_per_head] query scale.
+  per_dim_scale = linen_params.get('per_dim_scale')
+  if per_dim_scale is not None:
+    inner._per_dim_scale = mx.array(per_dim_scale)
+
   # Q/K/V processing networks have no trainable params
   # (RoPE is stateless with no learned weights).
 
@@ -381,11 +387,12 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
         shared_key_value_projection/kernel [source, heads, uph]
   """
   from sequence_layers.jax.attention import common as attn_common
+  from sequence_layers.mlx import projection_configs as mlx_proj
 
   # Handle Deferred wrapper.
   inner = mlx_attn
-  if hasattr(inner, '_inner') and inner._inner is not None:
-    inner = inner._inner
+  if hasattr(inner, 'inner') and inner.inner is not None:
+    inner = inner.inner
 
   input_projection = config.input_projection
 
@@ -400,7 +407,7 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
   if q_bias is not None:
     inner.q_bias = mx.array(q_bias.reshape(-1))
 
-  if isinstance(input_projection, attn_common.QueryAndKeyValueProjection):
+  if isinstance(input_projection, (attn_common.QueryAndKeyValueProjection, mlx_proj.QueryAndKeyValueProjection)):
     # Combined KV: kernel [source, 2, heads, uph] → split into K, V.
     kv_params = linen_params.get('key_value_projection', {})
     kv_kernel = kv_params.get('kernel')
@@ -417,7 +424,7 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
       inner.v_bias = mx.array(vb.reshape(-1))
 
   elif isinstance(
-      input_projection, attn_common.SeparateQueryKeyValueProjection
+      input_projection, (attn_common.SeparateQueryKeyValueProjection, mlx_proj.SeparateQueryKeyValueProjection)
   ):
     # Separate K and V projections.
     k_params = linen_params.get('key_projection', {})
@@ -439,7 +446,7 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
       inner.v_bias = mx.array(v_bias.reshape(-1))
 
   elif isinstance(
-      input_projection, attn_common.QueryAndSharedKeyValueProjection
+      input_projection, (attn_common.QueryAndSharedKeyValueProjection, mlx_proj.QueryAndSharedKeyValueProjection)
   ):
     # Shared K/V projection: same weights for both K and V.
     shared_params = linen_params.get('shared_key_value_projection', {})
@@ -454,6 +461,11 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
       b = mx.array(shared_bias.reshape(-1))
       inner.k_bias = b
       inner.v_bias = b
+
+  # per_dim_scale: learned [units_per_head] query scale.
+  per_dim_scale = linen_params.get('per_dim_scale')
+  if per_dim_scale is not None:
+    inner._per_dim_scale = mx.array(per_dim_scale)
 
 
 def _load_rms_norm(mlx_norm, linen_params, config):
@@ -523,8 +535,8 @@ def _load_group_norm(mlx_gn, linen_params, config):
 def _load_conv1d(mlx_conv, linen_params, config):
   """Load Conv1D: kernel [k, in, out] → [out, k, in]."""
   inner = mlx_conv
-  if hasattr(inner, '_inner') and inner._inner is not None:
-    inner = inner._inner
+  if hasattr(inner, 'inner') and inner.inner is not None:
+    inner = inner.inner
 
   kernel = linen_params.get('kernel')
   if kernel is not None:
@@ -548,8 +560,8 @@ def _load_conv1d_transpose(mlx_conv, linen_params, config):
   conv_transpose1d which reverses the kernel direction.
   """
   inner = mlx_conv
-  if hasattr(inner, '_inner') and inner._inner is not None:
-    inner = inner._inner
+  if hasattr(inner, 'inner') and inner.inner is not None:
+    inner = inner.inner
 
   kernel = linen_params.get('kernel')
   if kernel is not None:

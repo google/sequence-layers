@@ -1,10 +1,13 @@
 """Position embeddings for MLX."""
 
+import dataclasses
+
 import mlx.core as mx
 import numpy as np
 
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import types
+from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
 Sequence = bt.Sequence
 
@@ -15,6 +18,18 @@ class ApplyRotaryPositionalEncoding(
     types.SequenceLayer,
 ):
   """Applies Rotary Positional Encodings (RoPE) to the sequence."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    max_wavelength: float = 10000.0
+    axis: int = -1
+    only_advance_position_for_valid_timesteps: bool = True
+    positions_in_at_least_fp32: bool = True
+    positions_name: str | None = None
+    name: str | None = None
+
+    def make(self) -> 'ApplyRotaryPositionalEncoding':
+      return ApplyRotaryPositionalEncoding.from_config(self)
 
   def __init__(
       self,
