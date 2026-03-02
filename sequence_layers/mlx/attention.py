@@ -127,6 +127,7 @@ class DotProductSelfAttention(types.Emitting):
       value_network: types.SequenceLayer | None = None,
       attention_logits_soft_cap: float | None = None,
       num_sink_embeddings: int = 0,
+      input_projection=None,
   ):
     super().__init__()
     if num_kv_heads is None:
@@ -170,14 +171,20 @@ class DotProductSelfAttention(types.Emitting):
     q_dim = num_heads * units_per_head
     kv_dim = num_kv_heads * units_per_head
 
-    # Projections stored as [in, out] to match Linen convention.
-    self.q_proj = kernel_init(key, (in_features, q_dim), param_dtype)
-    self.k_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
-    self.v_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
-    if use_bias:
-      self.q_bias = bias_init(key, (q_dim,), param_dtype)
-      self.k_bias = bias_init(key, (kv_dim,), param_dtype)
-      self.v_bias = bias_init(key, (kv_dim,), param_dtype)
+    self.input_projection = input_projection
+    if isinstance(input_projection, projection_configs.CombinedQueryKeyValueProjection) and self.num_kv_heads == self.num_heads:
+      out_dim = q_dim + 2 * kv_dim
+      self.qkv_proj = kernel_init(key, (in_features, out_dim), param_dtype)
+      if use_bias:
+        self.qkv_bias = bias_init(key, (out_dim,), param_dtype)
+    else:
+      self.q_proj = kernel_init(key, (in_features, q_dim), param_dtype)
+      self.k_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
+      self.v_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
+      if use_bias:
+        self.q_bias = bias_init(key, (q_dim,), param_dtype)
+        self.k_bias = bias_init(key, (kv_dim,), param_dtype)
+        self.v_bias = bias_init(key, (kv_dim,), param_dtype)
 
     # Attention sink embeddings.
     self.num_sink_embeddings = num_sink_embeddings
@@ -210,14 +217,22 @@ class DotProductSelfAttention(types.Emitting):
     dtype = self.compute_dtype or x.dtype
 
     v = x.values.astype(dtype)
-    q = mx.matmul(v, self.q_proj.astype(dtype))
-    k = mx.matmul(v, self.k_proj.astype(dtype))
-    val = mx.matmul(v, self.v_proj.astype(dtype))
+    
+    if hasattr(self, 'qkv_proj'):
+      qkv = mx.matmul(v, self.qkv_proj.astype(dtype))
+      if self.use_bias:
+        qkv = qkv + self.qkv_bias.astype(dtype)
+      
+      q, k, val = mx.split(qkv, 3, axis=-1)
+    else:
+      q = mx.matmul(v, self.q_proj.astype(dtype))
+      k = mx.matmul(v, self.k_proj.astype(dtype))
+      val = mx.matmul(v, self.v_proj.astype(dtype))
 
-    if self.use_bias:
-      q = q + self.q_bias.astype(dtype)
-      k = k + self.k_bias.astype(dtype)
-      val = val + self.v_bias.astype(dtype)
+      if self.use_bias:
+        q = q + self.q_bias.astype(dtype)
+        k = k + self.k_bias.astype(dtype)
+        val = val + self.v_bias.astype(dtype)
 
     # Reshape to [b, t, heads, units_per_head].
     q = q.reshape(b, t, self.num_heads, self.units_per_head)
@@ -593,6 +608,7 @@ class DeferredDotProductSelfAttention(types.Emitting):
         key_network=key_network,
         value_network=value_network,
         num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
+        input_projection=getattr(self._config, 'input_projection', None),
     )
 
   @property
@@ -1097,6 +1113,7 @@ class StreamingDotProductAttention(types.Emitting):
       key_network: types.SequenceLayer | None = None,
       value_network: types.SequenceLayer | None = None,
       num_sink_embeddings: int = 0,
+      input_projection=None,
   ):
     super().__init__()
     if max_past_horizon < 1:
@@ -1544,6 +1561,7 @@ class DeferredStreamingDotProductAttention(types.Emitting):
         key_network=key_network,
         value_network=value_network,
         num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
+        input_projection=getattr(self._config, 'input_projection', None),
     )
 
   def _get_source(self, constants):
@@ -1701,6 +1719,7 @@ class DeferredLocalDotProductSelfAttention(types.Emitting):
         key_network=key_network,
         value_network=value_network,
         num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
+        input_projection=getattr(self._config, 'input_projection', None),
     )
 
   @property

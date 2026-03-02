@@ -314,22 +314,28 @@ def _load_attention(mlx_attn, linen_params, config):
   input_projection = config.input_projection
 
   if isinstance(input_projection, (attn_common.CombinedQueryKeyValueProjection, mlx_proj.CombinedQueryKeyValueProjection)):
-    # Combined QKV: kernel [in, 3, heads, uph] → separate q/k/v.
+    # Combined QKV: kernel [in, 3, heads, uph]
     qkv_params = linen_params.get('query_key_value_projection', {})
     combined_kernel = qkv_params.get('kernel')
     if combined_kernel is not None:
       in_features = combined_kernel.shape[0]
-      q, k, v = np.split(combined_kernel, 3, axis=1)
-      inner.q_proj = mx.array(q.reshape(in_features, -1))
-      inner.k_proj = mx.array(k.reshape(in_features, -1))
-      inner.v_proj = mx.array(v.reshape(in_features, -1))
+      if hasattr(inner, 'qkv_proj'):
+        inner.qkv_proj = mx.array(combined_kernel.reshape(in_features, -1))
+      else:
+        q, k, v = np.split(combined_kernel, 3, axis=1)
+        inner.q_proj = mx.array(q.reshape(in_features, -1))
+        inner.k_proj = mx.array(k.reshape(in_features, -1))
+        inner.v_proj = mx.array(v.reshape(in_features, -1))
 
     combined_bias = qkv_params.get('bias')
     if combined_bias is not None:
-      qb, kb, vb = np.split(combined_bias, 3, axis=0)
-      inner.q_bias = mx.array(qb.reshape(-1))
-      inner.k_bias = mx.array(kb.reshape(-1))
-      inner.v_bias = mx.array(vb.reshape(-1))
+      if hasattr(inner, 'qkv_bias'):
+        inner.qkv_bias = mx.array(combined_bias.reshape(-1))
+      else:
+        qb, kb, vb = np.split(combined_bias, 3, axis=0)
+        inner.q_bias = mx.array(qb.reshape(-1))
+        inner.k_bias = mx.array(kb.reshape(-1))
+        inner.v_bias = mx.array(vb.reshape(-1))
 
   elif isinstance(
       input_projection, (attn_common.SeparateQueryKeyValueProjection, mlx_proj.SeparateQueryKeyValueProjection)
