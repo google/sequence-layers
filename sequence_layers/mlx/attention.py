@@ -257,6 +257,25 @@ class DotProductSelfAttention(types.Emitting):
     Returns:
       context: [b, q_t, num_heads, units_per_head]
     """
+    can_use_fast_sdpa = (
+        self.sink_key_embeddings is None and 
+        getattr(self, '_attention_logits_soft_cap', None) is None
+    )
+
+    if can_use_fast_sdpa:
+      # Fast path: GQA is natively supported, so we do not repeat keys/values.
+      q = mx.transpose(queries, (0, 2, 1, 3))
+      k = mx.transpose(keys, (0, 2, 1, 3))
+      v = mx.transpose(values, (0, 2, 1, 3))
+      
+      q = _scale_queries(
+          q, self._per_dim_scale, self._query_scale, self.units_per_head
+      )
+      
+      # Use mx.fast.scaled_dot_product_attention with scale=1.0 since we pre-scaled
+      context = mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0, mask=mask)
+      return mx.transpose(context, (0, 2, 1, 3))
+
     # GQA: repeat K/V heads to match query heads.
     num_groups = self.num_heads // self.num_kv_heads
     if num_groups > 1:
@@ -308,7 +327,7 @@ class DotProductSelfAttention(types.Emitting):
         mask = mx.concatenate([sink_mask, mask], axis=-1)
 
     # Optional soft cap on logits (e.g., Gemma 2 uses cap=50.0).
-    if self._attention_logits_soft_cap is not None:
+    if getattr(self, '_attention_logits_soft_cap', None) is not None:
       cap = self._attention_logits_soft_cap
       logits = mx.tanh(logits / cap) * cap
 
@@ -787,16 +806,9 @@ class DotProductAttention(types.Emitting):
     q = _scale_queries(
         q, self._per_dim_scale, self._query_scale, self.units_per_head
     )
-    logits = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))
-
-    if mask is not None:
-      large_neg = mx.array(-1e9, dtype=logits.dtype)
-      logits = mx.where(mask, logits, large_neg)
-
-    weights = mx.softmax(logits, axis=-1)
-    context = mx.matmul(weights, v)
-    context = mx.transpose(context, (0, 2, 1, 3))
-    return context
+    
+    context = mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0, mask=mask)
+    return mx.transpose(context, (0, 2, 1, 3))
 
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 1:
@@ -1221,6 +1233,18 @@ class StreamingDotProductAttention(types.Emitting):
 
   def _compute_attention(self, queries, keys, values, mask):
     """Compute scaled dot-product attention."""
+    if self.sink_key_embeddings is None:
+      q = mx.transpose(queries, (0, 2, 1, 3))
+      k = mx.transpose(keys, (0, 2, 1, 3))
+      v = mx.transpose(values, (0, 2, 1, 3))
+      
+      q = _scale_queries(
+          q, self._per_dim_scale, self._query_scale, self.units_per_head
+      )
+      
+      context = mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0, mask=mask)
+      return mx.transpose(context, (0, 2, 1, 3))
+
     q = mx.transpose(queries, (0, 2, 1, 3))
     k = mx.transpose(keys, (0, 2, 1, 3))
     v = mx.transpose(values, (0, 2, 1, 3))
