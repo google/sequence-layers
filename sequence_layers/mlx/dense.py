@@ -154,6 +154,52 @@ class Dense(types.Stateless):
     else:
       return x.apply_values_masked(dense_fn)
 
+
+
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    if self.kernel is None or self._equation != '...nh,dnh->...d' or (self.kernel.shape[-1] * self.kernel.shape[-2]) % group_size != 0:
+      return self
+
+    _d, _n, _h = self.kernel.shape
+    kernel_2d = self.kernel.reshape(_d, _n * _h)
+    self.q_weight, self.q_scales, self.q_biases = mx.quantize(
+        kernel_2d, group_size=group_size, bits=bits
+    )
+    self._group_size = group_size
+    self._bits = bits
+    self.kernel = None
+
+    def layer(self, x, *, constants=None):
+        compute_dtype = self.get_output_dtype(x.dtype)
+        def quantized_einsum_fn(v):
+            original_shape = v.shape
+            v_2d = v.reshape(*original_shape[:-2], _n * _h)
+            v_2d = v_2d.astype(compute_dtype)
+            y = mx.quantized_matmul(
+                v_2d,
+                self.q_weight,
+                scales=self.q_scales,
+                biases=self.q_biases,
+                transpose=True,
+                group_size=self._group_size,
+                bits=self._bits,
+            )
+            if self.bias is not None:
+                y = y + self.bias
+            if self._activation is not None:
+                y = self._activation(y)
+            return y
+
+        if self.bias is not None or self._activation is not None:
+            return x.apply_values(quantized_einsum_fn)
+        return x.apply_values_masked(quantized_einsum_fn)
+    
+    import types
+    self.layer = types.MethodType(layer, self)
+    
+    return self
+
+
   @classmethod
   def from_config(cls, config):
     """Create a Dense layer from a Linen Dense.Config."""
@@ -228,6 +274,52 @@ class DenseDeferred(types.Stateless):
   def layer(self, x, *, constants=None):
     self._ensure_initialized(x.shape[-1])
     return self.inner.layer(x, constants=constants)
+
+
+
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    if self.kernel is None or self._equation != '...nh,dnh->...d' or (self.kernel.shape[-1] * self.kernel.shape[-2]) % group_size != 0:
+      return self
+
+    _d, _n, _h = self.kernel.shape
+    kernel_2d = self.kernel.reshape(_d, _n * _h)
+    self.q_weight, self.q_scales, self.q_biases = mx.quantize(
+        kernel_2d, group_size=group_size, bits=bits
+    )
+    self._group_size = group_size
+    self._bits = bits
+    self.kernel = None
+
+    def layer(self, x, *, constants=None):
+        compute_dtype = self.get_output_dtype(x.dtype)
+        def quantized_einsum_fn(v):
+            original_shape = v.shape
+            v_2d = v.reshape(*original_shape[:-2], _n * _h)
+            v_2d = v_2d.astype(compute_dtype)
+            y = mx.quantized_matmul(
+                v_2d,
+                self.q_weight,
+                scales=self.q_scales,
+                biases=self.q_biases,
+                transpose=True,
+                group_size=self._group_size,
+                bits=self._bits,
+            )
+            if self.bias is not None:
+                y = y + self.bias
+            if self._activation is not None:
+                y = self._activation(y)
+            return y
+
+        if self.bias is not None or self._activation is not None:
+            return x.apply_values(quantized_einsum_fn)
+        return x.apply_values_masked(quantized_einsum_fn)
+    
+    import types
+    self.layer = types.MethodType(layer, self)
+    
+    return self
+
 
   @classmethod
   def from_config(cls, config):
@@ -326,6 +418,52 @@ class EinsumDense(types.Stateless):
       return x.apply_values(einsum_fn)
     return x.apply_values_masked(einsum_fn)
 
+
+
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    if self.kernel is None or self._equation != '...nh,dnh->...d' or (self.kernel.shape[-1] * self.kernel.shape[-2]) % group_size != 0:
+      return self
+
+    _d, _n, _h = self.kernel.shape
+    kernel_2d = self.kernel.reshape(_d, _n * _h)
+    self.q_weight, self.q_scales, self.q_biases = mx.quantize(
+        kernel_2d, group_size=group_size, bits=bits
+    )
+    self._group_size = group_size
+    self._bits = bits
+    self.kernel = None
+
+    def layer(self, x, *, constants=None):
+        compute_dtype = self.get_output_dtype(x.dtype)
+        def quantized_einsum_fn(v):
+            original_shape = v.shape
+            v_2d = v.reshape(*original_shape[:-2], _n * _h)
+            v_2d = v_2d.astype(compute_dtype)
+            y = mx.quantized_matmul(
+                v_2d,
+                self.q_weight,
+                scales=self.q_scales,
+                biases=self.q_biases,
+                transpose=True,
+                group_size=self._group_size,
+                bits=self._bits,
+            )
+            if self.bias is not None:
+                y = y + self.bias
+            if self._activation is not None:
+                y = self._activation(y)
+            return y
+
+        if self.bias is not None or self._activation is not None:
+            return x.apply_values(quantized_einsum_fn)
+        return x.apply_values_masked(quantized_einsum_fn)
+    
+    import types
+    self.layer = types.MethodType(layer, self)
+    
+    return self
+
+
   @classmethod
   def from_config(cls, config):
     compute_dtype = getattr(config, 'compute_dtype', None)
@@ -343,3 +481,4 @@ class EinsumDense(types.Stateless):
 
 # Alias so that sl.Dense.Config(...) works like sl_jax.Dense.Config(...).
 Dense.Config = DenseDeferred.Config
+

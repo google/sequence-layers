@@ -15,6 +15,16 @@ from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfi
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
 
+def _quantized_matmul_proj(x, q_weight, q_scales, q_biases, group_size, bits):
+    return mx.quantized_matmul(
+        x, q_weight,
+        scales=q_scales,
+        biases=q_biases,
+        transpose=True,
+        group_size=group_size,
+        bits=bits,
+    )
+
 
 def _scale_queries(queries, per_dim_scale, query_scale, units_per_head):
   """Scale queries, optionally with per-dimension learned scale.
@@ -560,6 +570,53 @@ class DotProductSelfAttention(types.Emitting):
         v_net_state,
     )
     return Sequence(context, x.mask), new_state, ()
+
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    if getattr(self, 'q_proj', None) is None or self.q_proj.shape[0] % group_size != 0:
+      return self
+
+    self._quant_group_size = group_size
+    self._quant_bits = bits
+
+    w_q = self.q_proj.T
+    w_k = self.k_proj.T
+    w_v = self.v_proj.T
+    w_qkv = mx.concatenate([w_q, w_k, w_v], axis=0)
+    self.qkv_proj_qw, self.qkv_proj_qs, self.qkv_proj_qb = mx.quantize(w_qkv, group_size=group_size, bits=bits)
+    
+    self.q_proj = None
+    self.k_proj = None
+    self.v_proj = None
+
+    def _project_qkv(self, x):
+        b, t = x.shape[0], x.shape[1]
+        dtype = self.compute_dtype or x.dtype
+        v = x.values.astype(dtype)
+
+        qkv = _quantized_matmul_proj(v, self.qkv_proj_qw, self.qkv_proj_qs, self.qkv_proj_qb, self._quant_group_size, self._quant_bits)
+
+        d_q = self.num_heads * self.units_per_head
+        d_k = self.num_kv_heads * self.units_per_head
+        q, k, val = mx.split(qkv, [d_q, d_q + d_k], axis=-1)
+
+        if self.use_bias:
+            q = q + self.q_bias.astype(dtype)
+            k = k + self.k_bias.astype(dtype)
+            val = val + self.v_bias.astype(dtype)
+
+        q = q.reshape(b, t, self.num_heads, self.units_per_head)
+        k = k.reshape(b, t, self.num_kv_heads, self.units_per_head)
+        val = val.reshape(b, t, self.num_kv_heads, self.units_per_head)
+
+        return (
+            Sequence(q, x.mask),
+            Sequence(k, x.mask),
+            Sequence(val, x.mask),
+        )
+
+    import types
+    self._project_qkv = types.MethodType(_project_qkv, self)
+    return self
 
   @classmethod
   def from_config(cls, config):
@@ -1520,6 +1577,55 @@ class StreamingDotProductAttention(types.Emitting):
         q_delay_mask,
     )
     return Sequence(context, queries.mask), new_state, ()
+
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    if getattr(self, 'q_proj', None) is None or self.q_proj.shape[0] % group_size != 0:
+      return self
+
+    self._quant_group_size = group_size
+    self._quant_bits = bits
+
+    w_q = self.q_proj.T
+    self.q_proj_qw, self.q_proj_qs, self.q_proj_qb = mx.quantize(w_q, group_size=group_size, bits=bits)
+    
+    w_k = self.k_proj.T
+    w_v = self.v_proj.T
+    w_kv = mx.concatenate([w_k, w_v], axis=0)
+    self.kv_proj_qw, self.kv_proj_qs, self.kv_proj_qb = mx.quantize(w_kv, group_size=group_size, bits=bits)
+
+    self.q_proj = None
+    self.k_proj = None
+    self.v_proj = None
+
+    def _project_q(self, x):
+        b, t = x.shape[0], x.shape[1]
+        dtype = self.compute_dtype or x.dtype
+        v = x.values.astype(dtype)
+        q = _quantized_matmul_proj(v, self.q_proj_qw, self.q_proj_qs, self.q_proj_qb, self._quant_group_size, self._quant_bits)
+        if self.use_bias:
+            q = q + self.q_bias.astype(dtype)
+        q = q.reshape(b, t, self.num_heads, self.units_per_head)
+        return Sequence(q, x.mask)
+
+    def _project_kv(self, source):
+        b, t = source.shape[0], source.shape[1]
+        dtype = self.compute_dtype or source.dtype
+        v = source.values.astype(dtype)
+        kv = _quantized_matmul_proj(v, self.kv_proj_qw, self.kv_proj_qs, self.kv_proj_qb, self._quant_group_size, self._quant_bits)
+        d_k = self.num_heads * self.units_per_head
+        k, val = mx.split(kv, [d_k], axis=-1)
+        if self.use_bias:
+            k = k + self.k_bias.astype(dtype)
+            val = val + self.v_bias.astype(dtype)
+        k = k.reshape(b, t, self.num_heads, self.units_per_head)
+        val = val.reshape(b, t, self.num_heads, self.units_per_head)
+        return Sequence(k, source.mask), Sequence(val, source.mask)
+
+    import types
+    self._project_q = types.MethodType(_project_q, self)
+    self._project_kv = types.MethodType(_project_kv, self)
+    
+    return self
 
   @classmethod
   def from_config(cls, config):
