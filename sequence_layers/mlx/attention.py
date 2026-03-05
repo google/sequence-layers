@@ -26,6 +26,22 @@ def _quantized_matmul_proj(x, q_weight, q_scales, q_biases, group_size, bits):
     )
 
 
+def _query_scale_vector(per_dim_scale, query_scale, units_per_head, dtype):
+  """Compute the per-dimension query scale vector.
+
+  Returns:
+    scale: [units_per_head] array or scalar float.
+  """
+  if query_scale is None:
+    query_scale = 1.0 / math.sqrt(units_per_head)
+  if per_dim_scale is not None:
+    r_softplus_0 = 1.442695041
+    scale = r_softplus_0 * query_scale
+    softplus = mx.log1p(mx.exp(per_dim_scale.astype(dtype)))
+    return scale * softplus
+  return query_scale
+
+
 def _scale_queries(queries, per_dim_scale, query_scale, units_per_head):
   """Scale queries, optionally with per-dimension learned scale.
 
@@ -40,17 +56,10 @@ def _scale_queries(queries, per_dim_scale, query_scale, units_per_head):
   Returns:
     Scaled queries, same shape.
   """
-  if query_scale is None:
-    query_scale = 1.0 / math.sqrt(units_per_head)
-  if per_dim_scale is not None:
-    # 1/softplus(0) = 1/ln(2). At init (zeros), effective scale = query_scale.
-    r_softplus_0 = 1.442695041
-    scale = r_softplus_0 * query_scale
-    softplus = mx.log1p(mx.exp(per_dim_scale.astype(queries.dtype)))
-    queries = queries * (scale * softplus)
-  else:
-    queries = queries * query_scale
-  return queries
+  scale = _query_scale_vector(
+      per_dim_scale, query_scale, units_per_head, queries.dtype
+  )
+  return queries * scale
 
 
 def _causal_mask(q_len, kv_len):
@@ -274,67 +283,95 @@ class DotProductSelfAttention(types.Emitting):
     Returns:
       context: [b, q_t, num_heads, units_per_head]
     """
-    can_use_fast_sdpa = (
-        self.sink_key_embeddings is None and 
-        getattr(self, '_attention_logits_soft_cap', None) is None
-    )
+    # Use mx.fast.scaled_dot_product_attention unless soft_cap forces
+    # manual logit manipulation.
+    has_soft_cap = getattr(self, '_attention_logits_soft_cap', None) is not None
 
-    if can_use_fast_sdpa:
-      # Fast path: GQA is natively supported, so we do not repeat keys/values.
+    if not has_soft_cap:
+      # SDPA path — handles both plain and sink cases.
       q = mx.transpose(queries, (0, 2, 1, 3))
       k = mx.transpose(keys, (0, 2, 1, 3))
       v = mx.transpose(values, (0, 2, 1, 3))
-      
+
       q = _scale_queries(
           q, self._per_dim_scale, self._query_scale, self.units_per_head
       )
-      
-      # Use mx.fast.scaled_dot_product_attention with scale=1.0 since we pre-scaled
-      context = mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0, mask=mask)
+
+      if self.sink_key_embeddings is not None:
+        # JAX computes sink logits with *unscaled* queries.  To use SDPA
+        # we pre-divide sink keys by the scale so that:
+        #   scaled_q @ (sink_k / scale) == unscaled_q @ sink_k
+        scale_vec = _query_scale_vector(
+            self._per_dim_scale, self._query_scale,
+            self.units_per_head, q.dtype,
+        )
+        sink_k = self.sink_key_embeddings.astype(q.dtype) / scale_vec
+        sink_v = self.sink_value_embeddings.astype(v.dtype)
+
+        # GQA: repeat sink heads to match query heads.
+        num_groups = self.num_heads // self.num_kv_heads
+        if num_groups > 1:
+          sink_v = mx.repeat(sink_v, num_groups, axis=1)
+
+        # Transpose [K, nh, h] → [nh, K, h] and broadcast batch.
+        sink_k_b = mx.broadcast_to(
+            mx.transpose(sink_k, (1, 0, 2))[None],
+            (q.shape[0], self.num_heads, sink_k.shape[0], self.units_per_head),
+        )
+        sink_v_b = mx.broadcast_to(
+            mx.transpose(sink_v, (1, 0, 2))[None],
+            (v.shape[0], self.num_heads, sink_v.shape[0], self.units_per_head),
+        )
+
+        # Prepend sinks to K/V.
+        k = mx.concatenate([sink_k_b, k], axis=2)
+        v = mx.concatenate([sink_v_b, v], axis=2)
+
+        # Extend mask — sinks are always valid.
+        if mask is not None:
+          num_sinks = self.sink_key_embeddings.shape[0]
+          sink_mask = mx.ones(
+              (mask.shape[0], mask.shape[1], mask.shape[2], num_sinks),
+              dtype=mx.bool_,
+          )
+          mask = mx.concatenate([sink_mask, mask], axis=-1)
+
+      context = mx.fast.scaled_dot_product_attention(
+          q, k, v, scale=1.0, mask=mask
+      )
       return mx.transpose(context, (0, 2, 1, 3))
 
-    # GQA: repeat K/V heads to match query heads.
+    # Manual path — only for attention_logits_soft_cap.
     num_groups = self.num_heads // self.num_kv_heads
     if num_groups > 1:
-      b, kv_t, nk, h = keys.shape
       keys = mx.repeat(keys, num_groups, axis=2)
       values = mx.repeat(values, num_groups, axis=2)
 
-    # Transpose to [b, heads, t, h] for batched matmul.
-    q = mx.transpose(queries, (0, 2, 1, 3))  # [b, nh, qt, h]
-    k = mx.transpose(keys, (0, 2, 1, 3))  # [b, nh, kvt, h]
-    v = mx.transpose(values, (0, 2, 1, 3))  # [b, nh, kvt, h]
+    q = mx.transpose(queries, (0, 2, 1, 3))
+    k = mx.transpose(keys, (0, 2, 1, 3))
+    v = mx.transpose(values, (0, 2, 1, 3))
 
-    # Scaled dot-product attention.
     # Compute sink logits BEFORE scaling queries, matching JAX behavior.
-    # JAX computes sink_key_logits = einsum('BTNH,KNH->BNTK', queries.values,
-    # sink_key_embeddings) before _scale_query().
     if self.sink_key_embeddings is not None:
-      sink_k = self.sink_key_embeddings.astype(q.dtype)  # [K, nh, h]
-      sink_k_t = mx.transpose(sink_k, (1, 2, 0))  # [nh, h, K]
-      sink_logits = mx.matmul(q, sink_k_t)  # [b, nh, qt, K]
+      sink_k = self.sink_key_embeddings.astype(q.dtype)
+      sink_k_t = mx.transpose(sink_k, (1, 2, 0))
+      sink_logits = mx.matmul(q, sink_k_t)
 
     q = _scale_queries(
         q, self._per_dim_scale, self._query_scale, self.units_per_head
     )
     logits = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))
 
-    # Add attention sink logits if present.
     if self.sink_key_embeddings is not None:
-      # Prepend sink values to v: v becomes [b, nh, K+kvt, h]
-      sink_v = self.sink_value_embeddings.astype(v.dtype)  # [K, nkv, h]
+      sink_v = self.sink_value_embeddings.astype(v.dtype)
       if num_groups > 1:
         sink_v = mx.repeat(sink_v, num_groups, axis=1)
-      sink_v_t = mx.transpose(sink_v, (1, 0, 2))  # [nh, K, h]
+      sink_v_t = mx.transpose(sink_v, (1, 0, 2))
       sink_v_b = mx.broadcast_to(
           sink_v_t[None], (v.shape[0],) + sink_v_t.shape
-      )  # [b, nh, K, h]
-      v = mx.concatenate([sink_v_b, v], axis=2)  # [b, nh, K+kvt, h]
-
-      # Prepend sink logits to logits: [b, nh, qt, K+kvt]
+      )
+      v = mx.concatenate([sink_v_b, v], axis=2)
       logits = mx.concatenate([sink_logits, logits], axis=-1)
-
-      # Extend mask for sinks (always valid).
       if mask is not None:
         num_sinks = self.sink_key_embeddings.shape[0]
         sink_mask = mx.ones(
@@ -343,22 +380,16 @@ class DotProductSelfAttention(types.Emitting):
         )
         mask = mx.concatenate([sink_mask, mask], axis=-1)
 
-    # Optional soft cap on logits (e.g., Gemma 2 uses cap=50.0).
-    if getattr(self, '_attention_logits_soft_cap', None) is not None:
-      cap = self._attention_logits_soft_cap
-      logits = mx.tanh(logits / cap) * cap
+    cap = self._attention_logits_soft_cap
+    logits = mx.tanh(logits / cap) * cap
 
-    # Apply mask: set masked positions to large negative.
     if mask is not None:
       large_neg = mx.array(-1e9, dtype=logits.dtype)
       logits = mx.where(mask, logits, large_neg)
 
-    # Run softmax in at least float32 to match JAX precision.
     logits_f32 = logits.astype(mx.float32) if logits.dtype != mx.float32 else logits
     weights = mx.softmax(logits_f32, axis=-1).astype(v.dtype)
-    context = mx.matmul(weights, v)  # [b, nh, qt, h]
-
-    # Transpose back to [b, qt, nh, h].
+    context = mx.matmul(weights, v)
     context = mx.transpose(context, (0, 2, 1, 3))
     return context
 
@@ -1311,42 +1342,36 @@ class StreamingDotProductAttention(types.Emitting):
 
   def _compute_attention(self, queries, keys, values, mask):
     """Compute scaled dot-product attention."""
-    if self.sink_key_embeddings is None:
-      q = mx.transpose(queries, (0, 2, 1, 3))
-      k = mx.transpose(keys, (0, 2, 1, 3))
-      v = mx.transpose(values, (0, 2, 1, 3))
-      
-      q = _scale_queries(
-          q, self._per_dim_scale, self._query_scale, self.units_per_head
-      )
-      
-      context = mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0, mask=mask)
-      return mx.transpose(context, (0, 2, 1, 3))
-
     q = mx.transpose(queries, (0, 2, 1, 3))
     k = mx.transpose(keys, (0, 2, 1, 3))
     v = mx.transpose(values, (0, 2, 1, 3))
 
-    # Compute sink logits BEFORE scaling queries, matching JAX behavior.
-    if self.sink_key_embeddings is not None:
-      sink_k = self.sink_key_embeddings.astype(q.dtype)  # [K, nh, h]
-      sink_k_t = mx.transpose(sink_k, (1, 2, 0))  # [nh, h, K]
-      sink_logits = mx.matmul(q, sink_k_t)  # [b, nh, qt, K]
-
     q = _scale_queries(
         q, self._per_dim_scale, self._query_scale, self.units_per_head
     )
-    logits = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))
 
-    # Add attention sink logits if present.
     if self.sink_key_embeddings is not None:
-      sink_v = self.sink_value_embeddings.astype(v.dtype)  # [K, nh, h]
-      sink_v_t = mx.transpose(sink_v, (1, 0, 2))  # [nh, K, h]
+      # JAX computes sink logits with *unscaled* queries.  Pre-divide
+      # sink keys by the scale so that SDPA produces equivalent logits:
+      #   scaled_q @ (sink_k / scale) == unscaled_q @ sink_k
+      scale_vec = _query_scale_vector(
+          self._per_dim_scale, self._query_scale,
+          self.units_per_head, q.dtype,
+      )
+      sink_k = self.sink_key_embeddings.astype(q.dtype) / scale_vec
+      sink_v = self.sink_value_embeddings.astype(v.dtype)
+
+      sink_k_b = mx.broadcast_to(
+          mx.transpose(sink_k, (1, 0, 2))[None],
+          (q.shape[0], self.num_heads, sink_k.shape[0], self.units_per_head),
+      )
       sink_v_b = mx.broadcast_to(
-          sink_v_t[None], (v.shape[0],) + sink_v_t.shape
-      )  # [b, nh, K, h]
+          mx.transpose(sink_v, (1, 0, 2))[None],
+          (v.shape[0], self.num_heads, sink_v.shape[0], self.units_per_head),
+      )
+
+      k = mx.concatenate([sink_k_b, k], axis=2)
       v = mx.concatenate([sink_v_b, v], axis=2)
-      logits = mx.concatenate([sink_logits, logits], axis=-1)
 
       if mask is not None:
         num_sinks = self.sink_key_embeddings.shape[0]
@@ -1356,15 +1381,10 @@ class StreamingDotProductAttention(types.Emitting):
         )
         mask = mx.concatenate([sink_mask, mask], axis=-1)
 
-    if mask is not None:
-      large_neg = mx.array(-1e9, dtype=logits.dtype)
-      logits = mx.where(mask, logits, large_neg)
-    # Run softmax in at least float32 to match JAX precision.
-    logits_f32 = logits.astype(mx.float32) if logits.dtype != mx.float32 else logits
-    weights = mx.softmax(logits_f32, axis=-1).astype(v.dtype)
-    context = mx.matmul(weights, v)
-    context = mx.transpose(context, (0, 2, 1, 3))
-    return context
+    context = mx.fast.scaled_dot_product_attention(
+        q, k, v, scale=1.0, mask=mask
+    )
+    return mx.transpose(context, (0, 2, 1, 3))
 
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 1:
