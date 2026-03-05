@@ -14,50 +14,6 @@ Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
 PaddingMode = bt.PaddingMode
 
-# Module-level cache for mask convolution kernels.  Keys are tuples of
-# deterministic parameters; values are small mx.arrays.  The cache is
-# bounded (one entry per unique configuration) and shared across all
-# layer instances.
-_MASK_KERNEL_CACHE: dict[tuple, mx.array] = {}
-
-
-def _get_padding_kernel(pad_left, pad_right):
-  """Get or create the padding mask kernel for step-mode conv mask."""
-  key = ('pad', pad_left, pad_right)
-  if key not in _MASK_KERNEL_CACHE:
-    k = [0.0] * pad_left + [1.0] + [0.0] * pad_right
-    _MASK_KERNEL_CACHE[key] = mx.array(k, dtype=mx.float32).reshape(1, -1, 1)
-  return _MASK_KERNEL_CACHE[key]
-
-
-def _get_logical_kernel(kernel_size, dilation_rate):
-  """Get or create the logical mask kernel for reduce_window simulation."""
-  key = ('logical', kernel_size, dilation_rate)
-  if key not in _MASK_KERNEL_CACHE:
-    if dilation_rate == 1:
-      _MASK_KERNEL_CACHE[key] = mx.ones(
-          (1, kernel_size, 1), dtype=mx.float32
-      )
-    else:
-      ek = _effective_kernel_size(kernel_size, dilation_rate)
-      k = [0.0] * ek
-      for i in range(kernel_size):
-        k[i * dilation_rate] = 1.0
-      _MASK_KERNEL_CACHE[key] = (
-          mx.array(k, dtype=mx.float32).reshape(1, -1, 1)
-      )
-  return _MASK_KERNEL_CACHE[key]
-
-
-def _get_transpose_kernel(kernel_size):
-  """Get or create the transpose conv mask kernel."""
-  key = ('transpose', kernel_size)
-  if key not in _MASK_KERNEL_CACHE:
-    _MASK_KERNEL_CACHE[key] = mx.ones(
-        (1, kernel_size, 1), dtype=mx.float32
-    )
-  return _MASK_KERNEL_CACHE[key]
-
 
 # ---------------------------------------------------------------------------
 # Padding utilities (ported from jax/utils.py and jax/convolution.py)
@@ -145,7 +101,8 @@ def _compute_conv_mask(
           padding, kernel_size, stride, dilation_rate
       )
       # Use a simple convolution-like mask computation with float kernel.
-      kernel = _get_padding_kernel(pad_left, pad_right)
+      kernel = [0.0] * pad_left + [1.0] + [0.0] * pad_right
+      kernel = mx.array(kernel, dtype=mx.float32).reshape(1, -1, 1)
       mask_f = mask[:, :, None].astype(mx.float32)
       mask_conv = mx.conv1d(mask_f, kernel, stride=stride)
       return mx.squeeze(mask_conv, axis=-1).astype(mx.bool_)
@@ -218,7 +175,15 @@ def _compute_conv_mask_logical(
 
   # Use float conv to simulate reduce_window.
   mask_f = mask[:, :, None].astype(mx.float32)
-  kernel = _get_logical_kernel(kernel_size, dilation_rate)
+  # Build a kernel with ones at dilated positions.
+  if dilation_rate == 1:
+    kernel = mx.ones((1, kernel_size, 1), dtype=mx.float32)
+  else:
+    ek = _effective_kernel_size(kernel_size, dilation_rate)
+    k = [0.0] * ek
+    for i in range(kernel_size):
+      k[i * dilation_rate] = 1.0
+    kernel = mx.array(k, dtype=mx.float32).reshape(1, -1, 1)
 
   result = mx.conv1d(mask_f, kernel, stride=stride)
   result = mx.squeeze(result, axis=-1)
@@ -697,7 +662,7 @@ def _compute_conv_transpose_mask(
     test_signal = mx.logical_not(mask)
     test_fn = lambda m: m == 0.0
 
-  kernel = _get_transpose_kernel(kernel_size)
+  kernel = mx.ones((1, kernel_size, 1), dtype=mx.float32)
   signal = test_signal.astype(mx.float32)[:, :, None]
 
   result = mx.conv_transpose1d(
