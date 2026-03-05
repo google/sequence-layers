@@ -322,10 +322,14 @@ def _load_attention(mlx_attn, linen_params, config):
       if hasattr(inner, 'qkv_proj'):
         inner.qkv_proj = mx.array(combined_kernel.reshape(in_features, -1))
       else:
+        # Separate Q + combined KV layout.
         q, k, v = np.split(combined_kernel, 3, axis=1)
         inner.q_proj = mx.array(q.reshape(in_features, -1))
-        inner.k_proj = mx.array(k.reshape(in_features, -1))
-        inner.v_proj = mx.array(v.reshape(in_features, -1))
+        k_flat = k.reshape(in_features, -1)
+        v_flat = v.reshape(in_features, -1)
+        inner.kv_proj = mx.array(
+            np.concatenate([k_flat, v_flat], axis=-1)
+        )
 
     combined_bias = qkv_params.get('bias')
     if combined_bias is not None:
@@ -334,8 +338,9 @@ def _load_attention(mlx_attn, linen_params, config):
       else:
         qb, kb, vb = np.split(combined_bias, 3, axis=0)
         inner.q_bias = mx.array(qb.reshape(-1))
-        inner.k_bias = mx.array(kb.reshape(-1))
-        inner.v_bias = mx.array(vb.reshape(-1))
+        inner.kv_bias = mx.array(
+            np.concatenate([kb.reshape(-1), vb.reshape(-1)], axis=-1)
+        )
 
   elif isinstance(
       input_projection, (attn_common.SeparateQueryKeyValueProjection, mlx_proj.SeparateQueryKeyValueProjection)
@@ -352,21 +357,19 @@ def _load_attention(mlx_attn, linen_params, config):
 
     k_params = linen_params.get('key_projection', {})
     k_kernel = k_params.get('kernel')
-    if k_kernel is not None:
-      in_features = k_kernel.shape[0]
-      inner.k_proj = mx.array(k_kernel.reshape(in_features, -1))
-    k_bias = k_params.get('bias')
-    if k_bias is not None:
-      inner.k_bias = mx.array(k_bias.reshape(-1))
-
     v_params = linen_params.get('value_projection', {})
     v_kernel = v_params.get('kernel')
-    if v_kernel is not None:
-      in_features = v_kernel.shape[0]
-      inner.v_proj = mx.array(v_kernel.reshape(in_features, -1))
+    if k_kernel is not None and v_kernel is not None:
+      in_features = k_kernel.shape[0]
+      k_flat = k_kernel.reshape(in_features, -1)
+      v_flat = v_kernel.reshape(in_features, -1)
+      inner.kv_proj = mx.array(np.concatenate([k_flat, v_flat], axis=-1))
+    k_bias = k_params.get('bias')
     v_bias = v_params.get('bias')
-    if v_bias is not None:
-      inner.v_bias = mx.array(v_bias.reshape(-1))
+    if k_bias is not None and v_bias is not None:
+      inner.kv_bias = mx.array(
+          np.concatenate([k_bias.reshape(-1), v_bias.reshape(-1)], axis=-1)
+      )
 
   # per_dim_scale: learned [units_per_head] query scale.
   per_dim_scale = linen_params.get('per_dim_scale')
@@ -414,59 +417,57 @@ def _load_streaming_attention(mlx_attn, linen_params, config):
     inner.q_bias = mx.array(q_bias.reshape(-1))
 
   if isinstance(input_projection, (attn_common.QueryAndKeyValueProjection, mlx_proj.QueryAndKeyValueProjection)):
-    # Combined KV: kernel [source, 2, heads, uph] → split into K, V.
+    # Combined KV: kernel [source, 2, heads, uph] → combined kv_proj.
     kv_params = linen_params.get('key_value_projection', {})
     kv_kernel = kv_params.get('kernel')
     if kv_kernel is not None:
       source_features = kv_kernel.shape[0]
-      # Split along axis 1 (the '2' axis for K/V).
+      # Split along axis 1 (the '2' axis for K/V), flatten, recombine.
       k, v = np.split(kv_kernel, 2, axis=1)
-      inner.k_proj = mx.array(k.reshape(source_features, -1))
-      inner.v_proj = mx.array(v.reshape(source_features, -1))
+      k_flat = k.reshape(source_features, -1)
+      v_flat = v.reshape(source_features, -1)
+      inner.kv_proj = mx.array(np.concatenate([k_flat, v_flat], axis=-1))
     kv_bias = kv_params.get('bias')
     if kv_bias is not None:
       kb, vb = np.split(kv_bias, 2, axis=0)
-      inner.k_bias = mx.array(kb.reshape(-1))
-      inner.v_bias = mx.array(vb.reshape(-1))
+      inner.kv_bias = mx.array(
+          np.concatenate([kb.reshape(-1), vb.reshape(-1)], axis=-1)
+      )
 
   elif isinstance(
       input_projection, (attn_common.SeparateQueryKeyValueProjection, mlx_proj.SeparateQueryKeyValueProjection)
   ):
-    # Separate K and V projections.
+    # Separate K and V projections → combined kv_proj.
     k_params = linen_params.get('key_projection', {})
     k_kernel = k_params.get('kernel')
-    if k_kernel is not None:
-      source_features = k_kernel.shape[0]
-      inner.k_proj = mx.array(k_kernel.reshape(source_features, -1))
-    k_bias = k_params.get('bias')
-    if k_bias is not None:
-      inner.k_bias = mx.array(k_bias.reshape(-1))
-
     v_params = linen_params.get('value_projection', {})
     v_kernel = v_params.get('kernel')
-    if v_kernel is not None:
-      source_features = v_kernel.shape[0]
-      inner.v_proj = mx.array(v_kernel.reshape(source_features, -1))
+    if k_kernel is not None and v_kernel is not None:
+      source_features = k_kernel.shape[0]
+      k_flat = k_kernel.reshape(source_features, -1)
+      v_flat = v_kernel.reshape(source_features, -1)
+      inner.kv_proj = mx.array(np.concatenate([k_flat, v_flat], axis=-1))
+    k_bias = k_params.get('bias')
     v_bias = v_params.get('bias')
-    if v_bias is not None:
-      inner.v_bias = mx.array(v_bias.reshape(-1))
+    if k_bias is not None and v_bias is not None:
+      inner.kv_bias = mx.array(
+          np.concatenate([k_bias.reshape(-1), v_bias.reshape(-1)], axis=-1)
+      )
 
   elif isinstance(
       input_projection, (attn_common.QueryAndSharedKeyValueProjection, mlx_proj.QueryAndSharedKeyValueProjection)
   ):
-    # Shared K/V projection: same weights for both K and V.
+    # Shared K/V projection: same weights for both K and V → combined kv_proj.
     shared_params = linen_params.get('shared_key_value_projection', {})
     shared_kernel = shared_params.get('kernel')
     if shared_kernel is not None:
       source_features = shared_kernel.shape[0]
-      proj = mx.array(shared_kernel.reshape(source_features, -1))
-      inner.k_proj = proj
-      inner.v_proj = proj
+      proj = shared_kernel.reshape(source_features, -1)
+      inner.kv_proj = mx.array(np.concatenate([proj, proj], axis=-1))
     shared_bias = shared_params.get('bias')
     if shared_bias is not None:
-      b = mx.array(shared_bias.reshape(-1))
-      inner.k_bias = b
-      inner.v_bias = b
+      b = shared_bias.reshape(-1)
+      inner.kv_bias = mx.array(np.concatenate([b, b], axis=-1))
 
   # per_dim_scale: learned [units_per_head] query scale.
   per_dim_scale = linen_params.get('per_dim_scale')

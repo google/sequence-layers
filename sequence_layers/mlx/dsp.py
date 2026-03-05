@@ -64,15 +64,7 @@ def frame(values, frame_length, frame_step, pad_mode='valid', axis=1):
   # Compute number of frames.
   num_frames = max(0, (t - frame_length) // frame_step + 1)
 
-  # Gather frames using indexing.
-  indices = (
-      mx.arange(num_frames)[:, None] * frame_step
-      + mx.arange(frame_length)[None, :]
-  )
-  # indices: [num_frames, frame_length]
-
-  # Flatten, gather, reshape.
-  # Move axis to position 1 for easier manipulation.
+  # Move target axis to position 1 for uniform handling.
   if axis != 1:
     perm = list(range(values.ndim))
     perm[1], perm[axis] = perm[axis], perm[1]
@@ -82,18 +74,33 @@ def frame(values, frame_length, frame_step, pad_mode='valid', axis=1):
   batch = values.shape[0]
   rest_shape = values.shape[2:]
 
-  # Gather: result [batch, num_frames, frame_length, ...]
-  # Use fancy indexing along axis 1.
-  result = values[:, indices.reshape(-1)]
-  result = result.reshape((batch, num_frames, frame_length) + rest_shape)
+  # Fast path: zero-copy strided view for contiguous data.
+  rest_size = 1
+  for d in rest_shape:
+    rest_size *= d
+
+  batch_stride = t * rest_size
+  frame_stride = frame_step * rest_size
+  time_stride = rest_size
+
+  # Compute rest strides from contiguous layout.
+  rest_strides = []
+  s = 1
+  for d in reversed(rest_shape):
+    rest_strides.append(s)
+    s *= d
+  rest_strides.reverse()
+
+  result = mx.as_strided(
+      values,
+      shape=(batch, num_frames, frame_length) + rest_shape,
+      strides=(batch_stride, frame_stride, time_stride) + tuple(rest_strides),
+  )
 
   if axis != 1:
     # Move back.
     perm = list(range(result.ndim))
-    # axis was swapped to 1, new dims are at 1 and 2.
-    # Need to move them back so axis and axis+1 have the frame dims.
     perm[1], perm[axis] = perm[axis], perm[1]
-    # Also move frame_length dim.
     if axis > 1:
       perm.insert(axis + 1, perm.pop(2))
     result = mx.transpose(result, perm)
@@ -121,17 +128,22 @@ def overlap_and_add(signal_arr, frame_step):
   if frame_length == frame_step:
     return signal_arr.reshape(outer_dims + (output_length,))
 
-  # General overlap-add via scatter.
+  # Vectorized overlap-add via scatter.
   outer_size = 1
   for d in outer_dims:
     outer_size *= d
 
   flat = signal_arr.reshape(outer_size, frames, frame_length)
-  result = mx.zeros((outer_size, output_length), dtype=flat.dtype)
 
-  for f in range(frames):
-    start = f * frame_step
-    result = result.at[:, start : start + frame_length].add(flat[:, f])
+  # Build output position indices: [frames, frame_length].
+  offsets = mx.arange(frames)[:, None] * frame_step
+  positions = offsets + mx.arange(frame_length)[None, :]
+  flat_positions = positions.reshape(-1)  # [frames * frame_length]
+
+  # Flatten signal and scatter-add all frame contributions at once.
+  flat_signal = flat.reshape(outer_size, frames * frame_length)
+  result = mx.zeros((outer_size, output_length), dtype=flat.dtype)
+  result = result.at[:, flat_positions].add(flat_signal)
 
   return result.reshape(outer_dims + (output_length,))
 
@@ -161,20 +173,22 @@ def linear_to_mel_weight_matrix(
   mel_points = np.linspace(mel_low, mel_high, num_mel_bins + 2)
   hz_points = mel_to_hz(mel_points)
 
-  weights = np.zeros((num_spectrogram_bins, num_mel_bins), dtype=dtype)
-  for i in range(num_mel_bins):
-    lower = hz_points[i]
-    center = hz_points[i + 1]
-    upper = hz_points[i + 2]
+  lower = hz_points[:-2][np.newaxis, :]   # [1, num_mel_bins]
+  center = hz_points[1:-1][np.newaxis, :]  # [1, num_mel_bins]
+  upper = hz_points[2:][np.newaxis, :]     # [1, num_mel_bins]
+  freq = freq_bins[:, np.newaxis]          # [num_spectrogram_bins, 1]
 
-    # Rising slope.
-    for j in range(num_spectrogram_bins):
-      if lower <= freq_bins[j] <= center and center > lower:
-        weights[j, i] = (freq_bins[j] - lower) / (center - lower)
-      elif center < freq_bins[j] <= upper and upper > center:
-        weights[j, i] = (upper - freq_bins[j]) / (upper - center)
-
-  return weights
+  rising = np.where(
+      (freq >= lower) & (freq <= center) & (center > lower),
+      (freq - lower) / np.maximum(center - lower, 1e-10),
+      0.0,
+  )
+  falling = np.where(
+      (freq > center) & (freq <= upper) & (upper > center),
+      (upper - freq) / np.maximum(upper - center, 1e-10),
+      0.0,
+  )
+  return (rising + falling).astype(dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -1202,23 +1216,36 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
     self.sample_rate = sample_rate
     self.lower_edge_hertz = lower_edge_hertz
     self.upper_edge_hertz = upper_edge_hertz
+    self._cached_weights = None
+    self._cached_num_bins = None
+    self._cached_dtype = None
 
   def get_output_shape(self, input_shape, *, constants=None):
     if not input_shape:
       raise ValueError('LinearToMelSpectrogram requires rank >= 1 input.')
     return tuple(input_shape[:-1]) + (self.num_mel_bins,)
 
+  def _get_weights(self, num_bins, dtype):
+    if (
+        self._cached_weights is None
+        or self._cached_num_bins != num_bins
+        or self._cached_dtype != dtype
+    ):
+      weights = linear_to_mel_weight_matrix(
+          num_mel_bins=self.num_mel_bins,
+          num_spectrogram_bins=num_bins,
+          sample_rate=self.sample_rate,
+          lower_edge_hertz=self.lower_edge_hertz,
+          upper_edge_hertz=self.upper_edge_hertz,
+      )
+      self._cached_weights = mx.array(weights, dtype=dtype)
+      self._cached_num_bins = num_bins
+      self._cached_dtype = dtype
+    return self._cached_weights
+
   @types.check_layer
   def layer(self, x, *, constants=None):
-    num_bins = x.shape[-1]
-    weights = linear_to_mel_weight_matrix(
-        num_mel_bins=self.num_mel_bins,
-        num_spectrogram_bins=num_bins,
-        sample_rate=self.sample_rate,
-        lower_edge_hertz=self.lower_edge_hertz,
-        upper_edge_hertz=self.upper_edge_hertz,
-    )
-    weights = mx.array(weights, dtype=x.dtype)
+    weights = self._get_weights(x.shape[-1], x.dtype)
     return x.apply_values_masked(lambda v: v @ weights)
 
   @classmethod

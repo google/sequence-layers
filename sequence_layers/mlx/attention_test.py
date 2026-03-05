@@ -115,8 +115,7 @@ class DotProductSelfAttentionTest(parameterized.TestCase):
     )
     # Copy weights so projections match.
     layer_no_pds.q_proj = layer.q_proj
-    layer_no_pds.k_proj = layer.k_proj
-    layer_no_pds.v_proj = layer.v_proj
+    layer_no_pds.kv_proj = layer.kv_proj
 
     x = test_utils.random_sequence(1, 5, 8)
     y_pds = layer.layer(x)

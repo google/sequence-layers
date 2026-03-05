@@ -189,12 +189,17 @@ class DotProductSelfAttention(types.Emitting):
         self.qkv_bias = bias_init(key, (out_dim,), param_dtype)
     else:
       self.q_proj = kernel_init(key, (in_features, q_dim), param_dtype)
-      self.k_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
-      self.v_proj = kernel_init(key, (in_features, kv_dim), param_dtype)
+      # Combined K+V projection: single matmul + split is faster than two.
+      self.kv_proj = mx.concatenate([
+          kernel_init(key, (in_features, kv_dim), param_dtype),
+          kernel_init(key, (in_features, kv_dim), param_dtype),
+      ], axis=-1)
       if use_bias:
         self.q_bias = bias_init(key, (q_dim,), param_dtype)
-        self.k_bias = bias_init(key, (kv_dim,), param_dtype)
-        self.v_bias = bias_init(key, (kv_dim,), param_dtype)
+        self.kv_bias = mx.concatenate([
+            bias_init(key, (kv_dim,), param_dtype),
+            bias_init(key, (kv_dim,), param_dtype),
+        ], axis=-1)
 
     # Attention sink embeddings.
     self.num_sink_embeddings = num_sink_embeddings
@@ -236,13 +241,15 @@ class DotProductSelfAttention(types.Emitting):
       q, k, val = mx.split(qkv, 3, axis=-1)
     else:
       q = mx.matmul(v, self.q_proj.astype(dtype))
-      k = mx.matmul(v, self.k_proj.astype(dtype))
-      val = mx.matmul(v, self.v_proj.astype(dtype))
+      kv = mx.matmul(v, self.kv_proj.astype(dtype))
+      k, val = mx.split(kv, 2, axis=-1)
 
       if self.use_bias:
         q = q + self.q_bias.astype(dtype)
-        k = k + self.k_bias.astype(dtype)
-        val = val + self.v_bias.astype(dtype)
+        kv_bias = self.kv_bias.astype(dtype)
+        kb, vb = mx.split(kv_bias, 2, axis=-1)
+        k = k + kb
+        val = val + vb
 
     # Reshape to [b, t, heads, units_per_head].
     q = q.reshape(b, t, self.num_heads, self.units_per_head)
@@ -579,14 +586,13 @@ class DotProductSelfAttention(types.Emitting):
     self._quant_bits = bits
 
     w_q = self.q_proj.T
-    w_k = self.k_proj.T
-    w_v = self.v_proj.T
-    w_qkv = mx.concatenate([w_q, w_k, w_v], axis=0)
+    # kv_proj is already combined [in, 2*kv_dim].
+    w_kv = self.kv_proj.T
+    w_qkv = mx.concatenate([w_q, w_kv], axis=0)
     self.qkv_proj_qw, self.qkv_proj_qs, self.qkv_proj_qb = mx.quantize(w_qkv, group_size=group_size, bits=bits)
-    
+
     self.q_proj = None
-    self.k_proj = None
-    self.v_proj = None
+    self.kv_proj = None
 
     def _project_qkv(self, x):
         b, t = x.shape[0], x.shape[1]
@@ -601,8 +607,10 @@ class DotProductSelfAttention(types.Emitting):
 
         if self.use_bias:
             q = q + self.q_bias.astype(dtype)
-            k = k + self.k_bias.astype(dtype)
-            val = val + self.v_bias.astype(dtype)
+            kv_bias = self.kv_bias.astype(dtype)
+            kb, vb = mx.split(kv_bias, 2, axis=-1)
+            k = k + kb
+            val = val + vb
 
         q = q.reshape(b, t, self.num_heads, self.units_per_head)
         k = k.reshape(b, t, self.num_kv_heads, self.units_per_head)
@@ -805,12 +813,17 @@ class DotProductAttention(types.Emitting):
     qkv_dim = num_heads * units_per_head
 
     self.q_proj = kernel_init(key, (in_features, qkv_dim), param_dtype)
-    self.k_proj = kernel_init(key, (source_features, qkv_dim), param_dtype)
-    self.v_proj = kernel_init(key, (source_features, qkv_dim), param_dtype)
+    # Combined K+V projection: single matmul + split is faster than two.
+    self.kv_proj = mx.concatenate([
+        kernel_init(key, (source_features, qkv_dim), param_dtype),
+        kernel_init(key, (source_features, qkv_dim), param_dtype),
+    ], axis=-1)
     if use_bias:
       self.q_bias = bias_init(key, (qkv_dim,), param_dtype)
-      self.k_bias = bias_init(key, (qkv_dim,), param_dtype)
-      self.v_bias = bias_init(key, (qkv_dim,), param_dtype)
+      self.kv_bias = mx.concatenate([
+          bias_init(key, (qkv_dim,), param_dtype),
+          bias_init(key, (qkv_dim,), param_dtype),
+      ], axis=-1)
 
     self.query_network = query_network
     self.key_network = key_network
@@ -840,11 +853,13 @@ class DotProductAttention(types.Emitting):
     b, t = source.shape[0], source.shape[1]
     dtype = self.compute_dtype or source.dtype
     v = source.values.astype(dtype)
-    k = mx.matmul(v, self.k_proj.astype(dtype))
-    val = mx.matmul(v, self.v_proj.astype(dtype))
+    kv = mx.matmul(v, self.kv_proj.astype(dtype))
+    k, val = mx.split(kv, 2, axis=-1)
     if self.use_bias:
-      k = k + self.k_bias.astype(dtype)
-      val = val + self.v_bias.astype(dtype)
+      kv_bias = self.kv_bias.astype(dtype)
+      kb, vb = mx.split(kv_bias, 2, axis=-1)
+      k = k + kb
+      val = val + vb
     k = k.reshape(b, t, self.num_heads, self.units_per_head)
     val = val.reshape(b, t, self.num_heads, self.units_per_head)
     return Sequence(k, source.mask), Sequence(val, source.mask)
@@ -1224,13 +1239,17 @@ class StreamingDotProductAttention(types.Emitting):
 
     # Q projection from input.
     self.q_proj = kernel_init(key, (in_features, qkv_dim), param_dtype)
-    # K/V projections from source.
-    self.k_proj = kernel_init(key, (source_features, qkv_dim), param_dtype)
-    self.v_proj = kernel_init(key, (source_features, qkv_dim), param_dtype)
+    # Combined K+V projection from source: single matmul + split.
+    self.kv_proj = mx.concatenate([
+        kernel_init(key, (source_features, qkv_dim), param_dtype),
+        kernel_init(key, (source_features, qkv_dim), param_dtype),
+    ], axis=-1)
     if use_bias:
       self.q_bias = bias_init(key, (qkv_dim,), param_dtype)
-      self.k_bias = bias_init(key, (qkv_dim,), param_dtype)
-      self.v_bias = bias_init(key, (qkv_dim,), param_dtype)
+      self.kv_bias = mx.concatenate([
+          bias_init(key, (qkv_dim,), param_dtype),
+          bias_init(key, (qkv_dim,), param_dtype),
+      ], axis=-1)
     # Attention sink embeddings.
     self.num_sink_embeddings = num_sink_embeddings
     if num_sink_embeddings > 0:
@@ -1274,11 +1293,13 @@ class StreamingDotProductAttention(types.Emitting):
     b, t = source.shape[0], source.shape[1]
     dtype = self.compute_dtype or source.dtype
     v = source.values.astype(dtype)
-    k = mx.matmul(v, self.k_proj.astype(dtype))
-    val = mx.matmul(v, self.v_proj.astype(dtype))
+    kv = mx.matmul(v, self.kv_proj.astype(dtype))
+    k, val = mx.split(kv, 2, axis=-1)
     if self.use_bias:
-      k = k + self.k_bias.astype(dtype)
-      val = val + self.v_bias.astype(dtype)
+      kv_bias = self.kv_bias.astype(dtype)
+      kb, vb = mx.split(kv_bias, 2, axis=-1)
+      k = k + kb
+      val = val + vb
     k = k.reshape(b, t, self.num_heads, self.units_per_head)
     val = val.reshape(b, t, self.num_heads, self.units_per_head)
     return Sequence(k, source.mask), Sequence(val, source.mask)
@@ -1587,15 +1608,13 @@ class StreamingDotProductAttention(types.Emitting):
 
     w_q = self.q_proj.T
     self.q_proj_qw, self.q_proj_qs, self.q_proj_qb = mx.quantize(w_q, group_size=group_size, bits=bits)
-    
-    w_k = self.k_proj.T
-    w_v = self.v_proj.T
-    w_kv = mx.concatenate([w_k, w_v], axis=0)
+
+    # kv_proj is already combined [source, 2*qkv_dim].
+    w_kv = self.kv_proj.T
     self.kv_proj_qw, self.kv_proj_qs, self.kv_proj_qb = mx.quantize(w_kv, group_size=group_size, bits=bits)
 
     self.q_proj = None
-    self.k_proj = None
-    self.v_proj = None
+    self.kv_proj = None
 
     def _project_q(self, x):
         b, t = x.shape[0], x.shape[1]
@@ -1612,11 +1631,12 @@ class StreamingDotProductAttention(types.Emitting):
         dtype = self.compute_dtype or source.dtype
         v = source.values.astype(dtype)
         kv = _quantized_matmul_proj(v, self.kv_proj_qw, self.kv_proj_qs, self.kv_proj_qb, self._quant_group_size, self._quant_bits)
-        d_k = self.num_heads * self.units_per_head
-        k, val = mx.split(kv, [d_k], axis=-1)
+        k, val = mx.split(kv, 2, axis=-1)
         if self.use_bias:
-            k = k + self.k_bias.astype(dtype)
-            val = val + self.v_bias.astype(dtype)
+            kv_bias = self.kv_bias.astype(dtype)
+            kb, vb = mx.split(kv_bias, 2, axis=-1)
+            k = k + kb
+            val = val + vb
         k = k.reshape(b, t, self.num_heads, self.units_per_head)
         val = val.reshape(b, t, self.num_heads, self.units_per_head)
         return Sequence(k, source.mask), Sequence(val, source.mask)
