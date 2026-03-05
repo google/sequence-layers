@@ -482,7 +482,13 @@ class Conditioning(BaseConditioning):
     broadcasted_shape = jnp.broadcast_shapes(
         x.shape[:2], conditioning.shape[:2]
     )
-    utils.assert_is_compatible_with(x.shape[:2], broadcasted_shape)
+    try:
+      utils.assert_is_compatible_with(x.shape[:2], broadcasted_shape)
+    except ValueError as e:
+      raise ValueError(
+          f'Conditioning(name={self.name}, '
+          f'conditioning_name={self._conditioning_name}): imcompatible shapes'
+      ) from e
     return self._project_and_combine(x, conditioning, training)
 
   @types.check_step
