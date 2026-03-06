@@ -20,7 +20,7 @@ import fractions
 import functools
 import math
 import typing
-from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Protocol, Self, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Protocol, Self, Sequence as TypingSequence, TypeVar, override
 
 from absl import logging
 from flax import linen as nn
@@ -29,6 +29,8 @@ import jax
 from jax import numpy as jnp
 import jaxtyping
 import numpy as np
+
+from sequence_layers.abstract import types
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import typing as jt
 import typeguard
@@ -187,121 +189,8 @@ ARRAY_LIKE_TYPES = (
     jax.core.ShapedArray,
 )
 
-
-class PaddingMode(enum.Enum):
-  """Supported padding modes."""
-
-  # In VALID padding mode, no padding is applied.
-  #
-  # Key properties:
-  # * The physical length of an input array to a VALID padded function shrinks,
-  #   dropping any timesteps whose inputs are computed from implicit edge
-  #   padding.
-  # * An output timestep is valid when all of its input timesteps are also
-  #   valid.
-  VALID = 'valid'
-
-  # In SAME padding mode, the input sequence is padded such that the output
-  # length is equal to the input length before applying striding.
-  #
-  # Key properties:
-  # * The input length is equal to the output length, before applying striding.
-  # * Padding of `effective_kernel_size - 1` is applied. Half is applied to the
-  #   front and half to the back. If `effective_kernel_size` is even, the extra
-  #   padding is added to the end.
-  # * An output timestep is valid when its corresponding input timestep is
-  #   valid.
-  SAME = 'same'
-
-  # In CAUSAL_VALID padding mode, the input sequence is padded such that the
-  # output length is equal to the input length before applying striding. Padding
-  # is applied such that the output timestep `to` can only depend on input
-  # timesteps at or before `ti` where `ti * output_ratio = to`.
-  #
-  # Key properties:
-  # * As in SAME padding, the input length is equal to the output length, before
-  #   applying striding.
-  # * Padding of `effective_kernel_size - 1` is applied to the front of the
-  #   sequence.
-  # * As in VALID padding, an output timestep is valid iff all of its input
-  #   timesteps are also valid.
-  CAUSAL_VALID = 'causal_valid'
-
-  # In REVERSE_CAUSAL_VALID padding mode, the input sequence is padded such that
-  # the output length is equal to the input length before applying striding.
-  # Padding is applied such that the output timestep `to` can only depend on
-  # input timesteps at or after `ti` where `ti * output_ratio = to`.
-  #
-  # Key properties:
-  # * As in SAME padding, the input length is equal to the output length, before
-  #   applying striding.
-  # * Padding of `effective_kernel_size - 1` is applied to the back of the
-  #   sequence.
-  REVERSE_CAUSAL_VALID = 'reverse_causal_valid'
-
-  # In CAUSAL padding mode, the input sequence is padded such that the output
-  # length is equal to the input length before applying striding. Padding is
-  # applied such that the output timestep `to` can only depend on input
-  # timesteps at or before `ti` where `ti * output_ratio = to`.
-  #
-  # Key properties:
-  # * As in SAME padding, the input length is equal to the output length, before
-  #   applying striding.
-  # * Padding of `effective_kernel_size - 1` is applied to the front of the
-  #   sequence.
-  # * As in SAME padding, an output timestep is valid when its corresponding
-  #   input timestep is valid.
-  CAUSAL = 'causal'
-
-  # In REVERSE_CAUSAL padding mode, the input sequence is padded such that the
-  # output length is equal to the input length before applying striding. Padding
-  # is applied such that the output timestep `to` can only depend on input
-  # timesteps at or after `ti` where `ti * output_ratio = to`.
-  #
-  # Key properties:
-  # * As in SAME padding, the input length is equal to the output length, before
-  #   applying striding.
-  # * Padding of `effective_kernel_size - 1` is applied to the back of the
-  #   sequence.
-  # * As in SAME padding, an output timestep is valid when its corresponding
-  #   input timestep is valid.
-  REVERSE_CAUSAL = 'reverse_causal'
-
-  # In SEMICAUSAL padding mode, the input sequence is padded such that the
-  # output length is equal to the input length before applying striding. Padding
-  # is applied such that the output timestep `to` can only depend on input
-  # timesteps at or before `ti` where `ti * output_ratio = to`.
-  #
-  # Key properties:
-  # * As in SAME padding, the input length is equal to the output length, before
-  #   applying striding.
-  # * Padding of `effective_kernel_size - stride` is applied to the front of the
-  #   sequence, and padding of `stride - 1` timesteps is applied to the back of
-  #   the sequence for a total of `effective_kernel_size - 1` timesteps of
-  #   padding. If `effective_kernel_size` < `stride`, then padding of
-  #   `effective_kernel_size - 1` is applied to the back of the sequence.
-  # * As in SAME padding, an output timestep is valid when its corresponding
-  #   input timestep is valid.
-  SEMICAUSAL = 'semicausal'
-
-  # In SEMICAUSAL_FULL padding mode, the input sequence is padded such that the
-  # output of the corresponding overlap-add or transpose convolution is of the
-  # same size as the input sequence and perfect reconstruction can be achieved.
-  # The reconstructed signal is of the same length or of length rounded up to
-  # cover the full input sequence.
-  SEMICAUSAL_FULL = 'semicausal_full'
-
-
-PaddingModeString = Literal[
-    'valid',
-    'same',
-    'causal_valid',
-    'reverse_causal_valid',
-    'causal',
-    'reverse_causal',
-    'semicausal',
-    'semicausal_full',
-]
+PaddingMode = types.PaddingMode
+PaddingModeString = types.PaddingModeString
 
 
 def validate_padding(padding: str) -> PaddingModeString:
@@ -365,7 +254,7 @@ def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
   )
 
 
-class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
+class Sequence(types.Sequence[ValuesT, MaskT], struct.PyTreeNode):
   """A generic sequence container that preserves masking information."""
 
   values: ValuesT
@@ -426,16 +315,19 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
       )
 
   @property
+  @override
   def shape(self) -> Shape:
     """Returns the shape of the sequence values."""
     return self.values.shape
 
   @property
+  @override
   def ndim(self) -> int:
     """Returns the rank of the sequence values."""
     return self.values.ndim
 
   @property
+  @override
   def channel_shape(self) -> Shape:
     """Returns the channel shape (the shape without batch and time)."""
     return self.values.shape[2:]
@@ -446,6 +338,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     return ChannelSpec(self.channel_shape, self.dtype)
 
   @property
+  @override
   def dtype(self) -> DType:
     """Returns the dtype of the sequence values."""
     return self.values.dtype
@@ -459,6 +352,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     return MaskedSequence(values, mask) if is_masked else Sequence(values, mask)
 
   @classmethod
+  @override
   def from_values(cls, values: ValuesT) -> 'MaskedSequence':
     """Returns a MaskedSequence for values, assuming every timestep is valid."""
     if values.ndim < 2:
@@ -466,6 +360,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     return MaskedSequence(values, jnp.ones(values.shape[:2], jnp.bool_))
 
   @classmethod
+  @override
   def concatenate_sequences(cls, sequences: Iterable['Sequence']) -> 'Sequence':
     """Concatenates sequences and their masks on the time axis."""
     values = []
@@ -484,10 +379,12 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
         jnp.concatenate(values, axis=1), jnp.concatenate(masks, axis=1)
     )
 
+  @override
   def expanded_mask(self) -> ExpandedMaskT:
     """Returns the Sequence mask with dimensions expanded to match values."""
     return self.mask.reshape(self.mask.shape + (1,) * (self.values.ndim - 2))
 
+  @override
   def concatenate(self, other: 'Sequence') -> 'Sequence':
     """Concatenates this sequence with other on the time dimension."""
     values = jnp.concatenate([self.values, other.values], axis=1)
@@ -497,6 +394,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     return_type = type(self) if type(self) is type(other) else Sequence
     return return_type(values, mask)
 
+  @override
   def apply_values(
       self,
       values_fn: Callable[..., ValuesT],
@@ -506,6 +404,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     """Transforms values with values_fn, assuming result is unmasked."""
     return Sequence(values_fn(self.values, *args, **kwargs), self.mask)
 
+  @override
   def apply_values_masked(
       self: SequenceSelf,
       values_fn: Callable[..., ValuesT],
@@ -515,6 +414,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     """Transforms values with values_fn, preserving masked state."""
     return type(self)(values_fn(self.values, *args, **kwargs), self.mask)
 
+  @override
   def apply(
       self,
       apply_fn: Callable[..., tuple[ValuesT, MaskT]],
@@ -525,6 +425,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
     return Sequence(values, mask)
 
+  @override
   def apply_masked(
       self: SequenceSelf,
       apply_fn: Callable[..., tuple[ValuesT, MaskT]],
@@ -538,6 +439,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
     return type(self)(values, mask)
 
+  @override
   def astype(
       self: SequenceSelf,
       dtype: DType | None,
@@ -545,10 +447,12 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     """Returns a copy of this sequence with its values cast to dtype."""
     return type(self)(self.values.astype(dtype), self.mask)
 
+  @override
   def lengths(self) -> jt.Int[jt.ArrayT, 'B']:
     """Returns the number of valid timesteps per batch item."""
     return jnp.sum(self.mask.astype(jnp.int32), axis=1)
 
+  @override
   def __getitem__(
       self: SequenceSelf,
       the_slice: slice | tuple[int | slice | None | type(Ellipsis), ...],
@@ -566,6 +470,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
         self.values.__getitem__(the_slice), self.mask.__getitem__(the_slice[:2])
     )
 
+  @override
   def pad_time(
       self: SequenceSelf,
       pad_left: jt.ScalarInt,
@@ -620,10 +525,12 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
     ) // block_size * block_size - self.shape[1]
     return self.pad_time(pad_left=0, pad_right=pad_length, valid=False)
 
+  @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
     """Returns a sequence with invalid timesteps replaced with mask_value."""
     raise NotImplementedError('Replaced below.')
 
+  @override
   def unmask(self) -> 'Sequence':
     """Returns an unmasked version of this sequence with unchanged values."""
     # We are already an unmasked sequence.
@@ -633,6 +540,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
 class MaskedSequence(Sequence[ValuesT, MaskT]):
   """Sequence whose invalid timesteps are masked to zero."""
 
+  @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
     """Returns a sequence with invalid timesteps replaced with mask_value."""
     if mask_value is None:
@@ -640,6 +548,7 @@ class MaskedSequence(Sequence[ValuesT, MaskT]):
     else:
       return mask_invalid(self, mask_value)
 
+  @override
   def unmask(self) -> Sequence:
     """Returns an unmasked version of this sequence with unchanged values."""
     return Sequence(self.values, self.mask)
@@ -667,7 +576,7 @@ def mask_invalid(
 Sequence.mask_invalid = mask_invalid
 
 
-class MetaSequenceT(type):
+class MetaSequenceT(abc.ABCMeta):
   """A metaclass for SequenceT to support jaxtyping-style type parameters."""
 
   def __getitem__(cls, item):
@@ -760,7 +669,7 @@ def _add_custom_checker_lookup_fn(lookup_fn):
 _add_custom_checker_lookup_fn(_sequence_checker_lookup_fn)
 
 
-class Steppable(metaclass=abc.ABCMeta):
+class Steppable(types.Steppable):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   # Step-wise execution:
@@ -829,6 +738,7 @@ class Steppable(metaclass=abc.ABCMeta):
   path: str  # Provided by nn.Module.
 
   @property
+  @override
   def block_size(self) -> int:
     """The block size multiple required by the layer.
 
@@ -841,16 +751,19 @@ class Steppable(metaclass=abc.ABCMeta):
     return 1
 
   @property
+  @override
   def output_ratio(self) -> fractions.Fraction:
     """The number of output frames for one input frame."""
     return fractions.Fraction(1)
 
   @property
+  @override
   def supports_step(self) -> bool:
     """Returns whether this layer supports the SequenceLayer.step method."""
     return True
 
   @property
+  @override
   def input_latency(self) -> int:
     """Returns the input latency of this layer.
 
@@ -860,6 +773,7 @@ class Steppable(metaclass=abc.ABCMeta):
     return 0
 
   @property
+  @override
   def output_latency(self) -> int:
     """Returns the output latency of this layer.
 
@@ -870,10 +784,12 @@ class Steppable(metaclass=abc.ABCMeta):
     # to integer here.
     return int(self.input_latency * self.output_ratio)
 
+  @override
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     """Returns the accumulated input latency of this layer."""
     return math.ceil(input_latency / self.output_ratio) + self.input_latency
 
+  @override
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     """Returns the accumulated output latency of this layer."""
     output_ratio = self.output_ratio
@@ -892,6 +808,7 @@ class Steppable(metaclass=abc.ABCMeta):
     return int(output_latency * output_ratio) + self.output_latency
 
   @property
+  @override
   def receptive_field(self) -> ReceptiveField:
     """Returns the range of the receptive field of this layer.
 
@@ -1538,7 +1455,7 @@ class StatelessPointwiseFunctor(StatelessPointwise, metaclass=abc.ABCMeta):
     return y
 
 
-class SequenceLayerConfig(metaclass=abc.ABCMeta):
+class SequenceLayerConfig(types.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects.
 
   Requires a no-argument make() method which returns a SequenceLayer.
