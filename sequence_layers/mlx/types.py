@@ -403,6 +403,28 @@ class Steppable(types.Steppable):
   def output_latency(self) -> int:
     return int(self.input_latency * self.output_ratio)
 
+  @override
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    import math
+    return math.ceil(input_latency / self.output_ratio) + self.input_latency
+
+  @override
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    output_ratio = self.output_ratio
+    if required_delay := -output_latency % (1 / output_ratio):
+      path = '/'.join(self.path) if hasattr(self, 'path') else self.__class__.__name__
+      raise ValueError(
+          f'Input to {self.__class__.__name__}(path={path!r}) has a step-wise'
+          f' incoming {output_latency=} which is not divisible'
+          f" by the layer's {output_ratio=}. Insert a delay of"
+          f' -output_latency % (1/output_ratio)={required_delay} before the'
+          ' layer to compensate.'
+      )
+    return int(output_latency * output_ratio) + self.output_latency
+
+
+
+
   @abc.abstractmethod
   @override
   def layer(
