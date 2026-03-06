@@ -24,6 +24,8 @@ import jax
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
+
+from sequence_layers.abstract import types_test_base
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -37,8 +39,19 @@ class Foo(nn.Module):
     return x
 
 
-class SequenceTest(test_utils.SequenceLayerTest):
+class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
   """Tests for the Sequence class."""
+
+  def get_backend(self):
+    return jnp
+
+  @property
+  def Sequence(self):
+    return types.Sequence
+
+  @property
+  def MaskedSequence(self):
+    return types.MaskedSequence
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""
@@ -96,91 +109,6 @@ class SequenceTest(test_utils.SequenceLayerTest):
     with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(np.zeros((2, 3, 5)), np.zeros((1, 3), dtype=jnp.bool_))
 
-  @parameterized.parameters(None, 0.0, -1.0)
-  def test_mask_invalid(self, mask_value: float | None):
-    values = jnp.array([
-        [1.0, 2.0, 3.0, 4.0],
-        [10.0, 20.0, 30.0, 40.0],
-    ])
-    mask = jnp.array([[True, True, False, False], [False, False, False, True]])
-
-    output = types.Sequence(values, mask).mask_invalid(mask_value)
-    mask_value = 0.0 if mask_value is None else mask_value
-
-    chex.assert_trees_all_equal(
-        output.values,
-        jnp.array([
-            [1.0, 2.0, mask_value, mask_value],
-            [mask_value, mask_value, mask_value, 40.0],
-        ]),
-    )
-    chex.assert_trees_all_equal(output.mask, mask)
-
-  def test_slice(self):
-    x = test_utils.random_sequence(3, 5, 9)
-
-    self.assertSequencesEqual(
-        x[:, 1:], types.MaskedSequence(x.values[:, 1:], x.mask[:, 1:])
-    )
-
-    self.assertSequencesEqual(
-        x[:, ::2], types.MaskedSequence(x.values[:, ::2], x.mask[:, ::2])
-    )
-
-    self.assertSequencesEqual(
-        x[::2, ::3], types.MaskedSequence(x.values[::2, ::3], x.mask[::2, ::3])
-    )
-
-    self.assertSequencesEqual(
-        x[1::2, 2::3],
-        types.MaskedSequence(x.values[1::2, 2::3], x.mask[1::2, 2::3]),
-    )
-
-    self.assertSequencesEqual(
-        x[1::2],
-        types.MaskedSequence(x.values[1::2, :], x.mask[1::2, :]),
-    )
-
-    with self.assertRaises(ValueError):
-      _ = typing.cast(Any, x)[0, :]
-
-    with self.assertRaises(ValueError):
-      _ = typing.cast(Any, x)[:, 0]
-
-  def test_slice_can_slice_channel_dimensions(self):
-    x = test_utils.random_sequence(3, 5, 9, 4)
-
-    self.assertSequencesEqual(
-        x[:, 1:, :], types.MaskedSequence(x.values[:, 1:], x.mask[:, 1:])
-    )
-
-    self.assertSequencesEqual(
-        x[:, ::2, :3],
-        types.MaskedSequence(x.values[:, ::2, :3], x.mask[:, ::2]),
-    )
-
-    self.assertSequencesEqual(
-        x[:, :, ::2], types.MaskedSequence(x.values[:, :, ::2], x.mask)
-    )
-
-    self.assertSequencesEqual(
-        x[:, :, ::2, :1], types.MaskedSequence(x.values[:, :, ::2, :1], x.mask)
-    )
-
-    self.assertSequencesEqual(
-        x[:, :, 0, ::2], types.MaskedSequence(x.values[:, :, 0, ::2], x.mask)
-    )
-
-    self.assertSequencesEqual(
-        x[:, :, jnp.newaxis],
-        types.MaskedSequence(jnp.expand_dims(x.values, 2), x.mask),
-    )
-
-    self.assertSequencesEqual(
-        x[:, :, ..., 0],
-        types.MaskedSequence(x.values[:, :, :, 0], x.mask),
-    )
-
   def test_mask_invalid_idempotent(self):
     values = jnp.array([
         [1.0, 2.0, 3.0, 4.0],
@@ -200,83 +128,6 @@ class SequenceTest(test_utils.SequenceLayerTest):
     masked2 = x.mask_invalid()
     self.assertIsNot(masked2, masked)
     self.assertIsInstance(masked2, types.MaskedSequence)
-
-  def test_apply_values(self):
-    values = jnp.array([
-        [-1.0, 2.0, 3.0, 4.0],
-        [10.0, -20.0, 30.0, 40.0],
-    ])
-    mask = jnp.array([[True, True, False, False], [False, True, False, True]])
-
-    x = types.Sequence(values, mask)
-    masked = x.mask_invalid()
-
-    # x stays unmasked if we use apply_values.
-    y = x.apply_values(jax.nn.relu)
-    self.assertNotIsInstance(y, types.MaskedSequence)
-    chex.assert_trees_all_equal(y.values, jax.nn.relu(x.values))
-    chex.assert_trees_all_equal(y.mask, x.mask)
-
-    # x does not become masked if we use apply_values_masked.
-    y = x.apply_values_masked(jax.nn.relu)
-    self.assertNotIsInstance(y, types.MaskedSequence)
-    chex.assert_trees_all_equal(y.values, jax.nn.relu(x.values))
-    chex.assert_trees_all_equal(y.mask, x.mask)
-
-    # masked loses its masked state if we use apply_values.
-    y = masked.apply_values(jax.nn.relu)
-    self.assertNotIsInstance(y, types.MaskedSequence)
-    chex.assert_trees_all_equal(y.values, jax.nn.relu(masked.values))
-    chex.assert_trees_all_equal(y.mask, x.mask)
-
-    # masked keeps its masked state if we use apply_values_masked.
-    y = masked.apply_values_masked(jax.nn.relu)
-    self.assertIsInstance(y, types.MaskedSequence)
-    chex.assert_trees_all_equal(y.values, jax.nn.relu(masked.values))
-    chex.assert_trees_all_equal(y.mask, x.mask)
-
-  def test_apply_values_args(self):
-    values = jnp.array([
-        [-1.0, 2.0, 3.0, 4.0],
-        [10.0, -20.0, 30.0, 40.0],
-    ])
-    mask = jnp.array([[True, True, False, False], [False, True, False, True]])
-
-    x = types.Sequence(values, mask)
-    y = x.apply_values(jnp.reshape, [2, 4, 1])
-    self.assertEqual(y.values.shape, (2, 4, 1))
-    self.assertEqual(y.mask.shape, (2, 4))
-    y = x.apply_values_masked(jnp.reshape, [2, 4, 1])
-    self.assertEqual(y.values.shape, (2, 4, 1))
-    self.assertEqual(y.mask.shape, (2, 4))
-
-  def test_pad_time(self):
-    x = types.Sequence(
-        jnp.array([
-            [1.0, 2.0, 3.0, 4.0],
-            [10.0, 20.0, 30.0, 40.0],
-        ]),
-        jnp.array([[True, True, False, False], [False, False, False, True]]),
-    ).mask_invalid()
-
-    y = x.pad_time(0, 0, valid=False)
-    chex.assert_trees_all_equal(y.values, x.values)
-    chex.assert_trees_all_equal(y.mask, x.mask)
-
-    y = x.pad_time(1, 0, valid=False)
-
-    x_left1 = types.Sequence(
-        jnp.array([
-            [0.0, 1.0, 2.0, 3.0, 4.0],
-            [0.0, 10.0, 20.0, 30.0, 40.0],
-        ]),
-        jnp.array([
-            [False, True, True, False, False],
-            [False, False, False, False, True],
-        ]),
-    ).mask_invalid()
-    chex.assert_trees_all_equal(y.values, x_left1.values)
-    chex.assert_trees_all_equal(y.mask, x_left1.mask)
 
   def test_type_annotation(self):
     if not jt.runtime_type_checking_enabled:
@@ -388,61 +239,11 @@ class SequenceTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(x.lengths(), jnp.asarray([0, 0, 5, 17, 17]))
     self.assertIsInstance(x, types.MaskedSequence)
 
-  def test_from_values(self):
-    x_expected = test_utils.random_sequence(5, 17, 2).values
-    x = types.Sequence.from_values(x_expected)
 
-    # Mask is all ones.
-    self.assertAllEqual(x.mask, jnp.ones_like(x.mask))
+class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
 
-    # Result is a MaskedSequence.
-    self.assertIsInstance(x, types.MaskedSequence)
-
-    # The values are unchanged by from_values.
-    self.assertAllEqual(x.values, x_expected)
-
-  def test_astype(self):
-    x_float = jnp.asarray([[1.0, 2.9, 3.14]])
-    x_float_mask = jnp.asarray([[True, True, True]], dtype=types.MASK_DTYPE)
-    x_expected = jnp.asarray([[1, 2, 3]], dtype=jnp.int8)
-    x = types.Sequence(x_float, x_float_mask).astype(jnp.int8)
-    with self.subTest('values_are_casted'):
-      self.assertAllEqual(x.values, x_expected)
-    with self.subTest('values_dtype_is_set'):
-      self.assertEqual(x.values.dtype, x_expected.dtype)
-    with self.subTest('mask_unchanged'):
-      self.assertAllEqual(x.mask, x_float_mask)
-      self.assertEqual(x.mask.dtype, x_float_mask.dtype)
-
-
-class SequenceLayerConfigTest(test_utils.SequenceLayerTest):
-
-  def test_copy(self):
-
-    @dataclasses.dataclass(frozen=True)
-    class Config(types.SequenceLayerConfig):
-      a: int = 1234
-      b: str = 'default string'
-
-      def make(self) -> simple.Identity:
-        return simple.Identity.Config().make()
-
-    config = Config()
-    new_config = config.copy(b='new string')
-    self.assertEqual(new_config.a, config.a)
-    self.assertEqual(new_config.b, 'new string')
-
-  def test_copy_raises_on_non_dataclass(self):
-
-    class NonDataclassConfig(types.SequenceLayerConfig):
-
-      def make(self) -> simple.Identity:
-        return simple.Identity.Config().make()
-
-    config = NonDataclassConfig()
-    with self.assertRaises(TypeError):
-      new_config = config.copy()
-      del new_config
+  def get_config_base_cls(self):
+    return types.SequenceLayerConfig
 
   def test_copy_raises_on_mutable_attribute(self):
 
@@ -482,18 +283,29 @@ class SequenceLayerConfigTest(test_utils.SequenceLayerTest):
       new_config = config.copy()
       del new_config
 
-  def test_copy_disallows_new_fields(self):
 
-    @dataclasses.dataclass(frozen=True)
-    class Config(types.SequenceLayerConfig):
+class SteppableTest(types_test_base.SteppableTest):
 
-      def make(self) -> simple.Identity:
-        return simple.Identity.Config().make()
+  def create_steppable(self):
 
-    config = Config()
-    with self.assertRaises(AttributeError):
-      new_config = config.copy(field_does_not_exist=1234)
-      del new_config
+    class DefaultSteppable(types.Steppable):
+
+      def layer(self, x, *, constants=None):
+        return x
+
+      def step(self, x, state, *, constants=None):
+        return x, state
+
+      def get_initial_state(self, batch_size, input_spec, *, constants=None):
+        return 0
+
+      def get_output_shape(self, input_shape, *, constants=None):
+        return input_shape
+
+      def get_output_dtype(self, input_dtype, *, constants=None):
+        return input_dtype
+
+    return DefaultSteppable()
 
 
 if __name__ == '__main__':
