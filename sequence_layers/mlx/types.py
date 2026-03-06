@@ -422,7 +422,10 @@ class Steppable(types.Steppable):
       )
     return int(output_latency * output_ratio) + self.output_latency
 
-
+  @property
+  @override
+  def receptive_field(self) -> ReceptiveField:
+    raise NotImplementedError('receptive_field is not implemented by MLX Steppable.')
 
 
   @abc.abstractmethod

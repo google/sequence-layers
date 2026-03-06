@@ -290,5 +290,8 @@ class Steppable(metaclass=abc.ABCMeta):
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     pass
 
-
+  @property
+  @abc.abstractmethod
+  def receptive_field(self) -> Any:
+    pass
 
