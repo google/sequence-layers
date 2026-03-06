@@ -45,11 +45,13 @@ class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
   def get_backend(self):
     return jnp
 
-  def create_sequence(self, values, mask):
-    return types.Sequence(values, mask)
+  @property
+  def Sequence(self):
+    return types.Sequence
 
-  def create_masked_sequence(self, values, mask):
-    return types.MaskedSequence(values, mask)
+  @property
+  def MaskedSequence(self):
+    return types.MaskedSequence
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""

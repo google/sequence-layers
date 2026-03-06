@@ -11,11 +11,13 @@ class SequenceTest(types_test_base.SequenceTest):
   def get_backend(self):
     return mx
 
-  def create_sequence(self, values, mask):
-    return types.Sequence(values, mask)
+  @property
+  def Sequence(self):
+    return types.Sequence
 
-  def create_masked_sequence(self, values, mask):
-    return types.MaskedSequence(values, mask)
+  @property
+  def MaskedSequence(self):
+    return types.MaskedSequence
 
   def assertAllEqual(self, a, b):
     a = np.array(a) if isinstance(a, mx.array) else a

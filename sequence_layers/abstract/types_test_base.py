@@ -9,30 +9,59 @@ import fractions
 from absl.testing import parameterized
 import numpy as np
 
-# We'll need a way for subclasses to provide specific factory methods/backends
-class SequenceTest(parameterized.TestCase):
+class SequenceLayerTest(parameterized.TestCase):
+  """Base abstract test class providing common sequence testing assertions."""
+
+  @abc.abstractmethod
+  def assertSequencesClose(self, x: Any, y: Any, **kwargs):
+    pass
+
+  @abc.abstractmethod
+  def assertSequencesNotClose(self, x: Any, y: Any, **kwargs):
+    pass
+
+  @abc.abstractmethod
+  def assertSequencesEqual(self, x: Any, y: Any):
+    pass
+
+  @abc.abstractmethod
+  def assertSequencesNotEqual(self, x: Any, y: Any):
+    pass
+
+  @abc.abstractmethod
+  def assertAllEqual(self, x: Any, y: Any):
+    pass
+
+  @abc.abstractmethod
+  def assertAllClose(self, x: Any, y: Any, **kwargs):
+    pass
+
+  @abc.abstractmethod
+  def assertNotAllEqual(self, x: Any, y: Any):
+    pass
+
+  @abc.abstractmethod
+  def assertNotAllClose(self, x: Any, y: Any, **kwargs):
+    pass
+
+
+class SequenceTest(SequenceLayerTest):
   """Abstract tests for the Sequence class."""
 
   @abc.abstractmethod
   def get_backend(self) -> Any:
     """Returns the backend module (jax.numpy or mlx.core)."""
   
+  @property
   @abc.abstractmethod
-  def create_sequence(self, values: Any, mask: Any) -> Any:
-    """Creates a Sequence instance."""
+  def Sequence(self) -> type[types.Sequence]:
+    """Returns the Sequence class for the backend."""
 
+  @property
   @abc.abstractmethod
-  def create_masked_sequence(self, values: Any, mask: Any) -> Any:
-     """Creates a MaskedSequence instance."""
+  def MaskedSequence(self) -> Any:
+     """Returns the MaskedSequence class for the backend."""
   
-  @abc.abstractmethod
-  def assertSequencesEqual(self, x: Any, y: Any):
-    """Asserts that two sequences are equal."""
-
-  @abc.abstractmethod
-  def assertAllEqual(self, x: Any, y: Any):
-    """Asserts that two arrays are equal."""
-    
   @property
   def check_trees_all_equal(self) -> Callable[[Any, Any], None]:
     """Returns a function to check tree equality."""
@@ -47,7 +76,7 @@ class SequenceTest(parameterized.TestCase):
     # Different backends might handle boolean creation differently, but standard numpy-like syntax usually works
     mask = xp.array([[True, True, False, False], [False, False, False, True]])
 
-    x = self.create_sequence(values, mask)
+    x = self.Sequence(values, mask)
     masked = x.mask_invalid()
     self.assertIsNot(masked, x)
     # We can't easily check isinstance here without importing the concrete classes, 
@@ -76,10 +105,10 @@ class SequenceTest(parameterized.TestCase):
 
     # Pass mask_value only if it is not None (to test default None behavior vs explicit value)
     if expected_mask_value is None:
-       output = self.create_sequence(values, mask).mask_invalid()
+       output = self.Sequence(values, mask).mask_invalid()
        fill_value = 0.0
     else:
-       output = self.create_sequence(values, mask).mask_invalid(mask_value)
+       output = self.Sequence(values, mask).mask_invalid(mask_value)
        fill_value = mask_value
 
     expected_values = xp.array([
@@ -97,7 +126,7 @@ class SequenceTest(parameterized.TestCase):
     ])
     mask = xp.array([[True, True, False, False], [False, False, False, True]])
     
-    x = self.create_sequence(values, mask).mask_invalid()
+    x = self.Sequence(values, mask).mask_invalid()
 
     y = x.pad_time(0, 0, valid=False)
     self.check_trees_all_equal(y.values, x.values)
@@ -105,7 +134,7 @@ class SequenceTest(parameterized.TestCase):
 
     y = x.pad_time(1, 0, valid=False)
 
-    x_left1 = self.create_sequence(
+    x_left1 = self.Sequence(
         xp.array([
             [0.0, 1.0, 2.0, 3.0, 4.0],
             [0.0, 10.0, 20.0, 30.0, 40.0],
@@ -129,30 +158,30 @@ class SequenceTest(parameterized.TestCase):
     
     values = xp.array(values_np)
     mask = xp.array(mask_np)
-    return self.create_sequence(values, mask)
+    return self.Sequence(values, mask)
 
   def test_slice(self):
     x = self._create_test_sequence((3, 5, 9))
     
     self.assertSequencesEqual(
-        x[:, 1:], self.create_masked_sequence(x.values[:, 1:], x.mask[:, 1:])
+        x[:, 1:], self.Sequence(x.values[:, 1:], x.mask[:, 1:])
     )
     self.assertSequencesEqual(
-        x[:, ::2], self.create_masked_sequence(x.values[:, ::2], x.mask[:, ::2])
+        x[:, ::2], self.Sequence(x.values[:, ::2], x.mask[:, ::2])
     )
     self.assertSequencesEqual(
-        x[::2, ::3], self.create_masked_sequence(x.values[::2, ::3], x.mask[::2, ::3])
+        x[::2, ::3], self.Sequence(x.values[::2, ::3], x.mask[::2, ::3])
     )
 
   def test_slice_can_slice_channel_dimensions(self):
     x = self._create_test_sequence((3, 5, 9, 4))
     
     self.assertSequencesEqual(
-        x[:, 1:, :], self.create_masked_sequence(x.values[:, 1:], x.mask[:, 1:])
+        x[:, 1:, :], self.Sequence(x.values[:, 1:], x.mask[:, 1:])
     )
     self.assertSequencesEqual(
         x[:, ::2, :3],
-        self.create_masked_sequence(x.values[:, ::2, :3], x.mask[:, ::2]),
+        self.Sequence(x.values[:, ::2, :3], x.mask[:, ::2]),
     )
 
   def test_apply_values(self):
@@ -163,7 +192,7 @@ class SequenceTest(parameterized.TestCase):
     ])
     mask = xp.array([[True, True, False, False], [False, True, False, True]])
     
-    x = self.create_sequence(values, mask)
+    x = self.Sequence(values, mask)
     masked = x.mask_invalid()
     
     # Simple abs function
@@ -188,7 +217,7 @@ class SequenceTest(parameterized.TestCase):
         [10.0, -20.0, 30.0, 40.0],
     ])
     mask = xp.array([[True, True, False, False], [False, True, False, True]])
-    x = self.create_sequence(values, mask)
+    x = self.Sequence(values, mask)
     
     target_shape = (2, 4, 1)
     y = x.apply_values(lambda v, s: v.reshape(s), target_shape)
@@ -203,7 +232,7 @@ class SequenceTest(parameterized.TestCase):
     ], dtype=np.float32)
     values = xp.array(values_np)
     # Get the class from an instance
-    seq = self.create_sequence(values, xp.array(np.ones(values.shape[:2], dtype=bool)))
+    seq = self.Sequence(values, xp.array(np.ones(values.shape[:2], dtype=bool)))
     SeqClass = type(seq)
     
     x = SeqClass.from_values(values)
@@ -218,7 +247,7 @@ class SequenceTest(parameterized.TestCase):
     values = xp.array(values_np)
     mask = xp.array(mask_np)
     
-    x = self.create_sequence(values, mask)
+    x = self.Sequence(values, mask)
     
     # We need a dtype that matches the backend
     if xp.__name__ == 'jax.numpy':
@@ -254,7 +283,7 @@ class SteppableTest(parameterized.TestCase):
     self.assertEqual(layer.output_latency, 0)
 
 
-class SequenceLayerConfigTest(parameterized.TestCase):
+class SequenceLayerConfigTest(SequenceLayerTest):
 
   @abc.abstractmethod
   def get_config_base_cls(self) -> type[types.SequenceLayerConfig]:
