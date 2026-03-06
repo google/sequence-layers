@@ -281,6 +281,8 @@ class SteppableTest(parameterized.TestCase):
     self.assertTrue(layer.supports_step)
     self.assertEqual(layer.input_latency, 0)
     self.assertEqual(layer.output_latency, 0)
+    self.assertEqual(layer.get_accumulated_input_latency(0), 0)
+    self.assertEqual(layer.get_accumulated_output_latency(0), 0)
 
 
 class SequenceLayerConfigTest(SequenceLayerTest):

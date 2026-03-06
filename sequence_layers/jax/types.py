@@ -784,10 +784,12 @@ class Steppable(types.Steppable):
     # to integer here.
     return int(self.input_latency * self.output_ratio)
 
+  @override
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     """Returns the accumulated input latency of this layer."""
     return math.ceil(input_latency / self.output_ratio) + self.input_latency
 
+  @override
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     """Returns the accumulated output latency of this layer."""
     output_ratio = self.output_ratio
