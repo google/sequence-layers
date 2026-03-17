@@ -110,6 +110,11 @@ class DotProductAttention(types.Emitting):
     sink_scalars_init: nn.initializers.Initializer = (
         nn.initializers.zeros_init()
     )
+    # If True, when training in mixed precision (e.g. query and keys in
+    # bfloat16), sets logits einsum `preferred_element_dtype` to float32 to
+    # accumulate the logits in float32 instead of simply upcasting the output of
+    # the logits einsum to float32.
+    experimental_accumulate_logits_in_float32: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -567,6 +572,7 @@ class DotProductAttention(types.Emitting):
         + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
         sink_value_embeddings=sink_value_embeddings,
+        experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
     emits = common.CrossAttentionEmits(
         {self.config.source_name: types.Sequence(probabilities, query.mask)}

@@ -863,6 +863,7 @@ def dot_product_attention(
     num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nk h'] | None,
+    experimental_accumulate_logits_in_float32: bool = False,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
     jt.Float[jt.ArrayT, 'b q nq k+{num_sink_positions}'],
@@ -906,6 +907,8 @@ def dot_product_attention(
     sink_key_logits: Logits used to sink the attention [B, N, T, K].
     sink_value_embeddings: Value embeddings corresponding to the sink keys [K,
       N, H].
+    experimental_accumulate_logits_in_float32: If True, accumulate attention
+      logits in float32 for improved numerical stability.
 
   Returns:
     context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
@@ -943,6 +946,7 @@ def dot_product_attention(
         num_sink_positions,
         sink_key_logits,
         sink_value_embeddings,
+        experimental_accumulate_logits_in_float32,
     )
 
   q_dtype = utils.get_promoted_dtype(queries.dtype, dtype=compute_dtype)
@@ -954,8 +958,17 @@ def dot_product_attention(
   keys = _scale_key(keys.astype(q_dtype), per_dim_key_scale)
   queries = queries.astype(qk_dtype)
   keys = keys.astype(qk_dtype)
+  logit_element_type = (
+      jnp.float32 if experimental_accumulate_logits_in_float32 else None
+  )
   if get_logits_fn is None:
-    logits = jnp.einsum('BiNH,BjNH->BNij', queries, keys, precision=precision)
+    logits = jnp.einsum(
+        'BiNH,BjNH->BNij',
+        queries,
+        keys,
+        precision=precision,
+        preferred_element_type=logit_element_type,
+    )
   else:
     logits = get_logits_fn(queries, keys, precision).astype(qk_dtype)
 
@@ -1051,6 +1064,7 @@ def multi_key_value_dot_product_attention(
     ),
     zero_fully_masked: bool,
     compute_dtype: Any | types.DType | None,
+    experimental_accumulate_logits_in_float32: bool = False,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
     list[jt.Float[jt.ArrayT, 'b q nq _']],
@@ -1091,6 +1105,8 @@ def multi_key_value_dot_product_attention(
     zero_fully_masked: Outputs all-zeros context vectors for queries which have
       nothing to attend to (i.e. all possible keys are masked).
     compute_dtype: The dtype to use for computations.
+    experimental_accumulate_logits_in_float32: If True, accumulate attention
+      logits in float32 for improved numerical stability.
 
   Returns:
     context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
@@ -1133,11 +1149,18 @@ def multi_key_value_dot_product_attention(
 
   queries = queries.astype(qk_dtype)
 
+  logit_element_type = (
+      jnp.float32 if experimental_accumulate_logits_in_float32 else None
+  )
   logit_buffers = []
   for keys_i in keys:
     keys_i = keys_i.astype(qk_dtype)
     logits_i = jnp.einsum(
-        'BiNH,BjNH->BNij', queries, keys_i, precision=precision
+        'BiNH,BjNH->BNij',
+        queries,
+        keys_i,
+        precision=precision,
+        preferred_element_type=logit_element_type,
     )
 
     # Cap attention logits before masking.
@@ -1216,6 +1239,7 @@ def _dot_product_attention_gqa(
     num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nk h'] | None,
+    experimental_accumulate_logits_in_float32: bool = False,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
     jt.Float[jt.ArrayT, 'b q nq k+{num_sink_positions}'],
@@ -1257,6 +1281,8 @@ def _dot_product_attention_gqa(
       query_time, num_sink_positions].
     sink_value_embeddings: Value embeddings corresponding to the sink keys
       [num_sink_positions, num_key_value_heads, units_per_head].
+    experimental_accumulate_logits_in_float32: If True, accumulate attention
+      logits in float32 for improved numerical stability.
 
   Returns:
     context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
@@ -1287,7 +1313,16 @@ def _dot_product_attention_gqa(
       queries, axis=2, shape=(num_kv_heads, num_query_heads_per_kv_head)
   )
 
-  logits = jnp.einsum('BjKH,BiKQH->BKQij', keys, queries, precision=precision)
+  logit_element_type = (
+      jnp.float32 if experimental_accumulate_logits_in_float32 else None
+  )
+  logits = jnp.einsum(
+      'BjKH,BiKQH->BKQij',
+      keys,
+      queries,
+      precision=precision,
+      preferred_element_type=logit_element_type,
+  )
 
   if logit_bias is not None:
     if logit_bias.shape[1] == 1:
@@ -1675,6 +1710,7 @@ def multi_key_value_dot_product_flash_attention(
     precision: nn.linear.PrecisionLike,
     compute_dtype: Any | types.DType | None,
     remat: bool = False,
+    experimental_accumulate_logits_in_float32: bool = False,
 ) -> jt.Float[jt.ArrayT, 'b q nq h']:
   """Computes "multi key-value" dot product flash attention with queries.
 
@@ -1717,6 +1753,8 @@ def multi_key_value_dot_product_flash_attention(
       online softmax weighted sum state operations are performed in float32
       regardless of this value for numerical stability.
     remat: Whether to rematerialize the logits function.
+    experimental_accumulate_logits_in_float32: If True, accumulate attention
+      logits in float32 for improved numerical stability.
 
   Returns:
     context_vectors: A [batch_size, query_time, num_query_heads, units_per_head]
@@ -1794,8 +1832,15 @@ def multi_key_value_dot_product_flash_attention(
     query_data = utils.split_dimension(
         query.queries, axis=2, shape=(query_heads_per_kv_head, num_key_heads)
     )
+    logit_element_type = (
+        jnp.float32 if experimental_accumulate_logits_in_float32 else None
+    )
     logits = jnp.einsum(
-        'biqnh,bjnh->biqnj', query_data, key.keys, precision=precision
+        'biqnh,bjnh->biqnj',
+        query_data,
+        key.keys,
+        precision=precision,
+        preferred_element_type=logit_element_type,
     )
     logits = logits.astype(jnp.float32)
 
@@ -1938,6 +1983,7 @@ def local_dot_product_attention(
     num_sink_positions: int,
     sink_key_logits: jt.Float[jt.ArrayT, 'b nq q s'] | None,
     sink_value_embeddings: jt.Float[jt.ArrayT, 's nq h'] | None,
+    experimental_accumulate_logits_in_float32: bool = False,
 ) -> tuple[
     jt.Float[jt.ArrayT, 'b q nq h'],
     jt.Float[
@@ -2004,6 +2050,8 @@ def local_dot_product_attention(
     sink_key_logits: Logits used to sink the attention [B, N, T, K].
     sink_value_embeddings: Value embeddings corresponding to the sink keys [K,
       N, H].
+    experimental_accumulate_logits_in_float32: If True, accumulate attention
+      logits in float32 for improved numerical stability.
 
   Returns:
     context_vectors: A [batch_size, query_time, num_heads, units_per_head]
@@ -2102,11 +2150,15 @@ def local_dot_product_attention(
         qk_dtype
     )
   else:
+    logit_element_type = (
+        jnp.float32 if experimental_accumulate_logits_in_float32 else None
+    )
     logits = jnp.einsum(
         'BuwNH,BucNH->BNuwc',
         queries_blocks,
         keys_blocks,
         precision=precision,
+        preferred_element_type=logit_element_type,
     )
 
   # Cap attention logits before masking.
