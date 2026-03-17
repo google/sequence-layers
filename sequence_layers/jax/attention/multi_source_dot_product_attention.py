@@ -100,6 +100,11 @@ class MultiSourceDotProductAttention(types.Emitting):
     compute_dtype: types.DType | None = None
     # The dtype of the layer's parameters.
     param_dtype: types.DType = jnp.float32
+    # If True, when training in mixed precision (e.g. query and keys in
+    # bfloat16), sets logits einsum `preferred_element_dtype` to float32 to
+    # accumulate the logits in float32 instead of simply upcasting the output of
+    # the logits einsum to float32.
+    experimental_accumulate_logits_in_float32: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -489,6 +494,7 @@ class MultiSourceDotProductAttention(types.Emitting):
         per_dim_scale=self._per_dim_scale,
         query_scale=self.config.query_scale,
         compute_dtype=compute_dtype,
+        experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
     emits = ()
     # Context vectors contain invalid data in padding regions.

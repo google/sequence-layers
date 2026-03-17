@@ -60,10 +60,8 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     # Configuration for the query, key and value input projection parameters.
     # If num_kv_heads is set, must not be CombinedQueryKeyValueProjection.
     # If shared_kv_projection is set, must be QueryAndSharedKeyValueProjection.
-    input_projection: common.QueryKeyValueProjectionConfig = (
-        dataclasses.field(
-            default_factory=common.CombinedQueryKeyValueProjection
-        )
+    input_projection: common.QueryKeyValueProjectionConfig = dataclasses.field(
+        default_factory=common.CombinedQueryKeyValueProjection
     )
     # Optional query processing network. Useful to apply stateful processing to
     # the queries, e.g. enabling RoPE.
@@ -109,6 +107,11 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     flash_attention_query_block_size: int | None = None
     flash_attention_key_block_size: int | None = None
 
+    # If True, when training in mixed precision (e.g. query and keys in
+    # bfloat16), sets logits einsum `preferred_element_dtype` to float32 to
+    # accumulate the logits in float32 instead of simply upcasting the output of
+    # the logits einsum to float32.
+    experimental_accumulate_logits_in_float32: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -568,6 +571,7 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
         query_scale=self.config.query_scale,
         precision=self.config.precision,
         compute_dtype=compute_dtype,
+        experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
 
     # Preserve last kv_buffer_size timesteps as state for next step.
@@ -683,6 +687,7 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
         query_scale=self.config.query_scale,
         precision=self.config.precision,
         compute_dtype=compute_dtype,
+        experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
 
     emits = ()

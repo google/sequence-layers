@@ -121,6 +121,11 @@ class LocalDotProductSelfAttention(types.Emitting):
     # * Incompatible with relative_position_embedding.
     # * Requires streaming step sizes of 1.
     use_kv_cache_ringbuffer: bool = False
+    # If True, when training in mixed precision (e.g. query and keys in
+    # bfloat16), sets logits einsum `preferred_element_dtype` to float32 to
+    # accumulate the logits in float32 instead of simply upcasting the output of
+    # the logits einsum to float32.
+    experimental_accumulate_logits_in_float32: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -653,6 +658,7 @@ class LocalDotProductSelfAttention(types.Emitting):
               get_logits_fn=None,
               zero_fully_masked=self.config.zero_fully_masked,
               compute_dtype=compute_dtype,
+              experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
           )
       )
       probabilities = jnp.concatenate(probabilities, axis=-1)
@@ -677,6 +683,7 @@ class LocalDotProductSelfAttention(types.Emitting):
           + self.config.use_sink_scalars,
           sink_key_logits=sink_key_logits,
           sink_value_embeddings=self._sink_value_embeddings,
+          experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
       )
 
     # Update KV caches and state.
@@ -796,6 +803,7 @@ class LocalDotProductSelfAttention(types.Emitting):
         + self.config.use_sink_scalars,
         sink_key_logits=sink_key_logits,
         sink_value_embeddings=self._sink_value_embeddings,
+        experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
     emits = common.SelfAttentionEmits(types.Sequence(probabilities, x.mask))
 
