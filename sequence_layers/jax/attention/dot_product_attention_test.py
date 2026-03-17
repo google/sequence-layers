@@ -802,6 +802,112 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         grad_rtol=1e-5,
     )
 
+  def test_recompute_kv_per_step(self):
+    """Tests that recompute_kv_per_step re-reads source from constants."""
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_time, source_channels = 2, 7, 4
+    num_heads, units_per_head = 3, 5
+    source_name = 'source'
+    channels = 3
+
+    # Create two layers: one with recompute, one without.
+    config_kwargs = dict(
+        source_name=source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        precision=jax.lax.Precision.HIGHEST,
+        name='dot_product_attention',
+    )
+    l_recompute = dot_product_attention.DotProductAttention.Config(
+        **config_kwargs, recompute_kv_per_step=True
+    ).make()
+    l_cached = dot_product_attention.DotProductAttention.Config(
+        **config_kwargs, recompute_kv_per_step=False
+    ).make()
+
+    source1 = test_utils.random_sequence(
+        batch_size, source_time, source_channels
+    )
+    source2 = test_utils.random_sequence(
+        batch_size, source_time, source_channels
+    )
+    constants1 = {source_name: source1}
+    constants2 = {source_name: source2}
+
+    x = test_utils.random_sequence(batch_size, 1, channels)
+
+    # Init both layers with the same params using source1.
+    l_recompute = self.init_and_bind_layer(
+        key, l_recompute, x, constants=constants1
+    )
+    l_cached = self.init_and_bind_layer(key, l_cached, x, constants=constants1)
+
+    # Get initial states (both use source1 for init).
+    state_recompute = l_recompute.get_initial_state(
+        batch_size, x.channel_spec, training=False, constants=constants1
+    )
+    state_cached = l_cached.get_initial_state(
+        batch_size, x.channel_spec, training=False, constants=constants1
+    )
+
+    # Step with source1 — both should produce the same output.
+    y_recompute_s1, state_recompute, _ = l_recompute.step_with_emits(
+        x, state_recompute, training=False, constants=constants1
+    )
+    y_cached_s1, state_cached, _ = l_cached.step_with_emits(
+        x, state_cached, training=False, constants=constants1
+    )
+    self.assertSequencesClose(y_recompute_s1, y_cached_s1, atol=1e-5)
+
+    # Step with source2 — only recompute layer should change.
+    y_recompute_s2, _, _ = l_recompute.step_with_emits(
+        x, state_recompute, training=False, constants=constants2
+    )
+    y_cached_s2, _, _ = l_cached.step_with_emits(
+        x, state_cached, training=False, constants=constants2
+    )
+
+    # Recompute layer: output should differ when source changes.
+    with self.assertRaises(AssertionError):
+      self.assertSequencesClose(y_recompute_s1, y_recompute_s2, atol=1e-5)
+
+    # Cached layer: output should be the same regardless of source change
+    # (K/V were cached at init from source1).
+    self.assertSequencesClose(y_cached_s1, y_cached_s2, atol=1e-5)
+
+  @parameterized.parameters(5, 11)
+  def test_recompute_kv_per_step_verify_contract(self, time):
+    """Tests that recompute_kv_per_step passes the standard contract."""
+    key = jax.random.PRNGKey(1234)
+    batch_size, source_time, source_channels = 2, 7, 4
+    num_heads, units_per_head = 3, 5
+    source_name = 'source'
+
+    l = dot_product_attention.DotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        recompute_kv_per_step=True,
+        name='dot_product_attention',
+    ).make()
+
+    source = test_utils.random_sequence(
+        batch_size, source_time, source_channels
+    )
+    constants = {source_name: source}
+    channels = 3
+
+    x = test_utils.random_sequence(batch_size, time, channels)
+    l = self.init_and_bind_layer(key, l, x, constants=constants)
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        grad_atol=1e-5,
+        grad_rtol=1e-5,
+    )
+
 
 if __name__ == '__main__':
   test_utils.main()
