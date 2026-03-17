@@ -115,6 +115,13 @@ class DotProductAttention(types.Emitting):
     # accumulate the logits in float32 instead of simply upcasting the output of
     # the logits einsum to float32.
     experimental_accumulate_logits_in_float32: bool = False
+    # If True, re-reads the source sequence from constants and recomputes K/V
+    # projections on each step() instead of using cached K/V from
+    # get_initial_state(). This is useful for cross-attention where the source
+    # changes per step, e.g. a streaming blockwise encoder-decoder model where
+    # the encoder is bidirectional and therefore needs to be re-computed after
+    # each block.
+    recompute_kv_per_step: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -351,6 +358,25 @@ class DotProductAttention(types.Emitting):
       )
     return query_positions
 
+  def _project_kv(
+      self,
+      *,
+      training: bool,
+      constants: types.Constants | None = None,
+  ) -> tuple[types.Sequence, types.Sequence]:
+    """Reads source from constants and computes key/value projections."""
+    source = self._get_source(constants)
+    keys, values = self.input_projection.get_kv(source)
+    if self.key_network:
+      keys = self.key_network.layer(
+          keys, training=training, constants=constants
+      )
+    if self.value_network:
+      values = self.value_network.layer(
+          values, training=training, constants=constants
+      )
+    return keys, values
+
   def get_initial_state(
       self,
       batch_size: int,
@@ -359,21 +385,6 @@ class DotProductAttention(types.Emitting):
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.State:
-    # Pre-process the source with key/value projections and networks.
-    source = self._get_source(constants)
-
-    keys, values = self.input_projection.get_kv(source)
-
-    if self.key_network:
-      keys = self.key_network.layer(
-          keys, training=training, constants=constants
-      )
-
-    if self.value_network:
-      values = self.value_network.layer(
-          values, training=training, constants=constants
-      )
-
     if self.query_network:
       query_state = self.query_network.get_initial_state(
           batch_size,
@@ -389,6 +400,12 @@ class DotProductAttention(types.Emitting):
 
     time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
 
+    if self.config.recompute_kv_per_step:
+      # K/V will be recomputed from constants at each step, there's no need to
+      # store them in state.
+      return (query_state, time_step)
+
+    keys, values = self._project_kv(training=training, constants=constants)
     # Mask before storing in state:
     keys = keys.mask_invalid()
     values = values.mask_invalid()
@@ -430,7 +447,15 @@ class DotProductAttention(types.Emitting):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.State, types.Emits]:
-    keys, values, mask, query_state, time_step = state
+    if self.config.recompute_kv_per_step:
+      query_state, time_step = state
+      keys, values = self._project_kv(training=training, constants=constants)
+      keys = keys.mask_invalid()
+      values = values.mask_invalid()
+      mask = utils.combine_mask(keys.mask, values.mask)
+      keys, values = keys.values, values.values
+    else:
+      keys, values, mask, query_state, time_step = state
 
     x_num_timesteps = x.shape[1]
 
@@ -444,7 +469,8 @@ class DotProductAttention(types.Emitting):
 
     y, emits = self._attention(
         queries,
-        # get_initial_state masks before storing in state.
+        # Keys and values are already masked (either from cached state
+        # or freshly computed above).
         types.MaskedSequence(keys, mask),
         types.MaskedSequence(values, mask),
         training=training,
@@ -452,7 +478,10 @@ class DotProductAttention(types.Emitting):
         time_step=time_step,
     )
     time_step += x_num_timesteps
-    state = (keys, values, mask, query_state, time_step)
+    if self.config.recompute_kv_per_step:
+      state = (query_state, time_step)
+    else:
+      state = (keys, values, mask, query_state, time_step)
     return y, state, emits
 
   @types.check_layer_with_emits
@@ -463,19 +492,7 @@ class DotProductAttention(types.Emitting):
       training: bool,
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Emits]:
-    source = self._get_source(constants)
-
-    keys, values = self.input_projection.get_kv(source)
-
-    if self.key_network:
-      keys = self.key_network.layer(
-          keys, training=training, constants=constants
-      )
-
-    if self.value_network:
-      values = self.value_network.layer(
-          values, training=training, constants=constants
-      )
+    keys, values = self._project_kv(training=training, constants=constants)
 
     # No mask required, since query timesteps are independent.
     queries = self.input_projection.get_q(x)
