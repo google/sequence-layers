@@ -27,6 +27,12 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+import jax
+import jax.numpy as jnp
+import numpy as np
+import typing
+from absl.testing import parameterized
+from sequence_layers.abstract import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
@@ -254,131 +260,8 @@ def standard_dtype_configs(
 
   return reduced
 
-
-def zip_longest(
-    targets: Iterable[Iterable[Any]],
-    sources: Iterable[_T],
-) -> list[_T]:
-  """Applies zip_longest, specialized to @parameterized's argument format.
-
-  Args:
-    targets: Iterable of parameterized test arguments.
-    sources: Iterable of parameterized test arguments. If `targets` is a mapping
-      `sources` must be a mapping as well.
-
-  Returns:
-    A list of the zipped arguments, of the type of `targets` and with each
-    zipped argument internally sorted (target, source). If either input sequence
-    was longer, the last element of the shorter input sequence is repeated.
-  """
-
-  results = []
-  prev_source, prev_target = None, None
-  for source, target in itertools.zip_longest(sources, targets):
-    # If either runs out ahead-of-time, we repeat the final non-None element.
-    # (This is safest as we cannot inspect the function's defaults.)
-    if source is None:
-      source = prev_source
-    elif target is None:
-      target = prev_target
-
-    if isinstance(target, Mapping):
-      assert isinstance(source, Mapping)
-      results.append({**target, **source})
-    elif isinstance(sources, Iterable):
-      # target is a non-mapping iterable, like tuple or list.
-      if isinstance(source, Mapping):
-        # To match the target, we replace the source with its unlabeled values.
-        source = source.values()
-      results.append((*target, *source))
-      prev_source, prev_target = source, target
-    else:
-      raise NotImplementedError(
-          f'Targets of type {type(target)=} are unsupported.'
-      )
-
-  return results
-
-
-def named_product(
-    first: Iterable[TypingSequence[Any] | Mapping[str, Any]],
-    second: Iterable[TypingSequence[Any] | Mapping[str, Any]],
-) -> Callable[[_TestFnT], _TestFnT]:
-  """Builds named parameters from the product of iterators of named parameters.
-
-  As in parameterized.named_parameters, if an iterator's items are sequences,
-  the first element is interpreted as the name. If an iterator's items are
-  mappings, the `testcase_name` key is used.
-
-  Args:
-    first: Iterable of named parameters, whose names will be the first part of
-      the named product's test names.
-    second: Iterable of named parameters, whose names will be the second part of
-      the named product's test names.
-
-  Returns:
-    A decorator that calls the test function with the cartesian product of the
-    given iterators, whose items are named parameters with names of the form
-    `{first_item_name}_{second_item_name}`. If both iterators' items are
-    mappings, the product's items are mappings; otherwise they are ordered
-    tuples.
-
-    For example, if `first` is
-    `[{**foo, 'testcase_name': 'foo'}, {**bar, 'testcase_name': 'bar'}]` and
-    `second` is `[['baz', *baz], ['qux', *qux]]`, the items will be
-    `('foo_baz', *foo.values(), *baz), ('foo_qux', *foo.values(), *qux), ...`
-
-  Raises:
-    ValueError: A testcase_name is missing; either an iterator item is empty, or
-      one is a mapping without a `testcase_name` key.
-  """
-
-  results = []
-
-  for p1, p2 in itertools.product(first, second):
-
-    for source, parameters in enumerate([p1, p2]):
-      if isinstance(parameters, Mapping):
-        if 'testcase_name' not in parameters:
-          raise ValueError(
-              f'Mapping {parameters} from iterable #{source+1} does not have'
-              ' key `testcase_name`.'
-          )
-      elif not parameters:
-        raise ValueError(
-            f'An sequence from iterable #{source+1} is empty; the first entry'
-            ' is expected to be a testcase name.'
-        )
-
-    # When both are mappings, we merge by key:
-    if isinstance(p1, Mapping) and isinstance(p2, Mapping):
-      testcase_name = f'{p1["testcase_name"]}_{p2["testcase_name"]}'
-      p1 = {k: v for k, v in p1.items() if k != 'testcase_name'}
-      p2 = {k: v for k, v in p2.items() if k != 'testcase_name'}
-      results.append({**p1, **p2, 'testcase_name': testcase_name})
-
-    # Else, we return an ordered tuple based on each parameter set's order:
-    else:
-
-      if isinstance(p1, Mapping):
-        p1_name = p1['testcase_name']
-        p1 = tuple(v for k, v in p1.items() if k != 'testcase_name')
-      else:
-        p1_name = p1[0]
-        p1 = p1[1:]
-
-      if isinstance(p2, Mapping):
-        p2_name = p2['testcase_name']
-        p2 = tuple(v for k, v in p2.items() if k != 'testcase_name')
-      else:
-        p2_name = p2[0]
-        p2 = p2[1:]
-
-      testcase_name = f'{p1_name}_{p2_name}'
-      results.append((testcase_name, *p1, *p2))
-
-  return parameterized.named_parameters(*results)
-
+zip_longest = test_utils.zip_longest
+named_product = test_utils.named_product
 
 def get_grad_tols(
     l: types.SequenceLayer,
@@ -777,8 +660,84 @@ def _mask_and_pad_to_max_length(
   return a, b
 
 
-class SequenceLayerTest(parameterized.TestCase):
+class SequenceLayerTest(test_utils.SequenceLayerTest):
   """Base class for SequenceLayer tests."""
+
+  @typing.override
+  def get_backend(self):
+    return jnp
+
+  @property
+  @typing.override
+  def Sequence(self):
+    return types.Sequence
+
+  @property
+  @typing.override
+  def MaskedSequence(self):
+    return types.MaskedSequence
+
+  @typing.override
+  def random_sequence(
+      self,
+      *dims: int,
+      dtype=None,
+      random_mask: bool = False,
+      random_lengths: bool | None = None,
+      low: int | None = 0,
+      high: int | None = 10,
+      low_length: int = 0,
+      high_length: int | None = None,
+  ) -> Any:
+    """Generates a random Sequence with dims dimension."""
+    xp = self.get_backend()
+    if dtype is None:
+      dtype = xp.float32
+
+    if random_lengths is None:
+      random_lengths = not random_mask
+    if random_mask and random_lengths:
+      raise ValueError('Must not specify random_mask and random_lengths.')
+    if len(dims) < 2:
+      raise ValueError(
+          'random_sequence expects at least 2 dimensions, got: %s' % (dims,)
+      )
+
+    try:
+        np_dtype = np.dtype(dtype)
+        is_integer = np.issubdtype(np_dtype, np.integer)
+        is_complex = np.issubdtype(np_dtype, np.complexfloating)
+    except:
+        is_integer = 'int' in str(dtype)
+        is_complex = 'complex' in str(dtype)
+
+    if is_complex:
+      np_values = np.random.normal(size=dims) + 1j * np.random.normal(size=dims)
+    elif is_integer:
+      np_values = np.random.randint(low, high, size=dims)
+    else:
+      np_values = np.random.normal(size=dims)
+
+    batch_size, time = dims[0], dims[1]
+    values = xp.array(np_values).astype(dtype)
+    if random_mask:
+      mask = np.random.uniform(size=(batch_size, time)) > 0.5
+    else:
+      if time > 0:
+        if random_lengths:
+          if high_length is None:
+            high_length = time + 1
+          lengths = np.random.randint(
+              low_length, high_length, size=[batch_size]
+          ).astype(np.int32)
+        else:
+          lengths = np.full([batch_size], time).astype(np.int32)
+      else:
+        lengths = np.full([batch_size], 0).astype(np.int32)
+
+      mask = np.arange(time)[np.newaxis, :] < lengths[:, np.newaxis]
+
+    return self.Sequence(values, xp.array(mask)).mask_invalid()
 
   def setUp(self):
     super().setUp()
@@ -834,6 +793,11 @@ class SequenceLayerTest(parameterized.TestCase):
       variables = randomize_weights_fn(variables)
 
     return layer.bind(variables)
+
+  def init_layer(self, layer, x, **kwargs):
+      """Initialize and bind variables for JAX."""
+      key = jax.random.PRNGKey(1234)
+      return self.init_and_bind_layer(key, layer, x, **kwargs)
 
   def verify_masked(self, x: types.Sequence):
     """Asserts all invalid timesteps in x have values masked to zero."""
@@ -1316,9 +1280,9 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
-    if constants is None or self.config.expected_constant not in constants:
-      raise ValueError(f'{self.config.expected_constant=} not present')
-    return super().get_output_shape(input_shape, constants=constants)
+      if constants is None or self.config.expected_constant not in constants:
+          raise ValueError(f'{self.config.expected_constant=} not present')
+      return super().get_output_shape(input_shape, constants=constants)
 
   def layer(
       self,
