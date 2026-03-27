@@ -299,6 +299,7 @@ class Steppable(metaclass=abc.ABCMeta):
   ) -> 'Sequence':
     """Process this layer layer-wise."""
 
+  @abc.abstractmethod
   def layer_with_emits(
       self,
       x: 'Sequence',
@@ -307,14 +308,12 @@ class Steppable(metaclass=abc.ABCMeta):
       constants: Constants | None = None,
   ) -> tuple['Sequence', Emits]:
     """Process this layer layer-wise, producing emitted tensors."""
-    outputs = self.layer(x, training=training, constants=constants)
-    return outputs, ()
 
+  @abc.abstractmethod
   def __call__(
       self, x: 'Sequence', training: bool, constants: Constants | None = None
   ) -> 'Sequence':
     """An alias for layer."""
-    return self.layer(x, training=training, constants=constants)
 
   @abc.abstractmethod
   def step(
@@ -327,6 +326,7 @@ class Steppable(metaclass=abc.ABCMeta):
   ) -> tuple['Sequence', State]:
     """Process this layer step-wise."""
 
+  @abc.abstractmethod
   def step_with_emits(
       self,
       x: 'Sequence',
@@ -336,8 +336,6 @@ class Steppable(metaclass=abc.ABCMeta):
       constants: Constants | None = None,
   ) -> tuple['Sequence', State, Emits]:
     """Process this layer step-wise, producing emitted tensors."""
-    y, state = self.step(x, state, training=training, constants=constants)
-    return y, state, ()
 
   @abc.abstractmethod
   def get_initial_state(

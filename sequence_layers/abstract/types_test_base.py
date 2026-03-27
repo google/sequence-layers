@@ -284,6 +284,31 @@ class SteppableTest(parameterized.TestCase):
     self.assertEqual(layer.get_accumulated_input_latency(0), 0)
     self.assertEqual(layer.get_accumulated_output_latency(0), 0)
 
+  def test_steppable_mixins_alias(self):
+    import unittest.mock
+    layer = self.create_steppable()
+
+    # Disable mock if layer is immutable and mock fails, but patch.object usually works.
+    with unittest.mock.patch.object(layer, 'layer', return_value='mock_layer_out') as mock_layer:
+      # Test __call__
+      call_out = layer.__call__('mock_x', training=True, constants={'c': 1})
+      self.assertEqual(call_out, 'mock_layer_out')
+      mock_layer.assert_called_with('mock_x', training=True, constants={'c': 1})
+
+      # Test layer_with_emits
+      mock_layer.reset_mock()
+      out, emits = layer.layer_with_emits('mock_x', training=False, constants=None)
+      self.assertEqual(out, 'mock_layer_out')
+      self.assertEqual(emits, ())
+      mock_layer.assert_called_with('mock_x', training=False, constants=None)
+
+    with unittest.mock.patch.object(layer, 'step', return_value=('step_out', 'state_out')) as mock_step:
+      out, state, emits = layer.step_with_emits('mock_x', 'state_in', training=True, constants=None)
+      self.assertEqual(out, 'step_out')
+      self.assertEqual(state, 'state_out')
+      self.assertEqual(emits, ())
+      mock_step.assert_called_with('mock_x', 'state_in', training=True, constants=None)
+
 
 class SequenceLayerConfigTest(SequenceLayerTest):
 
