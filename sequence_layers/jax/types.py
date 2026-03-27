@@ -87,17 +87,17 @@ Sharding = sharding_lib.Sharding
 # Sequence type aliases:
 MASK_DTYPE = np.bool_
 
-# A rank 2+ tensor of any type.
+# A rank 2+ array of any type.
 ValuesT = TypeVar('ValuesT', bound=jt.Shaped[jt.ArrayT, 'B T *C'])
 
-# A boolean batched mask tensor. True indicates a given timepoint is valid, and
+# A boolean batched mask array. True indicates a given timepoint is valid, and
 # False indicates it is invalid.
 MaskT = TypeVar('MaskT', bound=jt.Bool[jt.ArrayT, 'B T'])
 
-# An integer batched lengths tensor.
+# An integer batched lengths array.
 LengthsT = TypeVar('LengthsT', bound=jt.Int[jt.ArrayT, 'B'])
 
-# A rank 2 boolean tensor with unit dimensions inserted to match their
+# A rank 2 boolean array with unit dimensions inserted to match their
 # corresponding values (e.g. for broadcasting).
 ExpandedMaskT = TypeVar('ExpandedMaskT', bound=jt.Bool[jt.ArrayT, 'B T *C'])
 
@@ -537,7 +537,7 @@ class Sequence(types.Sequence[ValuesT, MaskT], struct.PyTreeNode):
     return self
 
 
-class MaskedSequence(Sequence[ValuesT, MaskT]):
+class MaskedSequence(Sequence[ValuesT, MaskT], types.MaskedSequence[ValuesT, MaskT]):
   """Sequence whose invalid timesteps are masked to zero."""
 
   @override
@@ -899,6 +899,7 @@ class Steppable(types.Steppable):
         truncated to only represent valid frames.
     """
 
+  @override
   def layer_with_emits(
       self,
       x: Sequence,
@@ -906,11 +907,11 @@ class Steppable(types.Steppable):
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, Emits]:
-    """Process this layer layer-wise, producing emitted tensors.
+    """Process this layer layer-wise, producing emitted arrays.
 
     This is like `layer`, except it has an additional return value which is the
-    "emitted" tensors for the layer. The emitted tensors are a structure of
-    tensors whose whose values are `ArrayLike`s or `Sequence`s.
+    "emitted" arrays for the layer. The emitted arrays are a structure of
+    arrays whose whose values are `ArrayLike`s or `Sequence`s.
 
     Args:
       x: Input sequence with values shaped [b, t_i, ...].
@@ -924,11 +925,12 @@ class Steppable(types.Steppable):
       y: The outputs corresponding to this layer with values shaped
         [b, t_o, ...] where `t_o == t_i * output_ratio`. t_o may have been
         truncated to only represent valid frames.
-      emits: A nest of emitted tensors or Sequences.
+      emits: A nest of emitted arrays or Sequences.
     """
     outputs = self.layer(x, training=training, constants=constants)
     return outputs, ()
 
+  @override
   def __call__(
       self, x: Sequence, training: bool, constants: Constants | None = None
   ) -> Sequence:
@@ -944,12 +946,12 @@ class Steppable(types.Steppable):
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State]:
-    """Process this layer step-wise, producing emitted tensors.
+    """Process this layer step-wise, producing emitted arrays.
 
     Args:
       x: Input sequence with values shaped [b, t_i, ...], where t_i is a
         multiple of block_size.
-      state: A structure of state tensors matching get_initial_state. The
+      state: A structure of state arrays matching get_initial_state. The
         previous state for this layer.
       training: Python bool. Whether we are in training mode.
       constants: A dictionary of constant name to ArrayLike or sl.Sequence.
@@ -960,10 +962,11 @@ class Steppable(types.Steppable):
     Returns:
       y: The outputs corresponding to this step with values shaped [b, t_o, ...]
         where `t_o == t_i * output_ratio`.
-      state: A structure of state tensors matching get_initial_state. The
+      state: A structure of state arrays matching get_initial_state. The
         new state for this layer.
     """
 
+  @override
   def step_with_emits(
       self,
       x: Sequence,
@@ -972,16 +975,16 @@ class Steppable(types.Steppable):
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State, Emits]:
-    """Process this layer step-wise, producing emitted tensors.
+    """Process this layer step-wise, producing emitted arrays.
 
     This is like `step`, except it has an additional return value which is the
-    "emitted" tensors for the step. The emitted tensors are a structure of
-    tensors whose values are `ArrayLike`s or `Sequence`s.
+    "emitted" arrays for the step. The emitted arrays are a structure of
+    arrays whose values are `ArrayLike`s or `Sequence`s.
 
     Args:
       x: Input sequence with values shaped [b, t_i, ...], where t_i is a
         multiple of block_size.
-      state: A structure of state tensors matching get_initial_state. The
+      state: A structure of state arrays matching get_initial_state. The
         previous state for this layer.
       training: Python bool. Whether we are in training mode.
       constants: A dictionary of constant name to ArrayLike or sl.Sequence.
@@ -992,9 +995,9 @@ class Steppable(types.Steppable):
     Returns:
       y: The outputs corresponding to this step with values shaped [b, t_o, ...]
         where `t_o == t_i * output_ratio`.
-      state: A structure of state tensors matching get_initial_state. The
+      state: A structure of state arrays matching get_initial_state. The
         new state for this layer.
-      emits: A nest of emitted tensors or Sequences.
+      emits: A nest of emitted arrays or Sequences.
     """
     outputs, state = self.step(x, state, training=training, constants=constants)
     return outputs, state, ()
@@ -1021,14 +1024,15 @@ class Steppable(types.Steppable):
         attention layer this may contain the source sequence to attend to.
 
     Returns:
-      An integer, TensorShape or structure of integer/TensorShapes.
+      An integer, shape or structure of integer/shapes.
     """
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self, input_shape: ShapeLike, *, constants: Constants | None = None
   ) -> Shape:
-    """Returns the output shape this layer produces for an input shape.
+    """Returns the output channel shape this layer produces for an input channel shape.
 
     Args:
       input_shape: A shape representing the channels dimension of the input
@@ -1089,10 +1093,12 @@ class Steppable(types.Steppable):
     return self.get_output_spec(x.channel_spec, constants=constants)
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self, input_dtype: DType, *, constants: Constants | None = None
   ) -> DType:
     """Returns the layer's output dtype for the specified input dtype."""
+
 
   @nn.nowrap
   def get_output_spec(
@@ -1261,14 +1267,15 @@ def check_step_with_emits(step_with_emits_fn):
   return check_step_with_emits_fn
 
 
-class SequenceLayer(nn.Module, Steppable):
+class SequenceLayer(nn.Module, Steppable, types.SequenceLayer):
   """Base Module for Sequence Layers."""
 
 
-class PreservesType:
+class PreservesType(types.PreservesType):
   """A mix-in for layers that do not change the input dtype."""
 
   @nn.nowrap
+  @override
   def get_output_dtype(
       self, input_dtype: DType, *, constants: Constants | None = None
   ) -> DType:
@@ -1276,10 +1283,11 @@ class PreservesType:
     return input_dtype
 
 
-class PreservesShape:
+class PreservesShape(types.PreservesShape):
   """A mix-in for layers that do not change the input shape."""
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self, input_shape: ShapeLike, *, constants: Constants | None = None
   ) -> Shape:
@@ -1287,8 +1295,8 @@ class PreservesShape:
     return tuple(input_shape)
 
 
-class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
-  """A SequenceLayer that emits auxiliary tensors.
+class Emitting(SequenceLayer, types.Emitting):
+  """A SequenceLayer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
   step_with_emits and layer_with_emits, so that implementors need only implement
@@ -1297,6 +1305,7 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
   do not produce emits.
   """
 
+  @override
   def step(
       self,
       x: Sequence,
@@ -1311,6 +1320,7 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
     return output, state
 
   @abc.abstractmethod
+  @override
   def step_with_emits(
       self,
       x: Sequence,
@@ -1321,6 +1331,7 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
   ) -> tuple[Sequence, State, Emits]:
     pass
 
+  @override
   def layer(
       self,
       x: Sequence,
@@ -1334,6 +1345,7 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
     return outputs
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
       x: Sequence,
@@ -1344,7 +1356,7 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
     pass
 
 
-class Stateless(SequenceLayer):
+class Stateless(SequenceLayer, types.Stateless):
   """A SequenceLayer with no state over time required for step-wise processing.
 
   Sub-classes must only implement:
@@ -1367,6 +1379,7 @@ class Stateless(SequenceLayer):
   ) -> State:
     del batch_size
     del input_spec
+    del training
     del constants
     return ()
 
@@ -1380,9 +1393,31 @@ class Stateless(SequenceLayer):
   ) -> tuple[Sequence, State]:
     return self.layer(x, training=training, constants=constants), state
 
+  @abc.abstractmethod
+  def get_output_shape(
+      self, input_shape: ShapeLike, *, constants: Constants | None = None
+  ) -> Shape:
+    pass
 
-class StatelessEmitting(Emitting):
-  """A SequenceLayer with no state over time that emits auxiliary tensors.
+  @abc.abstractmethod
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    pass
+
+  @abc.abstractmethod
+  def layer(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> 'Sequence':
+    pass
+
+
+class StatelessEmitting(Emitting, types.StatelessEmitting):
+  """A SequenceLayer with no state over time that emits auxiliary arrays.
 
   Sub-classes must only implement:
   - layer_with_emits
@@ -1415,14 +1450,40 @@ class StatelessEmitting(Emitting):
       training: bool,
       constants: Constants | None = None,
   ) -> State:
+    del batch_size
+    del input_spec
+    del training
+    del constants
     return ()
 
+  @abc.abstractmethod
+  def get_output_shape(
+      self, input_shape: ShapeLike, *, constants: Constants | None = None
+  ) -> Shape:
+    pass
 
-class StatelessPointwise(PreservesShape, Stateless):
+  @abc.abstractmethod
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    pass
+
+  @abc.abstractmethod
+  def layer_with_emits(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, Emits]:
+    pass
+
+
+class StatelessPointwise(PreservesShape, Stateless, types.StatelessPointwise):
   """A SequenceLayer that has no state and operates pointwise on its input."""
 
 
-class StatelessPointwiseFunctor(StatelessPointwise, metaclass=abc.ABCMeta):
+class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunctor):
   """A stateless SequenceLayer for simple pointwise processing fns."""
 
   @abc.abstractmethod

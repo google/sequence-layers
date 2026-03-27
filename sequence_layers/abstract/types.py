@@ -16,6 +16,9 @@ Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
 DType = Any  # Can be numpy, jax, or mlx dtype
 ChannelSpec = Any  # Typically ShapeDType or compatible
+State = Any
+Constants = Any
+Emits = Any
 
 class PaddingMode(enum.Enum):
   """Supported padding modes."""
@@ -164,6 +167,16 @@ class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
 
   @classmethod
   @abc.abstractmethod
+  def from_lengths(
+      cls,
+      values: ValuesT,
+      lengths: Any,
+      is_masked: bool = False,
+  ) -> 'Sequence':
+    pass
+
+  @classmethod
+  @abc.abstractmethod
   def concatenate_sequences(cls, sequences: Iterable['Sequence']) -> 'Sequence':
     pass
 
@@ -216,7 +229,10 @@ class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
     pass
 
   @abc.abstractmethod
-  def __getitem__(self: SequenceSelf, the_slice: Any) -> SequenceSelf:
+  def __getitem__(
+    self: SequenceSelf,
+    the_slice: slice | tuple[int | slice | None | type(Ellipsis), ...],
+  ) -> SequenceSelf:
     pass
 
   @abc.abstractmethod
@@ -240,6 +256,11 @@ class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def unmask(self) -> 'Sequence':
     pass
+
+
+class MaskedSequence(Sequence[ValuesT, MaskT], metaclass=abc.ABCMeta):
+  """A sequence whose invalid timesteps are masked to zero."""
+  pass
 
 
 class SequenceLayerConfig(metaclass=abc.ABCMeta):
@@ -290,8 +311,439 @@ class Steppable(metaclass=abc.ABCMeta):
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     pass
 
+  @abc.abstractmethod
+  def layer(
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
+  ) -> Sequence:
+    """Process this layer layer-wise.
+
+    Args:
+      x: Input sequence with values shaped [b, t_i, ...].
+      training: Python bool. Whether we are in training mode.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the source sequence to attend to.
+
+    Returns:
+      y: The outputs corresponding to this layer with values shaped
+        [b, t_o, ...] where `t_o == t_i * output_ratio`. t_o may have been
+        truncated to only represent valid frames.
+    """
+
+  @abc.abstractmethod
+  def layer_with_emits(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, Emits]:
+    """Process this layer layer-wise, producing emitted arrays.
+
+    This is like `layer`, except it has an additional return value which is the
+    "emitted" arrays for the layer. The emitted arrays are a structure of
+    arrays whose values are arrays or `Sequence`s.
+
+    Args:
+      x: Input sequence with values shaped [b, t_i, ...].
+      training: Python bool. Whether we are in training mode.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the key/value sequence to attend to.
+
+    Returns:
+      y: The outputs corresponding to this layer with values shaped
+        [b, t_o, ...] where `t_o == t_i * output_ratio`. t_o may have been
+        truncated to only represent valid frames.
+      emits: A nest of emitted arrays or Sequences.
+    """
+
+  @abc.abstractmethod
+  def step(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State]:
+    """Process this layer step-wise.
+
+    Args:
+      x: Input sequence with values shaped [b, t_i, ...], where t_i is a
+        multiple of block_size.
+      state: A structure of state arrays matching get_initial_state. The
+        previous state for this layer.
+      training: Python bool. Whether we are in training mode.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the key/value sequence to attend to.
+
+    Returns:
+      y: The outputs corresponding to this step with values shaped [b, t_o, ...]
+        where `t_o == t_i * output_ratio`.
+      state: A structure of state arrays matching get_initial_state. The
+        new state for this layer.
+    """
+
+  @abc.abstractmethod
+  def step_with_emits(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State, Emits]:
+    """Process this layer step-wise, producing emitted arrays.
+
+    This is like `step`, except it has an additional return value which is the
+    "emitted" arrays for the step. The emitted arrays are a structure of
+    arrays whose values are arrays or `Sequence`s.
+
+    Args:
+      x: Input sequence with values shaped [b, t_i, ...], where t_i is a
+        multiple of block_size.
+      state: A structure of state arrays matching get_initial_state. The
+        previous state for this layer.
+      training: Python bool. Whether we are in training mode.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the key/value sequence to attend to.
+
+    Returns:
+      y: The outputs corresponding to this step with values shaped [b, t_o, ...]
+        where `t_o == t_i * output_ratio`.
+      state: A structure of state arrays matching get_initial_state. The
+        new state for this layer.
+      emits: A nest of emitted arrays or Sequences.
+    """
+
+  @abc.abstractmethod
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: ChannelSpec,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> State:
+    """Returns the initial state for this SequenceLayer.
+
+    Args:
+      batch_size: The batch size to create state for.
+      input_spec: An input ChannelSpec representing the channel shape and dtype
+        of the input that will be stepped.
+      training: Python bool. Whether we are in training mode.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the source sequence to attend to.
+
+    Returns:
+      An integer, shape, or structure of integer/shapes.
+    """
+
+  @abc.abstractmethod
+  def get_output_shape(
+      self,
+      input_shape: ShapeLike,
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    """Returns the output channel shape this layer produces for an input channel shape.
+
+    Args:
+      input_shape: A shape representing the channels dimension of the input
+        sequence (i.e. not including the batch or time dimension).
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing. For example, for an
+        attention layer this may contain the source sequence to attend to.
+
+    Returns:
+      A shape representing the output channels dimensions (i.e. not including
+      the batch or time dimension).
+    """
+
+  @abc.abstractmethod
+  def get_output_dtype(
+      self,
+      input_dtype: DType,
+      *,
+      constants: Constants | None = None,
+  ) -> DType:
+    """Returns the layer's output dtype for the specified input dtype.
+
+    Args:
+      input_dtype: The dtype of the input features.
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing.
+
+    Returns:
+      The dtype of the output features.
+    """
+
   @property
   @abc.abstractmethod
   def receptive_field(self) -> Any:
     pass
 
+
+class SequenceLayer(Steppable):
+  """Base class for Sequence Layers."""
+  pass
+
+
+# ---------------------------------------------------------------------------
+# Mixins
+# ---------------------------------------------------------------------------
+
+
+class PreservesType:
+  """A mix-in for layers that do not change the input dtype."""
+
+  @abc.abstractmethod
+  def get_output_dtype(
+      self,
+      input_dtype: DType,
+      *,
+      constants: Constants | None = None,
+  ) -> DType:
+    pass
+
+
+class PreservesShape:
+  """A mix-in for layers that do not change the input channel shape."""
+
+  @abc.abstractmethod
+  def get_output_shape(
+      self,
+      input_shape: ShapeLike,
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Stateless variants
+# ---------------------------------------------------------------------------
+
+
+class Stateless(SequenceLayer):
+  """A layer with no state over time required for step-wise processing.
+  
+  The backend must implement:
+  - get_initial_state
+  - step
+  Further sub-classes must only implement:
+  - layer
+  - get_output_shape
+  - get_output_dtype
+  """
+
+  @abc.abstractmethod
+  def get_output_shape(
+      self, input_shape: ShapeLike, *, constants: Constants | None = None
+  ) -> Shape:
+    pass
+
+  @abc.abstractmethod
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    pass
+
+  @abc.abstractmethod
+  def layer(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> Sequence:
+    pass
+
+  @abc.abstractmethod
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: ChannelSpec,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> State:
+    pass
+
+  @abc.abstractmethod
+  def step(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State]:
+    pass
+
+
+class StatelessPointwise(PreservesShape, Stateless):
+  """Stateless layer that operates pointwise (preserves shape)."""
+
+
+class StatelessPointwiseFunctor(StatelessPointwise, metaclass=abc.ABCMeta):
+  """Stateless pointwise layer defined by a fn(values, mask).
+  
+  The backend must implement:
+  - layer
+  Further sub-classes must only implement:
+  - fn
+  - mask_required
+  """
+
+  @abc.abstractmethod
+  def fn(self, values: Any, mask: Any) -> tuple[Any, Any]:
+    """Transforms each scalar in values independently."""
+
+  @property
+  @abc.abstractmethod
+  def mask_required(self) -> bool:
+    """Returns true if fn can change the sequence's masked state.
+    
+    If fn(0) -> 0, then mask_required() is False.
+    """
+
+  @abc.abstractmethod
+  def layer(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> Sequence:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Emitting variants
+# ---------------------------------------------------------------------------
+
+
+class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
+  """A Steppable layer that emits auxiliary arrays.
+
+  This is a convenience subclass that implements step and layer in terms of
+  step_with_emits and layer_with_emits.
+
+  The backend must implement:
+  - step
+  - layer
+  Further sub-classes must only implement:
+  - step_with_emits
+  - layer_with_emits
+  """
+
+  @abc.abstractmethod
+  def step(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State]:
+    pass
+
+  @abc.abstractmethod
+  def layer(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> Sequence:
+    pass
+
+  @abc.abstractmethod
+  def step_with_emits(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State, Emits]:
+    pass
+
+  @abc.abstractmethod
+  def layer_with_emits(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, Emits]:
+    pass
+
+
+class StatelessEmitting(Emitting):
+  """A Steppable layer with no state over time that emits auxiliary arrays.
+  
+  The backend must implement:
+  - get_initial_state
+  - step_with_emits
+  Further sub-classes must only implement:
+  - layer_with_emits
+  - get_output_shape
+  - get_output_dtype
+  """
+
+  @abc.abstractmethod
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: ChannelSpec,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> State:
+    pass
+
+  @abc.abstractmethod
+  def step_with_emits(
+      self,
+      x: Sequence,
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, State, Emits]:
+    pass
+
+  @abc.abstractmethod
+  def get_output_shape(
+      self, input_shape: ShapeLike, *, constants: Constants | None = None
+  ) -> Shape:
+    pass
+
+  @abc.abstractmethod
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    pass
+
+  @abc.abstractmethod
+  def layer_with_emits(
+      self,
+      x: Sequence,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple[Sequence, Emits]:
+    pass
