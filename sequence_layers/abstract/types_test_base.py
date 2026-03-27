@@ -8,6 +8,7 @@ from sequence_layers.abstract import types
 import fractions
 from absl.testing import parameterized
 import numpy as np
+import unittest.mock
 
 class SequenceLayerTest(parameterized.TestCase):
   """Base abstract test class providing common sequence testing assertions."""
@@ -265,6 +266,51 @@ class SequenceTest(SequenceLayerTest):
     # values is backend array. values.astype(dtype) should work if dtype is backend dtype.
     self.check_trees_all_equal(y.values, values.astype(dtype))
 
+  def test_mask_invalid_idempotent(self):
+    xp = self.get_backend()
+    values = xp.array([
+        [1.0, 2.0, 3.0, 4.0],
+        [10.0, 20.0, 30.0, 40.0],
+    ])
+    mask = xp.array([[True, True, False, False], [False, False, False, True]])
+
+    x = self.Sequence(values, mask)
+    masked = x.mask_invalid()
+    self.assertIsNot(masked, x)
+    self.assertIsInstance(masked, self.MaskedSequence)
+
+    masked_again = masked.mask_invalid()
+    self.assertIs(masked_again, masked)
+    self.assertIsInstance(masked_again, self.MaskedSequence)
+
+    masked2 = x.mask_invalid()
+    self.assertIsNot(masked2, masked)
+    self.assertIsInstance(masked2, self.MaskedSequence)
+
+  def test_from_lengths(self):
+    xp = self.get_backend()
+    values = xp.array(np.arange(5 * 17 * 2).reshape((5, 17, 2)).astype(np.float32))
+    lengths_np = np.array([0, 5, 10, 17, 12], dtype=np.int32)
+    mask_np = np.arange(17)[None, :] < lengths_np[:, None]
+    mask = xp.array(mask_np)
+
+    x_expected = self.Sequence(values, mask)
+    x = self.Sequence.from_lengths(x_expected.values, lengths_np)
+    self.check_trees_all_equal(x.values, x_expected.values)
+    self.check_trees_all_equal(x.mask, x_expected.mask)
+
+    # Out of range lengths are clipped to 0 or max.
+    x = self.Sequence.from_lengths(x_expected.values, [-1, 5, 10, 17, 18])
+    self.check_trees_all_equal(x.lengths(), xp.array([0, 5, 10, 17, 17]))
+    self.assertNotIsInstance(x, self.MaskedSequence)
+
+    # Return type is MaskedSequence if is_masked=True.
+    x = self.Sequence.from_lengths(
+        x_expected.values, [-1, 5, 10, 17, 18], is_masked=True
+    )
+    self.check_trees_all_equal(x.lengths(), xp.array([0, 5, 10, 17, 17]))
+    self.assertIsInstance(x, self.MaskedSequence)
+
 
 
 class SteppableTest(parameterized.TestCase):
@@ -283,6 +329,22 @@ class SteppableTest(parameterized.TestCase):
     self.assertEqual(layer.output_latency, 0)
     self.assertEqual(layer.get_accumulated_input_latency(0), 0)
     self.assertEqual(layer.get_accumulated_output_latency(0), 0)
+
+  def test_steppable_with_emits_defaults_to_tuple_with_empty_emits(self):
+    layer = self.create_steppable()
+
+    with unittest.mock.patch.object(layer, 'layer', return_value='mock_layer_out') as mock_layer:
+      out, emits = layer.layer_with_emits('mock_x', training=False, constants=None)
+      self.assertEqual(out, 'mock_layer_out')
+      self.assertEqual(emits, ())
+      mock_layer.assert_called_with('mock_x', training=False, constants=None)
+
+    with unittest.mock.patch.object(layer, 'step', return_value=('step_out', 'state_out')) as mock_step:
+      out, state, emits = layer.step_with_emits('mock_x', 'state_in', training=True, constants=None)
+      self.assertEqual(out, 'step_out')
+      self.assertEqual(state, 'state_out')
+      self.assertEqual(emits, ())
+      mock_step.assert_called_with('mock_x', 'state_in', training=True, constants=None)
 
 
 class SequenceLayerConfigTest(SequenceLayerTest):
@@ -335,4 +397,118 @@ class SequenceLayerConfigTest(SequenceLayerTest):
     with self.assertRaises((TypeError, AttributeError)):
       new_config = config.copy(field_does_not_exist=1234)
       del new_config
+
+
+class PreservesTypeTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self) -> types.PreservesType:
+    pass
+
+  def test_preserves_dtype(self):
+    layer = self.create_layer()
+    self.assertEqual(layer.get_output_dtype('fake_dtype123'), 'fake_dtype123')
+
+
+class PreservesShapeTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self) -> types.PreservesShape:
+    pass
+
+  def test_preserves_shape(self):
+    layer = self.create_layer()
+    self.assertEqual(layer.get_output_shape((1, 2, 3, 5)), (1, 2, 3, 5))
+
+
+class StatelessTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self) -> types.Stateless:
+    pass
+
+  def test_stateless_behaviors(self):
+    layer = self.create_layer()
+
+    # Initial state must be empty
+    self.assertEqual(
+        layer.get_initial_state(32, 'fake_spec', training=False), ()
+    )
+
+    # step unconditionally delegates to layer and returns identical empty state
+    with unittest.mock.patch.object(layer, 'layer', return_value='layer_out') as mock_layer:
+      out, state = layer.step('mock_x', 'mock_state', training=True, constants={'c': 1})
+      self.assertEqual(out, 'layer_out')
+      self.assertEqual(state, 'mock_state')
+      mock_layer.assert_called_once_with('mock_x', training=True, constants={'c': 1})
+
+
+class EmittingTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self) -> types.Emitting:
+    pass
+
+  def test_emitting_drops_emits_on_standard_calls(self):
+    layer = self.create_layer()
+
+    with unittest.mock.patch.object(layer, 'layer_with_emits', return_value=('out', 'emits')) as m_layer:
+      self.assertEqual(layer.layer('mock_x', training=False), 'out')
+      m_layer.assert_called_once_with('mock_x', training=False, constants=None)
+
+    with unittest.mock.patch.object(layer, 'step_with_emits', return_value=('out', 'state', 'emits')) as m_step:
+      out, state = layer.step('mock_x', 'state', training=True, constants={'c': 1})
+      self.assertEqual(out, 'out')
+      self.assertEqual(state, 'state')
+      m_step.assert_called_once_with('mock_x', 'state', training=True, constants={'c': 1})
+
+
+class StatelessEmittingTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self) -> types.StatelessEmitting:
+    pass
+
+  def test_stateless_emitting_behaviors(self):
+    layer = self.create_layer()
+
+    self.assertEqual(
+        layer.get_initial_state(32, 'fake_spec', training=False), ()
+    )
+
+    with unittest.mock.patch.object(layer, 'layer_with_emits', return_value=('out', 'emits')) as m_layer:
+      out, state, emits = layer.step_with_emits('mock_x', 'state', training=False)
+      self.assertEqual(out, 'out')
+      self.assertEqual(state, 'state')
+      self.assertEqual(emits, 'emits')
+      m_layer.assert_called_once_with('mock_x', training=False, constants=None)
+
+
+class StatelessPointwiseFunctorTest(parameterized.TestCase):
+
+  @abc.abstractmethod
+  def create_layer(self, mask_required: bool) -> types.StatelessPointwiseFunctor:
+    pass
+
+  @abc.abstractmethod
+  def create_sequence(self) -> types.Sequence:
+    pass
+
+  def test_layer_applies_fn_based_on_mask_required(self):
+    for mask_required in [True, False]:
+      with self.subTest(mask_required=mask_required):
+        layer = self.create_layer(mask_required)
+        x = self.create_sequence()
+        # Mock the apply methods on the Sequence class itself so we return a valid Sequence
+        # that satisfies any @check_layer decorators.
+        with unittest.mock.patch.object(type(x), 'apply', return_value=x) as mock_apply:
+          with unittest.mock.patch.object(type(x), 'apply_masked', return_value=x) as mock_apply_masked:
+            layer.layer(x, training=False)
+            
+            if mask_required:
+              mock_apply.assert_called_once()
+              mock_apply_masked.assert_not_called()
+            else:
+              mock_apply_masked.assert_called_once()
+              mock_apply.assert_not_called()
 
