@@ -899,6 +899,7 @@ class Steppable(types.Steppable):
         truncated to only represent valid frames.
     """
 
+  @override
   def layer_with_emits(
       self,
       x: Sequence,
@@ -929,6 +930,7 @@ class Steppable(types.Steppable):
     outputs = self.layer(x, training=training, constants=constants)
     return outputs, ()
 
+  @override
   def __call__(
       self, x: Sequence, training: bool, constants: Constants | None = None
   ) -> Sequence:
@@ -964,6 +966,7 @@ class Steppable(types.Steppable):
         new state for this layer.
     """
 
+  @override
   def step_with_emits(
       self,
       x: Sequence,

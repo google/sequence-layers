@@ -16,6 +16,9 @@ Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
 DType = Any  # Can be numpy, jax, or mlx dtype
 ChannelSpec = Any  # Typically ShapeDType or compatible
+State = Any
+Constants = Any
+Emits = Any
 
 class PaddingMode(enum.Enum):
   """Supported padding modes."""
@@ -290,6 +293,79 @@ class Steppable(metaclass=abc.ABCMeta):
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     pass
 
+  @abc.abstractmethod
+  def layer(
+      self, x: 'Sequence', *, training: bool, constants: Constants | None = None
+  ) -> 'Sequence':
+    """Process this layer layer-wise."""
+
+  def layer_with_emits(
+      self,
+      x: 'Sequence',
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple['Sequence', Emits]:
+    """Process this layer layer-wise, producing emitted tensors."""
+    outputs = self.layer(x, training=training, constants=constants)
+    return outputs, ()
+
+  def __call__(
+      self, x: 'Sequence', training: bool, constants: Constants | None = None
+  ) -> 'Sequence':
+    """An alias for layer."""
+    return self.layer(x, training=training, constants=constants)
+
+  @abc.abstractmethod
+  def step(
+      self,
+      x: 'Sequence',
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple['Sequence', State]:
+    """Process this layer step-wise."""
+
+  def step_with_emits(
+      self,
+      x: 'Sequence',
+      state: State,
+      *,
+      training: bool,
+      constants: Constants | None = None,
+  ) -> tuple['Sequence', State, Emits]:
+    """Process this layer step-wise, producing emitted tensors."""
+    y, state = self.step(x, state, training=training, constants=constants)
+    return y, state, ()
+
+  @abc.abstractmethod
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: ChannelSpec,
+      *,
+      constants: Constants | None = None,
+  ) -> State:
+    """Returns the initial state for step-wise processing."""
+
+  @abc.abstractmethod
+  def get_output_shape(
+      self,
+      input_shape: ShapeLike,
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    """Returns the output shape for a given input shape."""
+
+  def get_output_dtype(
+      self,
+      input_dtype: DType,
+      *,
+      constants: Constants | None = None,
+  ) -> DType:
+    """Returns the output dtype given the input dtype."""
+    return input_dtype
   @property
   @abc.abstractmethod
   def receptive_field(self) -> Any:

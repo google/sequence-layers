@@ -35,10 +35,10 @@ class SteppableTest(types_test_base.SteppableTest):
 
     class DefaultSteppable(types.Steppable):
 
-      def layer(self, x, *, constants=None):
+      def layer(self, x, *, training: bool, constants=None):
         return x
 
-      def step(self, x, state, *, constants=None):
+      def step(self, x, state, *, training: bool, constants=None):
         return x, state
 
       def get_initial_state(self, batch_size, input_spec, *, constants=None):

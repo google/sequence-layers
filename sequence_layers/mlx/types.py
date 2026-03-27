@@ -431,14 +431,22 @@ class Steppable(types.Steppable):
   @abc.abstractmethod
   @override
   def layer(
-      self, x: Sequence, *, constants: Constants | None = None
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> Sequence:
     """Process this layer layer-wise."""
 
+  @override
   def layer_with_emits(
-      self, x: Sequence, *, constants: Constants | None = None
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> tuple[Sequence, Emits]:
-    return self.layer(x, constants=constants), ()
+    return self.layer(x, training=training, constants=constants), ()
+
+  @override
+  def __call__(
+      self, x: Sequence, training: bool, constants: Constants | None = None
+  ) -> Sequence:
+      """For Flax-compatibility, define __call__ as an alias for layer."""
+      return self.layer(x, training=training, constants=constants)
 
   @abc.abstractmethod
   @override
@@ -447,18 +455,21 @@ class Steppable(types.Steppable):
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State]:
     """Process this layer step-wise."""
 
+  @override
   def step_with_emits(
       self,
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State, Emits]:
-    y, state = self.step(x, state, constants=constants)
+    y, state = self.step(x, state, training=training, constants=constants)
     return y, state, ()
 
   @abc.abstractmethod
