@@ -9,58 +9,12 @@ import fractions
 from absl.testing import parameterized
 import numpy as np
 
-class SequenceLayerTest(parameterized.TestCase):
-  """Base abstract test class providing common sequence testing assertions."""
+from sequence_layers.abstract import test_utils
 
-  @abc.abstractmethod
-  def assertSequencesClose(self, x: Any, y: Any, **kwargs):
-    pass
-
-  @abc.abstractmethod
-  def assertSequencesNotClose(self, x: Any, y: Any, **kwargs):
-    pass
-
-  @abc.abstractmethod
-  def assertSequencesEqual(self, x: Any, y: Any):
-    pass
-
-  @abc.abstractmethod
-  def assertSequencesNotEqual(self, x: Any, y: Any):
-    pass
-
-  @abc.abstractmethod
-  def assertAllEqual(self, x: Any, y: Any):
-    pass
-
-  @abc.abstractmethod
-  def assertAllClose(self, x: Any, y: Any, **kwargs):
-    pass
-
-  @abc.abstractmethod
-  def assertNotAllEqual(self, x: Any, y: Any):
-    pass
-
-  @abc.abstractmethod
-  def assertNotAllClose(self, x: Any, y: Any, **kwargs):
-    pass
-
-
-class SequenceTest(SequenceLayerTest):
+class SequenceTest(test_utils.SequenceLayerTest):
   """Abstract tests for the Sequence class."""
 
-  @abc.abstractmethod
-  def get_backend(self) -> Any:
-    """Returns the backend module (jax.numpy or mlx.core)."""
-  
-  @property
-  @abc.abstractmethod
-  def Sequence(self) -> type[types.Sequence]:
-    """Returns the Sequence class for the backend."""
 
-  @property
-  @abc.abstractmethod
-  def MaskedSequence(self) -> Any:
-     """Returns the MaskedSequence class for the backend."""
   
   @property
   def check_trees_all_equal(self) -> Callable[[Any, Any], None]:
@@ -310,7 +264,7 @@ class SteppableTest(parameterized.TestCase):
       mock_step.assert_called_with('mock_x', 'state_in', training=True, constants=None)
 
 
-class SequenceLayerConfigTest(SequenceLayerTest):
+class SequenceLayerConfigTest(test_utils.SequenceLayerTest):
 
   @abc.abstractmethod
   def get_config_base_cls(self) -> type[types.SequenceLayerConfig]:

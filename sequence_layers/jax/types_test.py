@@ -39,19 +39,8 @@ class Foo(nn.Module):
     return x
 
 
-class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
+class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
   """Tests for the Sequence class."""
-
-  def get_backend(self):
-    return jnp
-
-  @property
-  def Sequence(self):
-    return types.Sequence
-
-  @property
-  def MaskedSequence(self):
-    return types.MaskedSequence
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""

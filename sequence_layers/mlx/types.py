@@ -12,6 +12,12 @@ import mlx.nn as nn
 import numpy as np
 
 from sequence_layers.abstract import types
+from sequence_layers.abstract.types import FLOAT32, FLOAT16, BFLOAT16, INT32
+
+FLOAT32.register_backend_type(mx.float32)
+FLOAT16.register_backend_type(mx.float16)
+BFLOAT16.register_backend_type(mx.bfloat16)
+INT32.register_backend_type(mx.int32)
 
 # Type aliases.
 MASK_DTYPE = mx.bool_
@@ -341,9 +347,10 @@ def check_layer(layer_fn):
   """Validates layer inputs and outputs."""
 
   @functools.wraps(layer_fn)
-  def wrapper(self, x, *, constants=None):
-    y = layer_fn(self, x, constants=constants)
+  def wrapper(self, x, *, training: bool, constants=None):
+    y = layer_fn(self, x, training=training, constants=constants)
     _check_output_spec(self, x, y, constants)
+    _check_output_ratio(self, x, y)
     return y
 
   return wrapper
@@ -353,7 +360,7 @@ def check_step(step_fn):
   """Validates step inputs and outputs."""
 
   @functools.wraps(step_fn)
-  def wrapper(self, x, state, *, constants=None):
+  def wrapper(self, x, state, *, training: bool, constants=None):
     if not self.supports_step:
       raise ValueError(f'{self.__class__.__name__} does not support step().')
     block_size = self.block_size
@@ -362,7 +369,7 @@ def check_step(step_fn):
           f'{self.__class__.__name__} received input with'
           f' {x.shape=} not a multiple of {block_size=}.'
       )
-    y, state = step_fn(self, x, state, constants=constants)
+    y, state = step_fn(self, x, state, training=training, constants=constants)
     _check_output_spec(self, x, y, constants)
     _check_output_ratio(self, x, y)
     return y, state
@@ -522,6 +529,25 @@ class Steppable(types.Steppable):
 class SequenceLayer(nn.Module, Steppable):
   """Base MLX Module for Sequence Layers."""
 
+  def __init__(self, name: str | None = None):
+    nn.Module.__init__(self)
+    self._name = name or self.__class__.__name__
+
+  @property
+  def name(self) -> str:
+    return self._name
+
+  def get_output_shape_for_sequence(
+      self,
+      sequence: Sequence,
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    if hasattr(self, 'get_output_shape'):
+      return self.get_output_shape(sequence.channel_shape, constants=constants)
+    else:
+      return sequence.channel_shape # Fallback or error? Usually it's PreservesShape!
+
 class SequenceLayerConfig(types.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects."""
 
@@ -585,9 +611,10 @@ class Stateless(SequenceLayer):
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State]:
-    return self.layer(x, constants=constants), state
+    return self.layer(x, training=training, constants=constants), state
 
 
 class StatelessPointwise(PreservesShape, Stateless):
@@ -607,7 +634,7 @@ class StatelessPointwiseFunctor(StatelessPointwise, metaclass=abc.ABCMeta):
 
   @check_layer
   def layer(
-      self, x: Sequence, *, constants: Constants | None = None
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> Sequence:
     if self.mask_required:
       y = x.apply(self.fn)
@@ -632,9 +659,10 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State]:
-    y, state, _ = self.step_with_emits(x, state, constants=constants)
+    y, state, _ = self.step_with_emits(x, state, training=training, constants=constants)
     return y, state
 
   @abc.abstractmethod
@@ -643,19 +671,20 @@ class Emitting(SequenceLayer, metaclass=abc.ABCMeta):
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State, Emits]:
     pass
 
   def layer(
-      self, x: Sequence, *, constants: Constants | None = None
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> Sequence:
-    y, _ = self.layer_with_emits(x, constants=constants)
+    y, _ = self.layer_with_emits(x, training=training, constants=constants)
     return y
 
   @abc.abstractmethod
   def layer_with_emits(
-      self, x: Sequence, *, constants: Constants | None = None
+      self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> tuple[Sequence, Emits]:
     pass
 
@@ -668,9 +697,10 @@ class StatelessEmitting(Emitting):
       x: Sequence,
       state: State,
       *,
+      training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State, Emits]:
-    y, emits = self.layer_with_emits(x, constants=constants)
+    y, emits = self.layer_with_emits(x, training=training, constants=constants)
     return y, state, emits
 
   def get_initial_state(

@@ -3,19 +3,18 @@
 import dataclasses
 import math
 
-from typing import Callable
+from typing import Callable, Any
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from sequence_layers.mlx import basic_types as bt
+from sequence_layers.abstract import simple
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
-from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
 
-Sequence = bt.Sequence
-MaskedSequence = bt.MaskedSequence
+Sequence = types.Sequence
+MaskedSequence = types.MaskedSequence
 
 
 # ---------------------------------------------------------------------------
@@ -23,18 +22,18 @@ MaskedSequence = bt.MaskedSequence
 # ---------------------------------------------------------------------------
 
 
-class Identity(types.PreservesType, types.StatelessPointwise):
+class Identity(simple.Identity, types.PreservesType, types.StatelessPointwise):
   """Identity pass-through of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Identity':
       return Identity.from_config(self)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     return x
 
   @classmethod
@@ -47,8 +46,15 @@ class Identity(types.PreservesType, types.StatelessPointwise):
 # ---------------------------------------------------------------------------
 
 
-class Relu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Relu(simple.Relu, types.PreservesType, types.StatelessPointwiseFunctor):
   """A Relu layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Relu.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Relu':
+      return Relu.from_config(self)
 
   @property
   def mask_required(self):
@@ -62,8 +68,15 @@ class Relu(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls()
 
 
-class Gelu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Gelu(simple.Gelu, types.PreservesType, types.StatelessPointwiseFunctor):
   """A Gelu layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Gelu.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Gelu':
+      return Gelu.from_config(self)
 
   @property
   def mask_required(self):
@@ -77,8 +90,15 @@ class Gelu(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls()
 
 
-class Swish(types.PreservesType, types.StatelessPointwiseFunctor):
+class Swish(simple.Swish, types.PreservesType, types.StatelessPointwiseFunctor):
   """A Swish/SiLU layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Swish.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Swish':
+      return Swish.from_config(self)
 
   @property
   def mask_required(self):
@@ -92,8 +112,15 @@ class Swish(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls()
 
 
-class Tanh(types.PreservesType, types.StatelessPointwiseFunctor):
+class Tanh(simple.Tanh, types.PreservesType, types.StatelessPointwiseFunctor):
   """A tanh layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Tanh.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Tanh':
+      return Tanh.from_config(self)
 
   @property
   def mask_required(self):
@@ -107,8 +134,15 @@ class Tanh(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls()
 
 
-class Sigmoid(types.PreservesType, types.StatelessPointwiseFunctor):
+class Sigmoid(simple.Sigmoid, types.PreservesType, types.StatelessPointwiseFunctor):
   """A sigmoid layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Sigmoid.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Sigmoid':
+      return Sigmoid.from_config(self)
 
   @property
   def mask_required(self):
@@ -122,8 +156,16 @@ class Sigmoid(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls()
 
 
-class LeakyRelu(types.PreservesType, types.StatelessPointwiseFunctor):
+class LeakyRelu(simple.LeakyRelu, types.PreservesType, types.StatelessPointwiseFunctor):
   """A Leaky Relu layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.LeakyRelu.Config, types.SequenceLayerConfig):
+    negative_slope: float
+    name: str | None = None
+
+    def make(self) -> 'LeakyRelu':
+      return LeakyRelu.from_config(self)
 
   def __init__(self, negative_slope=0.01):
     super().__init__()
@@ -141,11 +183,11 @@ class LeakyRelu(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls(negative_slope=config.negative_slope)
 
 
-class Elu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Elu(simple.Elu, types.PreservesType, types.StatelessPointwiseFunctor):
   """An ELU activation layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     alpha: complex = 1.0
     name: str | None = None
 
@@ -168,8 +210,16 @@ class Elu(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls(alpha=config.alpha)
 
 
-class Softmax(types.PreservesType, types.StatelessPointwiseFunctor):
+class Softmax(simple.Softmax, types.PreservesType, types.StatelessPointwiseFunctor):
   """A softmax layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Softmax.Config, types.SequenceLayerConfig):
+    axis: int = -1
+    name: str | None = None
+
+    def make(self) -> 'Softmax':
+      return Softmax.from_config(self)
 
   def __init__(self, axis=-1):
     super().__init__()
@@ -193,8 +243,15 @@ class Softmax(types.PreservesType, types.StatelessPointwiseFunctor):
     return cls(axis=config.axis)
 
 
-class Softplus(types.PreservesType, types.StatelessPointwiseFunctor):
+class Softplus(simple.Softplus, types.PreservesType, types.StatelessPointwiseFunctor):
   """A softplus layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Softplus.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'Softplus':
+      return Softplus.from_config(self)
 
   @property
   def mask_required(self):
@@ -213,11 +270,11 @@ class Softplus(types.PreservesType, types.StatelessPointwiseFunctor):
 # ---------------------------------------------------------------------------
 
 
-class Cast(types.StatelessPointwiseFunctor):
+class Cast(simple.Cast, types.StatelessPointwiseFunctor):
   """Cast input values to the specified type."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     dtype: object = mx.float32
     name: str | None = None
 
@@ -245,26 +302,37 @@ class Cast(types.StatelessPointwiseFunctor):
     return cls(dtype=_to_mx_dtype(config.dtype))
 
 
-class Scale(types.PreservesType, types.StatelessPointwise):
+class Scale(simple.Scale, types.PreservesType, types.StatelessPointwise):
   """Scales the input by a provided constant or array."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
-    scale: object = 1.0
+  class Config(simple.Scale.Config, types.SequenceLayerConfig):
+    scale: Any
     name: str | None = None
 
     def make(self) -> 'Scale':
       return Scale.from_config(self)
 
-  def __init__(self, scale):
+  def __init__(self, scale, name=None):
     super().__init__()
     if isinstance(scale, (int, float, complex)):
       self._scale = scale
     else:
       self._scale = mx.array(np.asarray(scale))
 
+  def get_output_shape(self, input_shape, *, constants=None):
+    del constants
+    if np.isscalar(self._scale) or isinstance(self._scale, (int, float, complex)):
+      return input_shape
+    scale_shape = self._scale.shape
+    if scale_shape and input_shape:
+      return mx.broadcast_shapes(scale_shape, tuple(input_shape))
+    if len(scale_shape) > len(input_shape):
+      return scale_shape
+    return input_shape
+
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     s = self._scale
     if isinstance(s, mx.array):
       s = s.astype(x.dtype)
@@ -280,18 +348,37 @@ class Scale(types.PreservesType, types.StatelessPointwise):
     return cls(scale=scale)
 
 
-class Add(types.PreservesType, types.StatelessPointwise):
+class Add(simple.Add, types.PreservesType, types.StatelessPointwise):
   """Adds a provided constant or array to the input."""
 
-  def __init__(self, shift):
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Add.Config, types.SequenceLayerConfig):
+    shift: Any
+    name: str | None = None
+
+    def make(self) -> 'Add':
+      return Add.from_config(self)
+
+  def __init__(self, shift, name=None):
     super().__init__()
     if isinstance(shift, (int, float, complex)):
       self._shift = shift
     else:
       self._shift = mx.array(np.asarray(shift))
 
+  def get_output_shape(self, input_shape, *, constants=None):
+    del constants
+    if np.isscalar(self._shift) or isinstance(self._shift, (int, float, complex)):
+      return input_shape
+    shift_shape = self._shift.shape
+    if shift_shape and input_shape:
+      return mx.broadcast_shapes(shift_shape, tuple(input_shape))
+    if len(shift_shape) > len(input_shape):
+      return shift_shape
+    return input_shape
+
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     s = self._shift
     if isinstance(s, mx.array):
       s = s.astype(x.dtype)
@@ -304,7 +391,7 @@ class Add(types.PreservesType, types.StatelessPointwise):
       shift = np.array(shift.data, dtype=shift.dtype)
     elif hasattr(shift, 'array'):
       shift = np.asarray(shift.array)
-    return cls(shift=shift)
+    return cls(shift=shift, name=config.name)
 
 
 # ---------------------------------------------------------------------------
@@ -312,15 +399,23 @@ class Add(types.PreservesType, types.StatelessPointwise):
 # ---------------------------------------------------------------------------
 
 
-class MaskInvalid(types.PreservesType, types.StatelessPointwise):
+class MaskInvalid(simple.MaskInvalid, types.PreservesType, types.StatelessPointwise):
   """Masks invalid timesteps to zero (or a specified value)."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.MaskInvalid.Config, types.SequenceLayerConfig):
+    mask_value: Any | None = 0.0
+    name: str | None = None
+
+    def make(self) -> 'MaskInvalid':
+      return MaskInvalid.from_config(self)
 
   def __init__(self, mask_value=None):
     super().__init__()
     self._mask_value = mask_value
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     return x.mask_invalid(self._mask_value)
 
   @classmethod
@@ -334,11 +429,11 @@ class MaskInvalid(types.PreservesType, types.StatelessPointwise):
 # ---------------------------------------------------------------------------
 
 
-class GatedUnit(types.PreservesType, types.Stateless):
+class GatedUnit(simple.GatedUnit, types.PreservesType, types.Stateless):
   """Computes a generalized Gated Unit, reducing input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     feature_activation: Callable | None = None
     gate_activation: Callable | None = None
     name: str | None = None
@@ -361,7 +456,7 @@ class GatedUnit(types.PreservesType, types.Stateless):
     return tuple(input_shape[:-1]) + (channels // 2,)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     feature, gate = mx.split(x.values, 2, axis=-1)
     if self._feature_activation:
       feature = self._feature_activation(feature)
@@ -376,8 +471,15 @@ class GatedUnit(types.PreservesType, types.Stateless):
     return cls(feature_activation=fa, gate_activation=ga)
 
 
-class GatedLinearUnit(GatedUnit):
+class GatedLinearUnit(simple.GatedLinearUnit, GatedUnit):
   """Computes a Gated Linear Unit, reducing input channels by 2x."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.GatedLinearUnit.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'GatedLinearUnit':
+      return GatedLinearUnit.from_config(self)
 
   def __init__(self):
     super().__init__(
@@ -390,8 +492,15 @@ class GatedLinearUnit(GatedUnit):
     return cls()
 
 
-class GatedTanhUnit(GatedUnit):
+class GatedTanhUnit(simple.GatedTanhUnit, GatedUnit):
   """Computes a Gated Tanh Unit, reducing input channels by 2x."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.GatedTanhUnit.Config, types.SequenceLayerConfig):
+    name: str | None = None
+
+    def make(self) -> 'GatedTanhUnit':
+      return GatedTanhUnit.from_config(self)
 
   def __init__(self):
     super().__init__(
@@ -409,11 +518,11 @@ class GatedTanhUnit(GatedUnit):
 # ---------------------------------------------------------------------------
 
 
-class Flatten(types.PreservesType, types.StatelessPointwise):
+class Flatten(simple.Flatten, types.PreservesType, types.StatelessPointwise):
   """Flattens the channel dimensions of the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Flatten':
@@ -423,7 +532,7 @@ class Flatten(types.PreservesType, types.StatelessPointwise):
     return (math.prod(input_shape),)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     batch_size, time = x.values.shape[:2]
     num_elements = math.prod(x.channel_shape)
     new_values = mx.reshape(x.values, (batch_size, time, num_elements))
@@ -436,11 +545,11 @@ class Flatten(types.PreservesType, types.StatelessPointwise):
     return cls()
 
 
-class Reshape(types.PreservesType, types.Stateless):
+class Reshape(simple.Reshape, types.PreservesType, types.Stateless):
   """Reshapes the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     output_shape: tuple[int, ...] = ()
     name: str | None = None
 
@@ -468,7 +577,7 @@ class Reshape(types.PreservesType, types.Stateless):
     return self._output_shape
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     self._validate(x.channel_shape)
     b, t = x.values.shape[:2]
     new_values = mx.reshape(x.values, (b, t) + self._output_shape)
@@ -481,11 +590,11 @@ class Reshape(types.PreservesType, types.Stateless):
     return cls(output_shape=config.output_shape)
 
 
-class ExpandDims(types.PreservesType, types.Stateless):
+class ExpandDims(simple.ExpandDims, types.PreservesType, types.Stateless):
   """Expands channel dimensions of the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     axis: int | tuple[int, ...] = 0
     name: str | None = None
 
@@ -521,7 +630,7 @@ class ExpandDims(types.PreservesType, types.Stateless):
     return tuple(out)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     dims = [2 + d for d in self._normalize_axes(x.channel_shape)]
     new_values = mx.expand_dims(x.values, axis=dims)
     if isinstance(x, MaskedSequence):
@@ -533,8 +642,16 @@ class ExpandDims(types.PreservesType, types.Stateless):
     return cls(axis=config.axis)
 
 
-class Squeeze(types.PreservesType, types.Stateless):
+class Squeeze(simple.Squeeze, types.PreservesType, types.Stateless):
   """Squeezes singleton channel dimensions of the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Squeeze.Config, types.SequenceLayerConfig):
+    axis: int | tuple[int, ...] | None
+    name: str | None = None
+
+    def make(self) -> 'Squeeze':
+      return Squeeze.from_config(self)
 
   def __init__(self, axis=None):
     super().__init__()
@@ -561,7 +678,7 @@ class Squeeze(types.PreservesType, types.Stateless):
     return tuple(out) if out else (1,)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     ch_axes = self._channel_squeeze_axes(x.channel_shape)
     # Convert to full-tensor axes (offset by 2 for batch, time).
     full_axes = tuple(a + 2 for a in ch_axes)
@@ -575,8 +692,16 @@ class Squeeze(types.PreservesType, types.Stateless):
     return cls(axis=config.axis)
 
 
-class Transpose(types.PreservesType, types.Stateless):
+class Transpose(simple.Transpose, types.PreservesType, types.Stateless):
   """Permutes the channel axes of the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Transpose.Config, types.SequenceLayerConfig):
+    axes: tuple[int, ...] | None
+    name: str | None = None
+
+    def make(self) -> 'Transpose':
+      return Transpose.from_config(self)
 
   def __init__(self, axes=None):
     super().__init__()
@@ -600,7 +725,7 @@ class Transpose(types.PreservesType, types.Stateless):
     return tuple(input_shape[a - 2] for a in axes)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     axes = self._resolve_axes(x.channel_shape)
     new_values = mx.transpose(x.values, (0, 1) + axes)
     if isinstance(x, MaskedSequence):
@@ -617,8 +742,17 @@ class Transpose(types.PreservesType, types.Stateless):
 # ---------------------------------------------------------------------------
 
 
-class OneHot(types.Stateless):
+class OneHot(simple.OneHot, types.Stateless):
   """Computes one-hot vector of the input."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.OneHot.Config, types.SequenceLayerConfig):
+    depth: int
+    compute_dtype: types.DType | None = types.FLOAT32
+    name: str | None = None
+
+    def make(self) -> 'OneHot':
+      return OneHot.from_config(self)
 
   def __init__(self, depth, compute_dtype=mx.float32):
     super().__init__()
@@ -632,7 +766,7 @@ class OneHot(types.Stateless):
     return self._compute_dtype
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     def one_hot_fn(v):
       indices = v.astype(mx.int32)
       return mx.eye(self._depth, dtype=self._compute_dtype)[indices]
@@ -649,14 +783,14 @@ class OneHot(types.Stateless):
     )
 
 
-class Embedding(types.Stateless):
+class Embedding(simple.Embedding, types.Stateless):
   """Computes embeddings of integer input codes.
 
   Backed by mlx.nn.Embedding.
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     num_embeddings: int = 1
     dimension: int = 1
     compute_dtype: types.DType | None = None
@@ -690,7 +824,7 @@ class Embedding(types.Stateless):
     return self._param_dtype
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     def embed_fn(v):
       result = self._embedding(v.astype(mx.int32))
       if self.compute_dtype is not None:
@@ -719,11 +853,11 @@ class Embedding(types.Stateless):
 # ---------------------------------------------------------------------------
 
 
-class Dropout(types.PreservesType, types.StatelessPointwise):
+class Dropout(simple.Dropout, types.PreservesType, types.StatelessPointwise):
   """Dropout layer (pass-through during inference)."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     rate: float = 0.0
     broadcast_dims: tuple[int, ...] = ()
     name: str | None = None
@@ -736,7 +870,7 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
     self._rate = rate
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     # Inference-only: dropout is a no-op.
     return x
 
@@ -750,8 +884,16 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
 # ---------------------------------------------------------------------------
 
 
-class Downsample1D(types.PreservesType, types.Stateless):
+class Downsample1D(simple.Downsample1D, types.PreservesType, types.Stateless):
   """A 1D downsampling layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Downsample1D.Config, types.SequenceLayerConfig):
+    rate: int
+    name: str | None = None
+
+    def make(self) -> 'Downsample1D':
+      return Downsample1D.from_config(self)
 
   def __init__(self, rate):
     super().__init__()
@@ -761,11 +903,16 @@ class Downsample1D(types.PreservesType, types.Stateless):
   def block_size(self):
     return self._rate
 
+  @property
+  def output_ratio(self):
+    import fractions
+    return fractions.Fraction(1, self._rate)
+
   def get_output_shape(self, input_shape, *, constants=None):
     return tuple(input_shape)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     new_values = x.values[:, :: self._rate]
     new_mask = x.mask[:, :: self._rate]
     if isinstance(x, MaskedSequence):
@@ -777,18 +924,31 @@ class Downsample1D(types.PreservesType, types.Stateless):
     return cls(rate=config.rate)
 
 
-class Upsample1D(types.PreservesType, types.Stateless):
+class Upsample1D(simple.Upsample1D, types.PreservesType, types.Stateless):
   """A 1D upsampling layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(simple.Upsample1D.Config, types.SequenceLayerConfig):
+    rate: int
+    name: str | None = None
+
+    def make(self) -> 'Upsample1D':
+      return Upsample1D.from_config(self)
 
   def __init__(self, rate):
     super().__init__()
     self._rate = rate
 
+  @property
+  def output_ratio(self):
+    import fractions
+    return fractions.Fraction(self._rate, 1)
+
   def get_output_shape(self, input_shape, *, constants=None):
     return tuple(input_shape)
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     # Repeat each timestep `rate` times along the time axis.
     b, t = x.values.shape[:2]
     channel_shape = x.values.shape[2:]
@@ -813,11 +973,11 @@ class Upsample1D(types.PreservesType, types.Stateless):
 # ---------------------------------------------------------------------------
 
 
-class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
+class CheckpointName(simple.CheckpointName, types.PreservesType, types.StatelessPointwiseFunctor):
   """Identity pass-through (checkpoint naming is JAX-only)."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     checkpoint_name: str = ''
     name: str | None = None
 
@@ -845,11 +1005,11 @@ class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
 # ---------------------------------------------------------------------------
 
 
-class Lambda(types.Stateless):
+class Lambda(simple.Lambda, types.Stateless):
   """A SequenceLayer that wraps a Python callable."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     fn: Callable = None
     sequence_input: bool = False
     mask_required: bool = True
@@ -904,7 +1064,7 @@ class Lambda(types.Stateless):
       return spec.dtype
     return input_dtype
 
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     if self._sequence_input:
       result = self._fn(x)
       if not isinstance(result, (Sequence, MaskedSequence)):
@@ -934,11 +1094,11 @@ class Lambda(types.Stateless):
 # ---------------------------------------------------------------------------
 
 
-class Logging(types.PreservesType, types.StatelessPointwise):
+class Logging(simple.Logging, types.PreservesType, types.StatelessPointwise):
   """Logs input info and returns the input unchanged."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):
     prefix: str = ''
     dump_tensors: bool = False
     name: str | None = None
@@ -952,7 +1112,7 @@ class Logging(types.PreservesType, types.StatelessPointwise):
     self._dump_tensors = dump_tensors
 
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool, constants=None):
     if self._dump_tensors:
       print(f'{self._prefix} layer(): x={x.values}')
     else:

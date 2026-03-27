@@ -31,6 +31,12 @@ import jaxtyping
 import numpy as np
 
 from sequence_layers.abstract import types
+from sequence_layers.abstract.types import FLOAT32, FLOAT16, BFLOAT16, INT32
+
+FLOAT32.register_backend_type(jnp.float32)
+FLOAT16.register_backend_type(jnp.float16)
+BFLOAT16.register_backend_type(jnp.bfloat16)
+INT32.register_backend_type(jnp.int32)
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import typing as jt
 import typeguard

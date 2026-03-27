@@ -32,6 +32,7 @@ import numpy as np
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+from sequence_layers.abstract import simple
 from typing_extensions import override
 
 # pylint: disable=logging-fstring-interpolation
@@ -167,7 +168,7 @@ class Scale(StatelessPointwiseBroadcasting):
   """Scales the input by a provided constant or array."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Scale.Config, types.SequenceLayerConfig):
     """Config for Scale."""
 
     # The value to scale the input by. May be a numpy array, but must be
@@ -208,7 +209,7 @@ class Affine(types.PreservesType, types.Stateless):
   """Learnable additive bias and multiplicative scale scalars."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config of the learnable scale and bias layer."""
 
     use_bias: bool = True
@@ -292,7 +293,7 @@ class Add(StatelessPointwiseBroadcasting):
   """Adds the provided constant or array to the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Add.Config, types.SequenceLayerConfig):
     """Config for Add."""
 
     # The value to add to the input. May be a numpy array, but must be
@@ -333,7 +334,7 @@ class Maximum(StatelessPointwiseBroadcasting):
   """Clips the input with the provided maximum value."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for Maximum."""
 
     # The value to clip the input with. May be a numpy array, but must be
@@ -376,7 +377,7 @@ class Mod(StatelessPointwiseBroadcasting):
   """Returns the remainder of division of the input by the provided divisor."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for Mod."""
 
     # The divisor to compute the remainder with. May be a numpy array, but must
@@ -421,7 +422,7 @@ class Minimum(StatelessPointwiseBroadcasting):
   """Clips the input with the provided minimum value."""
 
   @dataclasses.dataclass(frozen=True, unsafe_hash=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for Minimum."""
 
     # The value to clip the input with. May be a numpy array, but must be
@@ -466,7 +467,7 @@ class _ReduceChannels(
   """Abstract base class for reductions over the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for _Reduce."""
 
     # The axis or axes to reduce over. Negative axis values are supported.
@@ -549,6 +550,9 @@ class Mean(_ReduceChannels):
   @dataclasses.dataclass(frozen=True)
   class Config(_ReduceChannels.Config):
     """Config for Mean."""
+    axis: int | TypingSequence[int] | None = -1
+    keepdims: bool = False
+    name: str | None = None
 
     def make(self) -> 'Mean':
       return Mean(self, name=self.name)
@@ -564,6 +568,9 @@ class Min(_ReduceChannels):
   @dataclasses.dataclass(frozen=True)
   class Config(_ReduceChannels.Config):
     """Config for Min."""
+    axis: int | TypingSequence[int] | None = -1
+    keepdims: bool = False
+    name: str | None = None
 
     def make(self) -> 'Min':
       return Min(self, name=self.name)
@@ -579,6 +586,9 @@ class Max(_ReduceChannels):
   @dataclasses.dataclass(frozen=True)
   class Config(_ReduceChannels.Config):
     """Config for Max."""
+    axis: int | TypingSequence[int] | None = -1
+    keepdims: bool = False
+    name: str | None = None
 
     def make(self) -> 'Max':
       return Max(self, name=self.name)
@@ -594,6 +604,9 @@ class Sum(_ReduceChannels):
   @dataclasses.dataclass(frozen=True)
   class Config(_ReduceChannels.Config):
     """Config for Sum."""
+    axis: int | TypingSequence[int] | None = -1
+    keepdims: bool = False
+    name: str | None = None
 
     def make(self) -> 'Sum':
       return Sum(self, name=self.name)
@@ -607,7 +620,7 @@ class Abs(types.StatelessPointwiseFunctor):
   """Absolute value layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     name: str | None = None
 
     def make(self) -> 'Abs':
@@ -648,7 +661,7 @@ class Cast(types.StatelessPointwiseFunctor):
   """Cast input values to the specified type."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Cast.Config, types.SequenceLayerConfig):
     dtype: types.DType
     name: str | None = None
 
@@ -683,7 +696,7 @@ class GatedUnit(types.PreservesType, types.Stateless):
   """Computes a generalized Gated Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.GatedUnit.Config, types.SequenceLayerConfig):
     feature_activation: Callable[[types.ValuesT], types.ValuesT] | None
     gate_activation: Callable[[types.ValuesT], types.ValuesT] | None
     name: str | None = None
@@ -729,7 +742,7 @@ class GatedLinearUnit(GatedUnit):
   """Computes a Gated Linear Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.GatedLinearUnit.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'GatedLinearUnit':
@@ -742,7 +755,7 @@ class GatedTanhUnit(GatedUnit):
   """Computes a Gated Tanh Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.GatedTanhUnit.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'GatedTanhUnit':
@@ -756,7 +769,7 @@ class GradientClipping(types.PreservesType, types.StatelessPointwise):
   """Identity except the gradient is clipped."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     clip_value: float
     name: str | None = None
 
@@ -796,7 +809,7 @@ class Identity(types.PreservesType, types.StatelessPointwise):
   """Identity pass-through of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Identity.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Identity':
@@ -818,7 +831,7 @@ class ApplySharding(types.PreservesType, types.StatelessPointwise):
   """Applies sharding annotations to the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     values_sharding: types.Sharding | None = None
     mask_sharding: types.Sharding | None = None
     name: str | None = None
@@ -857,7 +870,7 @@ class OptimizationBarrier(types.PreservesType, types.StatelessPointwise):
   """Applies an optimization barrier to the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     apply_to_mask: bool = False
     name: str | None = None
 
@@ -894,7 +907,7 @@ class Lambda(types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Lambda.Config, types.SequenceLayerConfig):
     """Configuration for a Lambda layer."""
 
     # If sequence_input is True, a callable that takes an sl.Sequence and
@@ -914,6 +927,7 @@ class Lambda(types.Stateless):
     # for type or shape information (respectively). Prefer to use
     # get_output_spec to avoid having to specify this.
     expected_input_spec: types.ShapeDType | None = None
+    expected_output_spec: Any = None
     # An optional name for the layer.
     name: str | None = None
 
@@ -1040,7 +1054,7 @@ class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
   """Applies a checkpoint name to the sequence values."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.CheckpointName.Config, types.SequenceLayerConfig):
     checkpoint_name: str
     name: str | None = None
 
@@ -1076,7 +1090,7 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for Snake."""
 
     separate_beta: bool
@@ -1125,7 +1139,7 @@ class Tanh(types.PreservesType, types.StatelessPointwiseFunctor):
   """A tanh layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Tanh.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Tanh':
@@ -1150,7 +1164,7 @@ class Relu(types.PreservesType, types.StatelessPointwiseFunctor):
   """A Relu layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Relu.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Relu':
@@ -1173,7 +1187,7 @@ class LeakyRelu(types.PreservesType, types.StatelessPointwiseFunctor):
   """A Leaky Relu layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.LeakyRelu.Config, types.SequenceLayerConfig):
     negative_slope: complex = 0.01
     name: str | None = None
 
@@ -1199,7 +1213,7 @@ class PRelu(types.PreservesType, types.StatelessPointwiseFunctor):
   """Parametric Relu, i.e., a Leaky Relu where the negative slope is learnable."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     negative_slope_init: float = 0.01
     param_dtype: types.DType = jnp.float32
     name: str | None = None
@@ -1242,7 +1256,7 @@ class Elu(types.PreservesType, types.StatelessPointwiseFunctor):
   """An elu activation layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Elu.Config, types.SequenceLayerConfig):
     alpha: complex = 1.0
     name: str | None = None
 
@@ -1264,7 +1278,7 @@ class Exp(types.PreservesType, types.StatelessPointwiseFunctor):
   """An exp layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     name: str | None = None
 
     def make(self) -> 'Exp':
@@ -1285,7 +1299,7 @@ class Log(types.PreservesType, types.StatelessPointwiseFunctor):
   """A log layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     name: str | None = None
 
     def make(self) -> 'Log':
@@ -1306,7 +1320,7 @@ class Power(types.PreservesType, types.StatelessPointwiseFunctor):
   """Raises the input to the specified power."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     power: float = 1.0
     name: str | None = None
 
@@ -1332,7 +1346,7 @@ class Sigmoid(types.PreservesType, types.StatelessPointwiseFunctor):
   """A sigmoid layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Sigmoid.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Sigmoid':
@@ -1353,7 +1367,7 @@ class Softplus(types.PreservesType, types.StatelessPointwiseFunctor):
   """A softplus layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Softplus.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Softplus':
@@ -1374,7 +1388,7 @@ class Softmax(types.PreservesType, types.StatelessPointwiseFunctor):
   """A softmax layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Softmax.Config, types.SequenceLayerConfig):
     axis: int = -1
     name: str | None = None
 
@@ -1402,7 +1416,7 @@ class Swish(types.PreservesType, types.StatelessPointwiseFunctor):
   """A Swish layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Swish.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Swish':
@@ -1425,7 +1439,7 @@ class Gelu(types.PreservesType, types.StatelessPointwiseFunctor):
   """A Gaussian Error Linear Unit (GELU) layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Gelu.Config, types.SequenceLayerConfig):
     approximate: bool = True
     name: str | None = None
 
@@ -1451,7 +1465,7 @@ class Slice(types.PreservesType, types.Stateless):
   """Slices the channels dimensions of input tensors."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for Slice."""
 
     # A slice to apply to each channel dimension of the input sequence. Follows
@@ -1551,7 +1565,7 @@ class Flatten(types.PreservesType, types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Flatten.Config, types.SequenceLayerConfig):
     name: str | None = None
 
     def make(self) -> 'Flatten':
@@ -1585,9 +1599,9 @@ class OneHot(types.Stateless):
   """Computes one-hot vector of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.OneHot.Config, types.SequenceLayerConfig):
     depth: int
-    compute_dtype: types.DType = jnp.float32
+    compute_dtype: types.DType | None = jnp.float32
     name: str | None = None
 
     def make(self) -> 'OneHot':
@@ -1645,7 +1659,7 @@ class Embedding(types.Stateless):
   """Computes embeddings of integer input codes."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Embedding.Config, types.SequenceLayerConfig):
     """Config for Embedding."""
 
     # Dimensionality of the embedded values.
@@ -1768,7 +1782,7 @@ class EmbeddingTranspose(types.Stateless):
   """Wraps a bound Embedding layer to be attended upon (e.g. pre-softmax)."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config for EmbeddingTranspose."""
 
     # Embedding layer to allow weight sharing. If not weight sharing, prefer to
@@ -1872,7 +1886,7 @@ class ExpandDims(types.PreservesType, types.Stateless):
   """Applies jnp.expand_dims to the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.ExpandDims.Config, types.SequenceLayerConfig):
     """Configuration for ExpandDims."""
 
     # The axis or axes in the channel shape to expand dims on.
@@ -1942,7 +1956,7 @@ class Reshape(types.PreservesType, types.Stateless):
   """Reshapes the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Reshape.Config, types.SequenceLayerConfig):
     """Configuration for Reshape."""
 
     # The new shape of the channels dimension. Can't contain -1, and must have
@@ -2014,7 +2028,7 @@ class GlobalReshape(types.PreservesType, types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Configuration for GlobalReshape."""
 
     # The desired [new_time, *new_channels] shape *after* the batch dimension.
@@ -2092,7 +2106,7 @@ class Transpose(types.PreservesType, types.Stateless):
   """Transposes (i.e., permutes) the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Transpose.Config, types.SequenceLayerConfig):
     """Configuration for Transpose.
 
     The usage is the same as that of jax.numpy.transpose.
@@ -2170,7 +2184,7 @@ class SwapAxes(Transpose):
   """Swap two channel axes."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     axis1: int
     axis2: int
     name: str | None = None
@@ -2205,7 +2219,7 @@ class MoveAxis(Transpose):
   """Moves one or several channel axes to new locations."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config of MoveAxis layer."""
 
     source: int | TypingSequence[int]
@@ -2259,7 +2273,7 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
   """An identity layer that emits its input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     name: str | None = None
 
     def make(self) -> 'Emit':
@@ -2284,7 +2298,7 @@ class NamedEmit(
   """An identity layer that emits its input with a named output."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     emit_name: str
     name: str | None = None
 
@@ -2308,7 +2322,7 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
   """Computes dropout using Flax RNGs."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Dropout.Config, types.SequenceLayerConfig):
     rate: float = 0.0
     broadcast_dims: TypingSequence[int] = ()
     rng_collection: str = 'dropout'
@@ -2401,7 +2415,7 @@ class Downsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
   """A 1D downsampling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Downsample1D.Config, types.SequenceLayerConfig):
     """Configuration for Downsample1D."""
 
     rate: int
@@ -2443,7 +2457,7 @@ class Upsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
   """A 1D upsampling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Upsample1D.Config, types.SequenceLayerConfig):
     """Configuration for Upsample1D."""
 
     rate: int
@@ -2482,7 +2496,7 @@ class Upsample2D(types.PreservesType, types.Stateless):
   """A 2D upsampling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Configuration for Upsample2D."""
 
     rate: int | TypingSequence[int]
@@ -2543,7 +2557,8 @@ class MaskInvalid(types.PreservesType, types.StatelessPointwise):
   """Masks the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.MaskInvalid.Config, types.SequenceLayerConfig):
+    mask_value: float | None = 0.0
     name: str | None = None
 
     def make(self) -> 'MaskInvalid':
@@ -2567,11 +2582,12 @@ class Logging(types.PreservesType, types.StatelessPointwise):
   """Layer that logs input arguments to get_initial_state, step, and layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Logging.Config, types.SequenceLayerConfig):
     """Configuration for the Logging layer."""
 
     prefix: str = ''
     dump_tensors: bool = False
+    name: str | None = None
     _: dataclasses.KW_ONLY
     layer_format_str: str = (
         '{prefix} layer():\n'
@@ -2679,7 +2695,7 @@ class Argmax(types.Stateless):
   """An Argmax layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     name: str | None = None
 
     def make(self) -> 'Argmax':
@@ -2720,7 +2736,7 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
   """A wrapper for einops.rearrange applied to the channel dimensions."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config of EinopsRearrange."""
 
     # Rearrangement pattern excluding the batch and time dimensions.
@@ -2787,7 +2803,7 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
   """A wrapper for einops.rearrange applied to the time and channel dimensions."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, abc.ABC):
     """Config of GlobalEinopsRearrange."""
 
     # Rearrangement pattern excluding the batch dimension.
@@ -2889,7 +2905,7 @@ class Squeeze(types.PreservesType, types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(simple.Squeeze.Config, types.SequenceLayerConfig):
     """Config of Squeeze."""
 
     axis: int | TypingSequence[int] | None = None

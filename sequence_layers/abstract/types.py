@@ -20,6 +20,28 @@ State = Any
 Constants = Any
 Emits = Any
 
+class SemanticDType(type):
+  """A semantic type representing a family of types mapping across backends."""
+
+  def __repr__(cls) -> str:
+    return cls.__name__.lower()
+
+  def register_backend_type(cls, backend_type: type | Any):
+    """Registers a concrete backend type to this semantic type."""
+    if not hasattr(cls, '_backend_types'):
+      cls._backend_types = set()
+    cls._backend_types.add(backend_type)
+
+  def matches(cls, concrete_type: type | Any) -> bool:
+    """Returns True if the backend type maps to this semantic type."""
+    return concrete_type in getattr(cls, '_backend_types', set()) or concrete_type is cls
+
+
+class FLOAT32(metaclass=SemanticDType): pass
+class FLOAT16(metaclass=SemanticDType): pass
+class BFLOAT16(metaclass=SemanticDType): pass
+class INT32(metaclass=SemanticDType): pass
+
 class PaddingMode(enum.Enum):
   """Supported padding modes."""
 
@@ -248,6 +270,8 @@ class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
 class SequenceLayerConfig(metaclass=abc.ABCMeta):
   """Configuration for a SequenceLayer."""
 
+
+
   @abc.abstractmethod
   def make(self) -> Any:
     """Creates the sequence layer."""
@@ -298,6 +322,12 @@ class Steppable(metaclass=abc.ABCMeta):
       self, x: 'Sequence', *, training: bool, constants: Constants | None = None
   ) -> 'Sequence':
     """Process this layer layer-wise."""
+
+  def get_output_dtype(
+      self, input_dtype: DType, *, constants: Constants | None = None
+  ) -> DType:
+    """Returns the output dtype given the input dtype."""
+    return input_dtype
 
   @abc.abstractmethod
   def layer_with_emits(
@@ -356,14 +386,6 @@ class Steppable(metaclass=abc.ABCMeta):
   ) -> Shape:
     """Returns the output shape for a given input shape."""
 
-  def get_output_dtype(
-      self,
-      input_dtype: DType,
-      *,
-      constants: Constants | None = None,
-  ) -> DType:
-    """Returns the output dtype given the input dtype."""
-    return input_dtype
   @property
   @abc.abstractmethod
   def receptive_field(self) -> Any:

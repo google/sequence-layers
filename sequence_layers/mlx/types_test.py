@@ -1,32 +1,9 @@
-import mlx.core as mx
-import numpy as np
-from sequence_layers.abstract import types_test_base
+from sequence_layers.mlx import test_utils
 from sequence_layers.mlx import types
-from absl.testing import parameterized
-from absl.testing import absltest
+from sequence_layers.abstract import types_test_base
 
-
-class SequenceTest(types_test_base.SequenceTest):
-
-  def get_backend(self):
-    return mx
-
-  @property
-  def Sequence(self):
-    return types.Sequence
-
-  @property
-  def MaskedSequence(self):
-    return types.MaskedSequence
-
-  def assertAllEqual(self, a, b):
-    a = np.array(a) if isinstance(a, mx.array) else a
-    b = np.array(b) if isinstance(b, mx.array) else b
-    np.testing.assert_array_equal(a, b)
-
-  def assertSequencesEqual(self, a, b):
-    self.assertAllEqual(a.values, b.values)
-    self.assertAllEqual(a.mask, b.mask)
+class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
+    pass
 
 
 class SteppableTest(types_test_base.SteppableTest):

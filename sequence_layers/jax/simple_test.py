@@ -17,6 +17,7 @@ import dataclasses
 import functools
 import itertools
 import math
+import typing
 from unittest import mock
 
 from absl import logging
@@ -35,65 +36,14 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 
+from sequence_layers.abstract import simple_test_base as simple_test_base
+from sequence_layers.jax import test_utils
+from sequence_layers.jax import simple
 
-class ScaleTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(((2, 13, 5),), ((2, 13, 5, 9),))
-  def test_basic(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Scale.Config(scale=2.0, name='scale').make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'scale')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(lambda v: v * 2.0)
-    self.assertSequencesEqual(y, y_expected)
-
-  @parameterized.parameters(((2, 13, 5),), ((2, 13, 9, 5),))
-  def test_ndarray(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Scale.Config(
-        scale=np.arange(5, dtype=np.float32), name='scale'
-    ).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'scale')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(lambda v: v * np.arange(5, dtype=np.float32))
-    self.assertSequencesEqual(y, y_expected)
-
-  def test_broadcast(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Scale.Config(scale=np.ones((5, 9))).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 9))
-
-  def test_too_many_dims(self):
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Scale.Config(scale=np.ones((5, 5, 5))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
-
-  def test_broadcast_failure(self):
-    x = test_utils.random_sequence(2, 3, 5, 9)
-    l = simple.Scale.Config(scale=np.ones((5,))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
+class ScaleTest(simple_test_base.ScaleTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self, scale, name=None):
+    return simple.Scale.Config(scale=scale, name=name).make()
 
 
 class AddTest(test_utils.SequenceLayerTest):
@@ -344,31 +294,15 @@ class ModTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class GatedUnitTest(test_utils.SequenceLayerTest):
+class GatedLinearUnitTest(simple_test_base.GatedLinearUnitTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self, name=None):
+    return simple.GatedLinearUnit.Config(name=name).make()
 
-  @parameterized.parameters(
-      itertools.product(
-          (simple.GatedUnit.Config(None, None),  # Bilinear
-           simple.GatedUnit.Config(None, jax.nn.swish),  # SwiGLU
-           simple.GatedUnit.Config(None, jax.nn.gelu),  # GeGLU
-           simple.GatedUnit.Config(lambda x: x, None),  # Bilinear
-           simple.GatedUnit.Config(jax.nn.swish, jax.nn.tanh),
-           simple.GatedTanhUnit.Config(),
-           simple.GatedLinearUnit.Config()),
-          ((2, 13, 6), (2, 13, 5, 10)))
-      )  # pyformat: disable
-  def test_gated_activation(self, layer_config, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = layer_config.make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(
-        l.get_output_shape_for_sequence(x), shape[2:-1] + (shape[-1] // 2,)
-    )
-    self.verify_contract(l, x, training=True)
-    self.assertEmpty(l.variables)
+class GatedTanhUnitTest(simple_test_base.GatedTanhUnitTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self, name=None):
+    return simple.GatedTanhUnit.Config(name=name).make()
 
 
 class DropoutTest(test_utils.SequenceLayerTest):
@@ -601,30 +535,10 @@ class GlobalReshapeTest(test_utils.SequenceLayerTest):
       self.init_and_bind_layer(key, l, x)
 
 
-class ReshapeTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(
-      ((2, 3, 5), (1, 5, 1)),
-      ((2, 3, 5, 9), (3, 3, 5)),
-      ((2, 3, 1), ()),
-      ((2, 3), (1,)),
-  )
-  def test_reshape(self, shape, output_shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Reshape.Config(output_shape, name='reshape').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
-    self.assertEqual(l.name, 'reshape')
-
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-
-    y_expected = x.apply_values(jnp.reshape, shape[:2] + output_shape)
-    self.assertSequencesEqual(y, y_expected)
+class ReshapeTest(simple_test_base.ReshapeTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self, output_shape, name=None):
+    return simple.Reshape.Config(output_shape=output_shape, name=name).make()
 
   def test_wrong_shape(self):
     l = simple.Reshape.Config([4], name='reshape').make().bind({})
@@ -989,21 +903,20 @@ class GradientClippingTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(expected_gradients, y_layer_x_grad)
 
 
-class IdentityTest(test_utils.SequenceLayerTest):
+class IdentityTest(simple_test_base.IdentityTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self):
+    return simple.Identity.Config().make()
 
-  @parameterized.parameters((((2, 3, 5)),), (((2, 3, 5, 9)),))
-  def test_identity(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Identity(name='identity')
-    l = self.init_and_bind_layer(key, l, x)
+class ReluTest(simple_test_base.ReluTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self):
+    return simple.Relu.Config().make()
 
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'identity')
-    self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
+class TanhTest(simple_test_base.TanhTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self):
+    return simple.Tanh.Config().make()
 
 
 class EmitTest(test_utils.SequenceLayerTest):
@@ -1928,23 +1841,10 @@ class CheckpointNameTest(test_utils.SequenceLayerTest):
     )
 
 
-class Downsample1DTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(((2, 3, 5), 2), ((2, 3, 5, 9), 3))
-  def test_downsample1d(self, shape, rate):
-    l = simple.Downsample1D.Config(rate, name='downsample_1d').make().bind({})
-
-    self.assertEqual(l.block_size, rate)
-    self.assertEqual(1 / l.output_ratio, rate)
-    self.assertTrue(l.supports_step)
-    self.assertEqual(l.name, 'downsample_1d')
-    self.assertEmpty(l.variables)
-
-    x = test_utils.random_sequence(*shape)
-    self.assertEqual(l.get_output_shape_for_sequence(x), x.channel_shape)
-    y = self.verify_contract(l, x, training=False)
-    self.assertAllEqual(x.values[:, ::rate], y.values)
-    self.assertAllEqual(x.mask[:, ::rate], y.mask)
+class Downsample1DTest(simple_test_base.Downsample1DTest, test_utils.SequenceLayerTest):
+  @typing.override
+  def create_layer(self, rate, name=None):
+    return simple.Downsample1D.Config(rate=rate, name=name).make()
 
 
 class Upsample1DTest(test_utils.SequenceLayerTest):
