@@ -25,36 +25,33 @@ import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 
-from sequence_layers.abstract import types_test_base
+import sequence_layers.jax as sl
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
+from sequence_layers.specs import types_behaviors as spec
 
 
-class Foo(nn.Module):
-
-  @nn.compact
-  def __call__(self, x: types.Sequence) -> types.Sequence:
-    return x
+class ModuleInterfaceTest(spec.ModuleInterfaceTest):
+  sl = sl
 
 
-class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
+class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
   """Tests for the Sequence class."""
 
-  def get_backend(self):
-    return jnp
-
-  @property
-  def Sequence(self):
-    return types.Sequence
-
-  @property
-  def MaskedSequence(self):
-    return types.MaskedSequence
+  sl = sl
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""
+
+    class Foo(nn.Module):
+
+      @nn.compact
+      def __call__(
+          self, x: types.Sequence[types.ValuesT, types.MaskT]
+      ) -> types.Sequence:
+        return x
 
     # Allowed: Both array-like.
     types.Sequence(jnp.zeros((2, 3, 5)), jnp.zeros((2, 3), dtype=jnp.bool_))
@@ -109,8 +106,6 @@ class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
     with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(np.zeros((2, 3, 5)), np.zeros((1, 3), dtype=jnp.bool_))
 
-
-
   def test_type_annotation(self):
     if not jt.runtime_type_checking_enabled:
       self.skipTest('Type checking is disabled.')
@@ -119,7 +114,7 @@ class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],
     ) -> types.SequenceT[jt.Float, 'B T C 1']:
-      return types.Sequence(x.values[..., jnp.newaxis], x.mask)
+      return types.Sequence(x.values[..., jnp.newaxis], x.mask)  # type: ignore[return-value]
 
     values = jnp.zeros((2, 3, 5))
     mask = jnp.zeros((2, 3), dtype=jnp.bool_)
@@ -153,7 +148,7 @@ class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],
     ) -> types.SequenceT[jt.Float, 'B T C 1']:
-      return types.MaskedSequence(x.values[..., jnp.newaxis], x.mask)
+      return types.MaskedSequence(x.values[..., jnp.newaxis], x.mask)  # type: ignore[return-value]
 
     values = jnp.zeros((2, 3, 5))
     mask = jnp.zeros((2, 3), dtype=jnp.bool_)
@@ -205,12 +200,8 @@ class SequenceTest(test_utils.SequenceLayerTest, types_test_base.SequenceTest):
     self.assertSequencesEqual(y, x)
 
 
-
-
-class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
-
-  def get_config_base_cls(self):
-    return types.SequenceLayerConfig
+class SequenceLayerConfigTest(spec.SequenceLayerConfigTest):
+  sl = sl
 
   def test_copy_raises_on_mutable_attribute(self):
 
@@ -251,93 +242,33 @@ class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
       del new_config
 
 
-class SteppableTest(types_test_base.SteppableTest):
-
-  def create_steppable(self):
-
-    class DefaultSteppable(types.Steppable):
-
-      def layer(self, x, *, training: bool, constants=None):
-        return x
-
-      def step(self, x, state, *, training: bool, constants=None):
-        return x, state
-
-      def get_initial_state(self, batch_size, input_spec, *, constants=None):
-        return 0
-
-      def get_output_shape(self, input_shape, *, constants=None):
-        return input_shape
-
-      def get_output_dtype(self, input_dtype, *, constants=None):
-        return input_dtype
-
-    return DefaultSteppable()
+class SteppableTest(spec.SteppableTest):
+  sl = sl
 
 
-class PreservesTypeTest(types_test_base.PreservesTypeTest):
-  def create_layer(self):
-    class DummyLayer(types.PreservesType, types.SequenceLayer):
-      def layer(self, x, *, training: bool, constants=None): return x
-      def step(self, x, state, *, training: bool, constants=None): return x, state
-      def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None): return ()
-      def get_output_shape(self, input_shape, *, constants=None): return input_shape
-    return DummyLayer()
+class PreservesTypeTest(spec.PreservesTypeTest):
+  sl = sl
 
 
-class PreservesShapeTest(types_test_base.PreservesShapeTest):
-  def create_layer(self):
-    class DummyLayer(types.PreservesShape, types.SequenceLayer):
-      def layer(self, x, *, training: bool, constants=None): return x
-      def step(self, x, state, *, training: bool, constants=None): return x, state
-      def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None): return ()
-      def get_output_dtype(self, input_dtype, *, constants=None): return input_dtype
-    return DummyLayer()
+class PreservesShapeTest(spec.PreservesShapeTest):
+  sl = sl
 
 
-class StatelessTest(types_test_base.StatelessTest):
-  def create_layer(self):
-    class DummyLayer(types.Stateless, types.SequenceLayer):
-      def layer(self, x, *, training: bool, constants=None): return x
-      def get_output_shape(self, input_shape, *, constants=None): return input_shape
-      def get_output_dtype(self, input_dtype, *, constants=None): return input_dtype
-    return DummyLayer()
+class StatelessTest(spec.StatelessTest):
+  sl = sl
 
 
-class EmittingTest(types_test_base.EmittingTest):
-  def create_layer(self):
-    class DummyLayer(types.Emitting, types.SequenceLayer):
-      def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None): return ()
-      def layer_with_emits(self, x, *, training: bool, constants=None): return x, ()
-      def step_with_emits(self, x, state, *, training: bool, constants=None): return x, state, ()
-      def get_output_shape(self, input_shape, *, constants=None): return input_shape
-      def get_output_dtype(self, input_dtype, *, constants=None): return input_dtype
-      @property
-      def receptive_field_per_step(self): return {0: (0, 0)}
-    return DummyLayer()
+class EmittingTest(spec.EmittingTest):
+  sl = sl
 
 
-class StatelessEmittingTest(types_test_base.StatelessEmittingTest):
-  def create_layer(self):
-    class DummyLayer(types.StatelessEmitting, types.SequenceLayer):
-      def layer_with_emits(self, x, *, training: bool, constants=None): return x, ()
-      def get_output_shape(self, input_shape, *, constants=None): return input_shape
-      def get_output_dtype(self, input_dtype, *, constants=None): return input_dtype
-    return DummyLayer()
+class StatelessEmittingTest(spec.StatelessEmittingTest):
+  sl = sl
 
 
-class StatelessPointwiseFunctorTest(types_test_base.StatelessPointwiseFunctorTest):
-  def create_layer(self, is_mask_required: bool):
-    class DummyLayer(types.StatelessPointwiseFunctor, types.SequenceLayer):
-      @property
-      def mask_required(self): return is_mask_required
-      def fn(self, values, mask): return values, mask
-      def get_output_shape(self, input_shape, *, constants=None): return input_shape
-      def get_output_dtype(self, input_dtype, *, constants=None): return input_dtype
-    return DummyLayer()
+class StatelessPointwiseFunctorTest(spec.StatelessPointwiseFunctorTest):
+  sl = sl
 
-  def create_sequence(self):
-    return types.Sequence(jnp.zeros((2, 3, 5)), jnp.zeros((2, 3), dtype=jnp.bool_))
 
 if __name__ == '__main__':
   test_utils.main()

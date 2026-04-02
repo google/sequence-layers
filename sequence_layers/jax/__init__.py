@@ -13,6 +13,10 @@
 # limitations under the License.
 """Sequence layers in JAX."""
 
+# (re-export the names for typechecking)
+from . import backend as backend
+from . import types as types
+
 # pylint: disable=wildcard-import
 from sequence_layers.jax.attention import *
 from sequence_layers.jax.combinators import *
