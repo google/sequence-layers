@@ -5,13 +5,15 @@ import dataclasses
 import enum
 import fractions
 import functools
-from typing import Callable, Generic, Iterable, TypeVar, override
+import types
+from typing import Any, Callable, Generic, Iterable, Self, TypeVar, override, cast
 
+import jaxtyping as jt
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from sequence_layers.abstract import types
+from sequence_layers.specs import types as spec
 
 # Type aliases.
 MASK_DTYPE = mx.bool_
@@ -20,11 +22,13 @@ ValuesT = TypeVar('ValuesT', bound=mx.array)
 MaskT = TypeVar('MaskT', bound=mx.array)
 LengthsT = TypeVar('LengthsT', bound=mx.array)
 ExpandedMaskT = TypeVar('ExpandedMaskT', bound=mx.array)
+NewValuesT = TypeVar('NewValuesT', bound=mx.array)
+NewMaskT = TypeVar('NewMaskT', bound=mx.array)
 SequenceSelf = TypeVar('SequenceSelf', bound='Sequence')
 
 Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
-DType = np.dtype
+DType = mx.Dtype
 State = object  # Any pytree.
 Constants = dict[str, object]
 Emits = object
@@ -32,6 +36,8 @@ Emits = object
 # Receptive field.
 ReceptiveField = tuple[float | int, float | int] | None
 
+InputT = TypeVar('InputT', bound='Sequence')
+OutputT = TypeVar('OutputT', bound='Sequence')
 
 __all__ = (
     # go/keep-sorted start
@@ -67,6 +73,7 @@ __all__ = (
     # go/keep-sorted end
 )
 
+
 class ShapeDType:
   """Lightweight replacement for jax.ShapeDtypeStruct."""
 
@@ -88,14 +95,16 @@ class ShapeDType:
 
 ChannelSpec = ShapeDType
 
-PaddingMode = types.PaddingMode
+PaddingMode = spec.PaddingMode
 
 
-def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
+def sequence_mask(lengths: LengthsT, maxlen: int) -> mx.array:
   return mx.arange(maxlen)[None, :] < mx.array(lengths)[:, None]
 
 
-class Sequence(types.Sequence[ValuesT, MaskT]):
+class Sequence[ValuesT: mx.array, MaskT: mx.array](
+    spec.Sequence[ValuesT, MaskT]
+):
   """A generic sequence container that preserves masking information."""
 
   values: ValuesT
@@ -143,9 +152,13 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
       is_masked: bool = False,
   ) -> 'Sequence':
     """Constructs a sequence from values and per-batch element lengths."""
-    values = mx.array(values)
-    mask = sequence_mask(lengths, maxlen=values.shape[1])
-    return MaskedSequence(values, mask) if is_masked else Sequence(values, mask)
+    values_arr = mx.array(values)
+    mask = sequence_mask(lengths, maxlen=values_arr.shape[1])
+    return (
+        MaskedSequence(values_arr, mask)
+        if is_masked
+        else Sequence(values_arr, mask)
+    )
 
   @classmethod
   @override
@@ -174,8 +187,9 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
     )
 
   @override
-  def expanded_mask(self) -> ExpandedMaskT:
+  def expanded_mask(self) -> mx.array:
     """Returns the Sequence mask expanded to match values rank."""
+    print(self, type(self), dir(self), self.mask, type(self.mask))
     return self.mask.reshape(self.mask.shape + (1,) * (self.values.ndim - 2))
 
   @override
@@ -190,13 +204,16 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
 
   @override
   def apply_values_masked(
-      self: SequenceSelf,
-      values_fn: Callable[..., ValuesT],
+      self,
+      values_fn: Callable[..., NewValuesT],
       *args,
       **kwargs,
-  ) -> SequenceSelf:
+  ) -> 'Sequence[NewValuesT, MaskT]':
     """Transforms values, preserving masked state."""
-    return type(self)(values_fn(self.values, *args, **kwargs), self.mask)
+    return cast(
+        'Sequence[NewValuesT, MaskT]',
+        type(self)(values_fn(self.values, *args, **kwargs), self.mask),
+    )
 
   @override
   def apply(
@@ -211,14 +228,14 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
 
   @override
   def apply_masked(
-      self: SequenceSelf,
-      apply_fn: Callable[..., tuple[ValuesT, MaskT]],
+      self,
+      apply_fn: Callable[..., tuple[NewValuesT, NewMaskT]],
       *args,
       **kwargs,
-  ) -> SequenceSelf:
+  ) -> 'Sequence[NewValuesT, NewMaskT]':
     """Transforms values/mask, preserving masked state."""
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
-    return type(self)(values, mask)
+    return cast('Sequence[NewValuesT, NewMaskT]', type(self)(values, mask))
 
   @override
   def astype(self: SequenceSelf, dtype: DType | None) -> SequenceSelf:
@@ -235,7 +252,7 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
   @override
   def __getitem__(
       self: SequenceSelf,
-      the_slice: slice | tuple[int | slice | None | type(Ellipsis), ...],
+      the_slice: slice | tuple[int | slice | None | types.EllipsisType, ...],
   ) -> SequenceSelf:
     """Slices the Sequence values and mask."""
     if isinstance(the_slice, slice):
@@ -275,8 +292,10 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
     """Concatenates with other on the time dimension."""
     values = mx.concatenate([self.values, other.values], axis=1)
     mask = mx.concatenate([self.mask, other.mask], axis=1)
-    return_type = type(self) if type(self) is type(other) else Sequence
-    return return_type(values, mask)
+    if type(self) is type(other):
+      return type(self)(values, mask)
+    else:
+      return Sequence(values, mask)
 
   @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
@@ -289,8 +308,34 @@ class Sequence(types.Sequence[ValuesT, MaskT]):
     return self
 
 
-class MaskedSequence(Sequence[ValuesT, MaskT], types.MaskedSequence[ValuesT, MaskT]):
+class MaskedSequence[ValuesT: mx.array, MaskT: mx.array](
+    Sequence[ValuesT, MaskT], spec.MaskedSequence[ValuesT, MaskT]
+):
   """Sequence whose invalid timesteps are masked to zero."""
+
+  @override
+  def apply_values_masked(
+      self,
+      values_fn: Callable[..., NewValuesT],
+      *args,
+      **kwargs,
+  ) -> 'MaskedSequence[NewValuesT, MaskT]':
+    return cast(
+        'MaskedSequence[NewValuesT, MaskT]',
+        type(self)(values_fn(self.values, *args, **kwargs), self.mask),
+    )
+
+  @override
+  def apply_masked(
+      self,
+      apply_fn: Callable[..., tuple[NewValuesT, NewMaskT]],
+      *args,
+      **kwargs,
+  ) -> 'MaskedSequence[NewValuesT, NewMaskT]':
+    values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
+    return cast(
+        'MaskedSequence[NewValuesT, NewMaskT]', type(self)(values, mask)
+    )
 
   @override
   def mask_invalid(self, mask_value: complex | None = None) -> Sequence:
@@ -311,10 +356,10 @@ def mask_invalid(
   expanded_mask = sequence.expanded_mask()
   if mask_value is None:
     masked_values = mx.zeros_like(sequence.values)
-    result_type = MaskedSequence
+    result_type: type[Sequence] = MaskedSequence
   else:
     masked_values = mx.full(
-        sequence.values.shape, mask_value, sequence.values.dtype
+        sequence.values.shape, mask_value, sequence.values.dtype  # type: ignore[arg-type]
     )
     result_type = Sequence
   masked_values = mx.where(expanded_mask, sequence.values, masked_values)
@@ -322,7 +367,7 @@ def mask_invalid(
 
 
 # Defined outside of Sequence so mask_invalid can return MaskedSequence.
-Sequence.mask_invalid = mask_invalid
+Sequence.mask_invalid = mask_invalid  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Check decorators
@@ -388,7 +433,7 @@ def check_step(step_fn):
 # ---------------------------------------------------------------------------
 
 
-class Steppable(types.Steppable):
+class Steppable(spec.Steppable[InputT, OutputT], Generic[InputT, OutputT]):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   # Step-wise execution:
@@ -482,13 +527,18 @@ class Steppable(types.Steppable):
   @override
   def get_accumulated_input_latency(self, input_latency: int) -> int:
     import math
+
     return math.ceil(input_latency / self.output_ratio) + self.input_latency
 
   @override
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     output_ratio = self.output_ratio
     if required_delay := -output_latency % (1 / output_ratio):
-      path = '/'.join(self.path) if hasattr(self, 'path') else self.__class__.__name__
+      path = (
+          '/'.join(self.path)
+          if hasattr(self, 'path')
+          else self.__class__.__name__
+      )
       raise ValueError(
           f'Input to {self.__class__.__name__}(path={path!r}) has a step-wise'
           f' incoming {output_latency=} which is not divisible'
@@ -501,14 +551,15 @@ class Steppable(types.Steppable):
   @property
   @override
   def receptive_field(self) -> ReceptiveField:
-    raise NotImplementedError('receptive_field is not implemented by MLX Steppable.')
-
+    raise NotImplementedError(
+        'receptive_field is not implemented by MLX Steppable.'
+    )
 
   @abc.abstractmethod
   @override
   def layer(
-      self, x: Sequence, *, training: bool, constants: Constants | None = None
-  ) -> Sequence:
+      self, x: InputT, *, training: bool, constants: Constants | None = None
+  ) -> OutputT:
     """Process this layer layer-wise.
 
     Args:
@@ -527,8 +578,8 @@ class Steppable(types.Steppable):
 
   @override
   def layer_with_emits(
-      self, x: Sequence, *, training: bool, constants: Constants | None = None
-  ) -> tuple[Sequence, Emits]:
+      self, x: InputT, *, training: bool, constants: Constants | None = None
+  ) -> tuple[OutputT, Emits]:
     """Process this layer layer-wise, producing emitted arrays.
 
     This is like `layer`, except it has an additional return value which is the
@@ -555,12 +606,12 @@ class Steppable(types.Steppable):
   @override
   def step(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State]:
+  ) -> tuple[OutputT, State]:
     """Process this layer step-wise.
 
     Args:
@@ -584,12 +635,12 @@ class Steppable(types.Steppable):
   @override
   def step_with_emits(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State, Emits]:
+  ) -> tuple[OutputT, State, Emits]:
     """Process this layer step-wise, producing emitted arrays.
 
     This is like `step`, except it has an additional return value which is the
@@ -701,20 +752,22 @@ class Steppable(types.Steppable):
 # ---------------------------------------------------------------------------
 
 
-class SequenceLayer(nn.Module, Steppable, types.SequenceLayer):
+class SequenceLayer[InputT: Sequence, OutputT: Sequence](
+    nn.Module, Steppable[InputT, OutputT], spec.SequenceLayer[InputT, OutputT]
+):
   """Base Module for Sequence Layers."""
 
-class SequenceLayerConfig(types.SequenceLayerConfig):
+
+class SequenceLayerConfig(spec.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects."""
 
   @abc.abstractmethod
   def make(self) -> SequenceLayer:
     """Builds a SequenceLayer from this config."""
 
-  def copy(self, **kwargs) -> 'SequenceLayerConfig':
+  def copy(self, **kwargs) -> Self:
     """Returns a copy of the config with updated fields."""
-    return dataclasses.replace(self, **kwargs)
-
+    return cast(Self, dataclasses.replace(cast(Any, self), **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +775,7 @@ class SequenceLayerConfig(types.SequenceLayerConfig):
 # ---------------------------------------------------------------------------
 
 
-class PreservesType(types.PreservesType):
+class PreservesType(SequenceLayer, spec.PreservesType):
   """A mix-in for layers that do not change the input dtype."""
 
   @override
@@ -736,7 +789,9 @@ class PreservesType(types.PreservesType):
     return input_dtype
 
 
-class PreservesShape(types.PreservesShape):
+class PreservesShape[InputT: Sequence, OutputT: Sequence](
+    SequenceLayer[InputT, OutputT], spec.PreservesShape[InputT, OutputT]
+):
   """A mix-in for layers that do not change the input shape."""
 
   @override
@@ -755,15 +810,18 @@ class PreservesShape(types.PreservesShape):
 # ---------------------------------------------------------------------------
 
 
-class Stateless(SequenceLayer, types.Stateless):
+class Stateless[InputT: Sequence, OutputT: Sequence](
+    SequenceLayer[InputT, OutputT], spec.Stateless[InputT, OutputT]
+):
   """A SequenceLayer with no state over time required for step-wise processing.
 
-  Sub-classes must only implement:
+  Sub-classes must also implement:
   - layer
   - get_output_shape
   - get_output_dtype
   """
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -779,56 +837,69 @@ class Stateless(SequenceLayer, types.Stateless):
     return ()
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self,
       input_shape: ShapeLike,
       *,
       constants: Constants | None = None,
   ) -> Shape:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self,
       input_dtype: DType,
       *,
       constants: Constants | None = None,
   ) -> DType:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def layer(
       self,
-      x: Sequence,
+      x: InputT,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> Sequence:
-    pass
+  ) -> OutputT:
+    ...
 
+  @override
   def step(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State]:
+  ) -> tuple[OutputT, State]:
     return self.layer(x, training=training, constants=constants), state
 
 
-class StatelessPointwise(PreservesShape, Stateless, types.StatelessPointwise):
+class StatelessPointwise[InputT: Sequence, OutputT: Sequence](
+    PreservesShape[InputT, OutputT],
+    Stateless[InputT, OutputT],
+    spec.StatelessPointwise[InputT, OutputT],
+):
   """A SequenceLayer that has no state and operates pointwise on its input."""
 
 
-class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunctor):
+class StatelessPointwiseFunctor[InputT: Sequence, OutputT: Sequence](
+    StatelessPointwise[InputT, OutputT],
+    spec.StatelessPointwiseFunctor[InputT, OutputT],
+):
   """A stateless SequenceLayer for simple pointwise processing fns."""
 
   @abc.abstractmethod
+  @override
   def fn(self, values: ValuesT, mask: MaskT) -> tuple[ValuesT, MaskT]:
     """Transforms each scalar in values independently."""
 
   @property
+  @override
   def mask_required(self):
     """Returns true if fn can change the sequence's masked state.
 
@@ -837,13 +908,14 @@ class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunc
     return True
 
   @check_layer
+  @override
   def layer(
       self,
-      x: Sequence,
+      x: InputT,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> Sequence:
+  ) -> OutputT:
     del training
     if self.mask_required:
       y = x.apply(self.fn)
@@ -852,7 +924,7 @@ class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunc
     # Ensure MaskedSequence -> Sequence conversion for apply.
     if isinstance(y, MaskedSequence) and self.mask_required:
       y = Sequence(y.values, y.mask)
-    return y
+    return cast(OutputT, y)
 
 
 # ---------------------------------------------------------------------------
@@ -860,7 +932,11 @@ class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunc
 # ---------------------------------------------------------------------------
 
 
-class Emitting(SequenceLayer, types.Emitting):
+class Emitting(
+    SequenceLayer[InputT, OutputT],
+    spec.Emitting[InputT, OutputT],
+    Generic[InputT, OutputT],
+):
   """A SequenceLayer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
@@ -871,6 +947,7 @@ class Emitting(SequenceLayer, types.Emitting):
   """
 
   @abc.abstractmethod
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -879,83 +956,92 @@ class Emitting(SequenceLayer, types.Emitting):
       training: bool,
       constants: Constants | None = None,
   ) -> State:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self,
       input_shape: ShapeLike,
       *,
       constants: Constants | None = None,
   ) -> Shape:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self,
       input_dtype: DType,
       *,
       constants: Constants | None = None,
   ) -> DType:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def step_with_emits(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State, Emits]:
-    pass
+  ) -> tuple[OutputT, State, Emits]:
+    ...
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
-      x: Sequence,
+      x: InputT,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, Emits]:
-    pass
+  ) -> tuple[OutputT, Emits]:
+    ...
 
+  @override
   def step(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State]:
+  ) -> tuple[OutputT, State]:
     output, state, _ = self.step_with_emits(
         x, state, training=training, constants=constants
     )
     return output, state
 
+  @override
   def layer(
       self,
-      x: Sequence,
+      x: InputT,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> Sequence:
+  ) -> OutputT:
     outputs, _ = self.layer_with_emits(
         x, training=training, constants=constants
     )
     return outputs
 
 
-class StatelessEmitting(Emitting, types.StatelessEmitting):
+class StatelessEmitting[InputT: Sequence, OutputT: Sequence](
+    Emitting[InputT, OutputT], spec.StatelessEmitting[InputT, OutputT]
+):
   """A SequenceLayer with no state over time that emits auxiliary arrays.
 
-  Sub-classes must only implement:
+  Sub-classes must implement:
   - layer_with_emits
   - get_output_shape
   - get_output_dtype
   """
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self,
       input_shape: ShapeLike,
@@ -965,24 +1051,27 @@ class StatelessEmitting(Emitting, types.StatelessEmitting):
     pass
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self,
       input_dtype: DType,
       *,
       constants: Constants | None = None,
   ) -> DType:
-    pass
+    ...
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
-      x: Sequence,
+      x: InputT,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, Emits]:
-    pass
+  ) -> tuple[OutputT, Emits]:
+    ...
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -997,14 +1086,15 @@ class StatelessEmitting(Emitting, types.StatelessEmitting):
     del constants
     return ()
 
+  @override
   def step_with_emits(
       self,
-      x: Sequence,
+      x: InputT,
       state: State,
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, State, Emits]:
+  ) -> tuple[OutputT, State, Emits]:
     outputs, emits = self.layer_with_emits(
         x, training=training, constants=constants
     )

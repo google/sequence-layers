@@ -2228,6 +2228,7 @@ def layer_with_emits_spec(
       values_spec,
       types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
   )
+
   def layer_fn(
       layer: types.SequenceLayer,
       x: types.Sequence,

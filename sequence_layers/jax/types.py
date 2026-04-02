@@ -30,7 +30,7 @@ from jax import numpy as jnp
 import jaxtyping
 import numpy as np
 
-from sequence_layers.abstract import types
+from sequence_layers.specs import types as spec
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import typing as jt
 import typeguard
@@ -189,8 +189,8 @@ ARRAY_LIKE_TYPES = (
     jax.core.ShapedArray,
 )
 
-PaddingMode = types.PaddingMode
-PaddingModeString = types.PaddingModeString
+PaddingMode = spec.PaddingMode
+PaddingModeString = spec.PaddingModeString
 
 
 def validate_padding(padding: str) -> PaddingModeString:
@@ -254,7 +254,9 @@ def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
   )
 
 
-class Sequence(types.Sequence[ValuesT, MaskT], struct.PyTreeNode):
+class Sequence[ValuesT, MaskT](
+    spec.Sequence[ValuesT, MaskT], struct.PyTreeNode
+):
   """A generic sequence container that preserves masking information."""
 
   values: ValuesT
@@ -537,7 +539,9 @@ class Sequence(types.Sequence[ValuesT, MaskT], struct.PyTreeNode):
     return self
 
 
-class MaskedSequence(Sequence[ValuesT, MaskT], types.MaskedSequence[ValuesT, MaskT]):
+class MaskedSequence(
+    Sequence[ValuesT, MaskT], spec.MaskedSequence[ValuesT, MaskT]
+):
   """Sequence whose invalid timesteps are masked to zero."""
 
   @override
@@ -598,6 +602,8 @@ class MetaSequenceT(abc.ABCMeta):
 
 
 class SequenceT(Sequence, metaclass=MetaSequenceT):
+  """Allows typing to be: SequenceT[Float, "B T C"]"""
+
   pass
 
 
@@ -669,7 +675,7 @@ def _add_custom_checker_lookup_fn(lookup_fn):
 _add_custom_checker_lookup_fn(_sequence_checker_lookup_fn)
 
 
-class Steppable(types.Steppable):
+class Steppable(spec.Steppable):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   # Step-wise execution:
@@ -880,6 +886,7 @@ class Steppable(types.Steppable):
     )
 
   @abc.abstractmethod
+  @override
   def layer(
       self, x: Sequence, *, training: bool, constants: Constants | None = None
   ) -> Sequence:
@@ -1099,7 +1106,6 @@ class Steppable(types.Steppable):
   ) -> DType:
     """Returns the layer's output dtype for the specified input dtype."""
 
-
   @nn.nowrap
   def get_output_spec(
       self,
@@ -1267,11 +1273,11 @@ def check_step_with_emits(step_with_emits_fn):
   return check_step_with_emits_fn
 
 
-class SequenceLayer(nn.Module, Steppable, types.SequenceLayer):
+class SequenceLayer(nn.Module, Steppable, spec.SequenceLayer):
   """Base Module for Sequence Layers."""
 
 
-class PreservesType(types.PreservesType):
+class PreservesType(SequenceLayer, spec.PreservesType):
   """A mix-in for layers that do not change the input dtype."""
 
   @nn.nowrap
@@ -1283,7 +1289,7 @@ class PreservesType(types.PreservesType):
     return input_dtype
 
 
-class PreservesShape(types.PreservesShape):
+class PreservesShape(SequenceLayer, spec.PreservesShape):
   """A mix-in for layers that do not change the input shape."""
 
   @nn.nowrap
@@ -1295,7 +1301,7 @@ class PreservesShape(types.PreservesShape):
     return tuple(input_shape)
 
 
-class Emitting(SequenceLayer, types.Emitting):
+class Emitting(SequenceLayer, spec.Emitting):
   """A SequenceLayer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
@@ -1356,7 +1362,7 @@ class Emitting(SequenceLayer, types.Emitting):
     pass
 
 
-class Stateless(SequenceLayer, types.Stateless):
+class Stateless(SequenceLayer, spec.Stateless):
   """A SequenceLayer with no state over time required for step-wise processing.
 
   Sub-classes must only implement:
@@ -1369,6 +1375,7 @@ class Stateless(SequenceLayer, types.Stateless):
   def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
     return {0: (0, 0)}
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -1383,6 +1390,7 @@ class Stateless(SequenceLayer, types.Stateless):
     del constants
     return ()
 
+  @override
   def step(
       self,
       x: Sequence,
@@ -1394,18 +1402,21 @@ class Stateless(SequenceLayer, types.Stateless):
     return self.layer(x, training=training, constants=constants), state
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self, input_shape: ShapeLike, *, constants: Constants | None = None
   ) -> Shape:
     pass
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self, input_dtype: DType, *, constants: Constants | None = None
   ) -> DType:
     pass
 
   @abc.abstractmethod
+  @override
   def layer(
       self,
       x: Sequence,
@@ -1416,7 +1427,7 @@ class Stateless(SequenceLayer, types.Stateless):
     pass
 
 
-class StatelessEmitting(Emitting, types.StatelessEmitting):
+class StatelessEmitting(Emitting, spec.StatelessEmitting):
   """A SequenceLayer with no state over time that emits auxiliary arrays.
 
   Sub-classes must only implement:
@@ -1429,6 +1440,7 @@ class StatelessEmitting(Emitting, types.StatelessEmitting):
   def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
     return {0: (0, 0)}
 
+  @override
   def step_with_emits(
       self,
       x: Sequence,
@@ -1479,11 +1491,13 @@ class StatelessEmitting(Emitting, types.StatelessEmitting):
     pass
 
 
-class StatelessPointwise(PreservesShape, Stateless, types.StatelessPointwise):
+class StatelessPointwise(PreservesShape, Stateless, spec.StatelessPointwise):
   """A SequenceLayer that has no state and operates pointwise on its input."""
 
 
-class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunctor):
+class StatelessPointwiseFunctor(
+    StatelessPointwise, spec.StatelessPointwiseFunctor
+):
   """A stateless SequenceLayer for simple pointwise processing fns."""
 
   @abc.abstractmethod
@@ -1516,7 +1530,7 @@ class StatelessPointwiseFunctor(StatelessPointwise, types.StatelessPointwiseFunc
     return y
 
 
-class SequenceLayerConfig(types.SequenceLayerConfig):
+class SequenceLayerConfig(spec.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects.
 
   Requires a no-argument make() method which returns a SequenceLayer.
