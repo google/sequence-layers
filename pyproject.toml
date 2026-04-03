@@ -4,7 +4,7 @@
 name = "sequence_layers"
 description = "Sequence Layers neural network layer library from Google."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 license = {file = "LICENSE"}
 authors = [
     {name = "RJ Skerry-Ryan", email="rjryan@google.com"},
@@ -24,7 +24,7 @@ dependencies = [
     "jaxtyping",
     "numpy",
     "orbax-export",
-    "recurrentgemma[jax]",
+    "recurrentgemma[jax]>=1.0.1",
     "typeguard==2.13.3",
 ]
 
@@ -50,13 +50,14 @@ mlx = [
     "mlx",
 ]
 dev = [
-    "absl-py",
+    "absl-py>=2.4.0",
     "chex",
     "orbax",
+    "pyink",
+    "pylint>=2.6.0",
+    "pyrefly>=0.58.0",
     "pytest",
     "pytest-xdist",
-    "pylint>=2.6.0",
-    "pyink",
     "tensorflow",  # JAX tests use TensorFlow.
 ]
 
@@ -82,3 +83,5 @@ exclude = [
   "**/*_test.py",
   "testdata/**",
 ]
+
+[tool.pyrefly]
