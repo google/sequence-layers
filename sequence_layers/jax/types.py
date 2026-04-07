@@ -454,6 +454,7 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
   def from_lengths(
       cls, values: ValuesT, lengths: LengthsT, is_masked: bool = False
   ) -> 'Sequence':
+    """Returns a Sequence for values, with masking information from lengths."""
     values = jnp.asarray(values)
     mask = sequence_mask(lengths, maxlen=values.shape[1])
     return MaskedSequence(values, mask) if is_masked else Sequence(values, mask)
@@ -598,7 +599,12 @@ class Sequence(Generic[ValuesT, MaskT], struct.PyTreeNode):
         [[0, 0], [pad_left, pad_right]],
         constant_values=valid,
     )
-    return type(self)(values, mask)
+    return_type = type(self)
+    # If padding invalid timesteps with a non-zero value, the result is not
+    # a MaskedSequence, even if the input was.
+    if isinstance(self, MaskedSequence) and not valid and pad_value != 0.0:
+      return_type = Sequence
+    return return_type(values, mask)
 
   def reverse_time(self: SequenceSelf) -> SequenceSelf:
     """Reverses the sequence along the time dimension.
