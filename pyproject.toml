@@ -68,6 +68,11 @@ unstable = true
 pyink-indentation = 2
 pyink-use-majority-quotes = true
 
+[tool.pylint.format]
+indent-string = "  "
+
+
+
 [build-system]
 # Build system specify which backend is used to build/install the project (flit,
 # poetry, setuptools,...). All backends are supported by `pip install`
