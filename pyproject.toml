@@ -71,6 +71,9 @@ pyink-use-majority-quotes = true
 [tool.pylint.format]
 indent-string = "  "
 
+[tool.pylint.basic]
+no-docstring-rgx = "^(_)?test_|^.*Test$"
+
 
 
 [build-system]
@@ -90,3 +93,4 @@ exclude = [
 ]
 
 [tool.pyrefly]
+errors = { missing-override-decorator = "error" }
