@@ -15,9 +15,7 @@
 
 import dataclasses
 import typing
-from typing import Any
 
-from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -25,7 +23,6 @@ import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 
-import sequence_layers.jax as sl
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -33,14 +30,14 @@ from sequence_layers.jax import typing as jt
 from sequence_layers.specs import types_behaviors as spec
 
 
-class ModuleInterfaceTest(spec.ModuleInterfaceTest):
-  sl = sl
+class ModuleInterfaceTest(
+    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
+):
+  pass
 
 
 class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
   """Tests for the Sequence class."""
-
-  sl = sl
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""
@@ -200,8 +197,10 @@ class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
     self.assertSequencesEqual(y, x)
 
 
-class SequenceLayerConfigTest(spec.SequenceLayerConfigTest):
-  sl = sl
+class SequenceLayerConfigTest(
+    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
+):
+  pass
 
   def test_copy_raises_on_mutable_attribute(self):
 
@@ -242,32 +241,36 @@ class SequenceLayerConfigTest(spec.SequenceLayerConfigTest):
       del new_config
 
 
-class SteppableTest(spec.SteppableTest):
-  sl = sl
+class SteppableTest(test_utils.SequenceLayerTest, spec.SteppableTest):
+  pass
 
 
-class PreservesTypeTest(spec.PreservesTypeTest):
-  sl = sl
+class PreservesTypeTest(test_utils.SequenceLayerTest, spec.PreservesTypeTest):
+  pass
 
 
-class PreservesShapeTest(spec.PreservesShapeTest):
-  sl = sl
+class PreservesShapeTest(test_utils.SequenceLayerTest, spec.PreservesShapeTest):
+  pass
 
 
-class StatelessTest(spec.StatelessTest):
-  sl = sl
+class StatelessTest(test_utils.SequenceLayerTest, spec.StatelessTest):
+  pass
 
 
-class EmittingTest(spec.EmittingTest):
-  sl = sl
+class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
+  pass
 
 
-class StatelessEmittingTest(spec.StatelessEmittingTest):
-  sl = sl
+class StatelessEmittingTest(
+    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
+):
+  pass
 
 
-class StatelessPointwiseFunctorTest(spec.StatelessPointwiseFunctorTest):
-  sl = sl
+class StatelessPointwiseFunctorTest(
+    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
+):
+  pass
 
 
 if __name__ == '__main__':

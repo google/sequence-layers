@@ -1,20 +1,58 @@
-"""Abstract tests for Sequence types."""
+# pylint: disable=abstract-method
+"""Generic tests for Sequence types."""
 
-import abc
-from types import ModuleType
-from typing import Any, Callable, Sequence as TypingSequence, TYPE_CHECKING, cast, override
 import dataclasses
-from sequence_layers import specs
-from sequence_layers.specs import backend as backend_spec
-from sequence_layers.specs import types as spec
-
 import fractions
+from typing import Any, override
+import unittest.mock
+
 from absl.testing import parameterized
 import numpy as np
-import unittest.mock
+
+from sequence_layers.specs import types as spec
+from sequence_layers.specs.test_utils import SequenceLayerTest
 
 
 class DefaultTestLayer(spec.SequenceLayer):
+  """A default test layer for testing."""
+
+  @property
+  @override
+  def block_size(self) -> int:
+    return 1
+
+  @property
+  @override
+  def output_ratio(self) -> fractions.Fraction:
+    return fractions.Fraction(1)
+
+  @property
+  @override
+  def supports_step(self) -> bool:
+    return True
+
+  @property
+  @override
+  def input_latency(self) -> int:
+    return 0
+
+  @property
+  @override
+  def output_latency(self) -> int:
+    return 0
+
+  @property
+  @override
+  def receptive_field(self) -> Any:
+    return 1
+
+  @override
+  def get_accumulated_input_latency(self, input_latency: int) -> int:
+    return input_latency
+
+  @override
+  def get_accumulated_output_latency(self, output_latency: int) -> int:
+    return output_latency
 
   @override
   def layer(
@@ -89,27 +127,6 @@ class DefaultTestLayer(spec.SequenceLayer):
     return np.float64
 
 
-class SequenceLayerTest[SequenceT: spec.Sequence = spec.Sequence](
-    parameterized.TestCase
-):
-  """Base test class providing common sequence testing assertions and binds a backend implementation to tests."""
-
-  # sequence_layers.<backend> module
-  sl: specs.ModuleSpec
-
-  @property
-  def xp(self) -> backend_spec.xp:
-    return self.sl.backend.xp
-
-  @abc.abstractmethod
-  def assertSequencesEqual(self, x: SequenceT, y: SequenceT) -> None:
-    ...
-
-  @abc.abstractmethod
-  def assertAllEqual(self, x: Any, y: Any) -> None:
-    ...
-
-
 class ModuleInterfaceTest(SequenceLayerTest):
 
   def test_backend_specific_module_has_interface(self) -> None:
@@ -117,7 +134,7 @@ class ModuleInterfaceTest(SequenceLayerTest):
 
 
 class SequenceTest(SequenceLayerTest):
-  """Abstract tests for the Sequence class."""
+  """Generic tests for the Sequence class."""
 
   @parameterized.named_parameters(
       ('mask_value=None', 0.0, None),
@@ -183,6 +200,7 @@ class SequenceTest(SequenceLayerTest):
   def _create_test_sequence(
       self, shape: spec.Shape
   ) -> spec.Sequence[spec.Array, spec.Array]:
+    """Creates a test sequence with specific shape."""
     size = 1
     for d in shape:
       size *= d
@@ -264,13 +282,7 @@ class SequenceTest(SequenceLayerTest):
   def test_from_values(self) -> None:
     values_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
     values = self.xp.array(values_np)
-    # Get the class from an instance
-    seq = self.sl.Sequence(
-        values, self.xp.array(np.ones(values.shape[:2], dtype=bool))
-    )
-    SeqClass = type(seq)
-
-    x = SeqClass.from_values(values)  # type: ignore
+    x = self.sl.Sequence.from_values(values)
     self.assertAllEqual(x.values, values)
     self.assertAllEqual(
         x.mask, self.xp.array(np.ones(values.shape[:2], dtype=bool))
@@ -316,6 +328,7 @@ class SequenceTest(SequenceLayerTest):
     self.assertIsInstance(masked2, self.sl.MaskedSequence)
 
   def test_from_lengths(self) -> None:
+    """Tests creating a sequence from lengths."""
     values = self.xp.array(
         np.arange(5 * 17 * 2).reshape((5, 17, 2)).astype(np.float32)
     )
@@ -344,22 +357,27 @@ class SequenceTest(SequenceLayerTest):
 
 
 class SteppableTest(SequenceLayerTest):
-  """Abstract tests for Steppable layers."""
 
   def create_steppable(self) -> spec.Steppable:
-    """Creates a basic Steppable instance that should have default properties."""
+    """Creates a basic Steppable instance."""
+    backend_sl = self.sl
 
-    class DefaultSteppable(DefaultTestLayer, self.sl.types.Steppable):  # type: ignore[name-defined, misc]
+    class DefaultSteppable(
+        DefaultTestLayer, backend_sl.types.Steppable
+    ):
+      """Mock layer for testing."""
 
       @override
       def layer_with_emits(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).layer_with_emits(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Steppable.layer_with_emits(
+            self, *args, **kwargs
+        )
 
       @override
       def step_with_emits(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).step_with_emits(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Steppable.step_with_emits(self, *args, **kwargs)
 
-    return DefaultSteppable()  # type: ignore
+    return DefaultSteppable()
 
   def test_steppable_defaults(self) -> None:
     layer = self.create_steppable()
@@ -371,7 +389,9 @@ class SteppableTest(SequenceLayerTest):
     self.assertEqual(layer.get_accumulated_input_latency(0), 0)
     self.assertEqual(layer.get_accumulated_output_latency(0), 0)
 
+  @override
   def create_sequence(self) -> spec.Sequence:
+    """Creates a test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
     )
@@ -407,13 +427,18 @@ class SteppableTest(SequenceLayerTest):
 class SequenceLayerConfigTest(SequenceLayerTest):
 
   def test_copy(self) -> None:
+    backend_sl = self.sl
 
     @dataclasses.dataclass(frozen=True)
-    class Config(self.sl.SequenceLayerConfig):  # type: ignore[name-defined,misc]
+    class Config(backend_sl.SequenceLayerConfig):
+      """Mock config."""
+
       a: int = 1234
       b: str = 'default string'
 
+      @override
       def make(self) -> Any:
+        """Makes a dummy layer."""
         return 'dummy_layer'
 
     config = Config()  # type: ignore
@@ -422,10 +447,14 @@ class SequenceLayerConfigTest(SequenceLayerTest):
     self.assertEqual(new_config.b, 'new string')
 
   def test_copy_raises_on_non_dataclass(self) -> None:
+    backend_sl = self.sl
 
-    class NonDataclassConfig(self.sl.SequenceLayerConfig):  # type: ignore[name-defined,misc]
+    class NonDataclassConfig(backend_sl.SequenceLayerConfig):  # pylint: disable=too-few-public-methods
+      """Non-dataclass mock config."""
 
+      @override
       def make(self) -> Any:
+        """Makes a dummy layer."""
         return 'dummy_layer'
 
     config = NonDataclassConfig()  # type: ignore
@@ -434,11 +463,15 @@ class SequenceLayerConfigTest(SequenceLayerTest):
       del new_config
 
   def test_copy_disallows_new_fields(self) -> None:
+    backend_sl = self.sl
 
     @dataclasses.dataclass(frozen=True)
-    class Config(self.sl.SequenceLayerConfig):  # type: ignore[name-defined,misc]
+    class Config(backend_sl.SequenceLayerConfig):
+      """Mock config."""
 
+      @override
       def make(self) -> Any:
+        """Makes a dummy layer."""
         return 'dummy_layer'
 
     config = Config()  # type: ignore
@@ -452,13 +485,21 @@ class SequenceLayerConfigTest(SequenceLayerTest):
 class PreservesTypeTest(SequenceLayerTest):
 
   def create_layer(self) -> spec.PreservesType:
-    class DummyLayer(DefaultTestLayer, self.sl.types.PreservesType):  # type: ignore[name-defined, misc]
+    """Creates a preserves type layer."""
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.PreservesType
+    ):
+      """Mock layer for testing."""
 
       @override
       def get_output_dtype(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).get_output_dtype(*args, **kwargs)  # type: ignore
+        return backend_sl.types.PreservesType.get_output_dtype(
+            self, *args, **kwargs
+        )
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
   def test_preserves_dtype(self) -> None:
     layer = self.create_layer()
@@ -468,13 +509,21 @@ class PreservesTypeTest(SequenceLayerTest):
 class PreservesShapeTest(SequenceLayerTest):
 
   def create_layer(self) -> spec.PreservesShape:
-    class DummyLayer(DefaultTestLayer, self.sl.types.PreservesShape):  # type: ignore[name-defined, misc]
+    """Creates a preserves shape layer."""
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.PreservesShape
+    ):
+      """Mock layer for testing."""
 
       @override
       def get_output_shape(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).get_output_shape(*args, **kwargs)  # type: ignore
+        return backend_sl.types.PreservesShape.get_output_shape(
+            self, *args, **kwargs
+        )
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
   def test_preserves_shape(self) -> None:
     layer = self.create_layer()
@@ -483,18 +532,33 @@ class PreservesShapeTest(SequenceLayerTest):
 
 class StatelessTest(SequenceLayerTest):
 
+  @override
+  def create_sequence(self) -> spec.Sequence:
+    """Creates a default test sequence."""
+    return self.sl.Sequence(
+        self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
+    )
+
   def create_layer(self) -> spec.Stateless:
-    class DummyLayer(DefaultTestLayer, self.sl.types.Stateless):  # type: ignore[name-defined, misc]
+    """Creates a stateless layer."""
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.Stateless
+    ):
+      """Mock layer for testing."""
 
       @override
       def get_initial_state(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).get_initial_state(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Stateless.get_initial_state(
+            self, *args, **kwargs
+        )
 
       @override
       def step(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).step(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Stateless.step(self, *args, **kwargs)
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
   def test_stateless_behaviors(self) -> None:
     layer = self.create_layer()
@@ -505,66 +569,98 @@ class StatelessTest(SequenceLayerTest):
     )
 
     # step unconditionally delegates to layer and returns identical empty state
+    x = self.create_sequence()
     with unittest.mock.patch.object(
         layer, 'layer', return_value='layer_out'
     ) as mock_layer:
-      out, state = layer.step('mock_x', 'mock_state', training=True, constants={'c': 1})  # type: ignore
+      out, state = layer.step(
+          x, 'mock_state', training=True, constants={'c': 1}
+      )
       self.assertEqual(out, 'layer_out')
       self.assertEqual(state, 'mock_state')
-      mock_layer.assert_called_once_with(
-          'mock_x', training=True, constants={'c': 1}
-      )
+      mock_layer.assert_called_once_with(x, training=True, constants={'c': 1})
 
 
 class EmittingTest(SequenceLayerTest):
 
+  @override
+  def create_sequence(self) -> spec.Sequence:
+    """Creates a default test sequence."""
+    return self.sl.Sequence(
+        self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
+    )
+
   def create_layer(self) -> spec.Emitting:
-    class DummyLayer(DefaultTestLayer, self.sl.types.Emitting):  # type: ignore[name-defined, misc]
+    """Creates an emitting layer."""
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.Emitting
+    ):
+      """Mock layer for testing."""
 
       @override
       def layer(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).layer(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Emitting.layer(self, *args, **kwargs)
 
       @override
       def step(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).step(*args, **kwargs)  # type: ignore
+        return backend_sl.types.Emitting.step(self, *args, **kwargs)
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
   def test_emitting_drops_emits_on_standard_calls(self) -> None:
     layer = self.create_layer()
+    x = self.create_sequence()
 
     with unittest.mock.patch.object(
         layer, 'layer_with_emits', return_value=('out', 'emits')
     ) as m_layer:
-      self.assertEqual(layer.layer('mock_x', training=False), 'out')  # type: ignore
-      m_layer.assert_called_once_with('mock_x', training=False, constants=None)
+      self.assertEqual(layer.layer(x, training=False), 'out')
+      m_layer.assert_called_once_with(x, training=False, constants=None)
 
     with unittest.mock.patch.object(
         layer, 'step_with_emits', return_value=('out', 'state', 'emits')
     ) as m_step:
-      out, state = layer.step('mock_x', 'state', training=True, constants={'c': 1})  # type: ignore
+      out, state = layer.step(x, 'state', training=True, constants={'c': 1})
       self.assertEqual(out, 'out')
       self.assertEqual(state, 'state')
       m_step.assert_called_once_with(
-          'mock_x', 'state', training=True, constants={'c': 1}
+          x, 'state', training=True, constants={'c': 1}
       )
 
 
 class StatelessEmittingTest(SequenceLayerTest):
 
+  @override
+  def create_sequence(self) -> spec.Sequence:
+    """Creates a default test sequence."""
+    return self.sl.Sequence(
+        self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
+    )
+
   def create_layer(self) -> spec.SequenceLayer:
-    class DummyLayer(DefaultTestLayer, self.sl.types.StatelessEmitting):  # type: ignore[name-defined, misc]
+    """Creates a stateless emitting layer."""
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.StatelessEmitting
+    ):
+      """Mock layer for testing."""
 
       @override
       def get_initial_state(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).get_initial_state(*args, **kwargs)  # type: ignore
+        return backend_sl.types.StatelessEmitting.get_initial_state(
+            self, *args, **kwargs
+        )
 
       @override
       def step_with_emits(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).step_with_emits(*args, **kwargs)  # type: ignore
+        return backend_sl.types.StatelessEmitting.step_with_emits(
+            self, *args, **kwargs
+        )
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
   def test_stateless_emitting_behaviors(self) -> None:
     layer = self.create_layer()
@@ -573,42 +669,57 @@ class StatelessEmittingTest(SequenceLayerTest):
         layer.get_initial_state(32, 'fake_spec', training=False), ()
     )
 
+    x = self.create_sequence()
     with unittest.mock.patch.object(
         layer, 'layer_with_emits', return_value=('out', 'emits')
     ) as m_layer:
-      out, state, emits = layer.step_with_emits('mock_x', 'state', training=False)  # type: ignore
+      out, state, emits = layer.step_with_emits(x, 'state', training=False)
       self.assertEqual(out, 'out')
       self.assertEqual(state, 'state')
       self.assertEqual(emits, 'emits')
-      m_layer.assert_called_once_with('mock_x', training=False, constants=None)
+      m_layer.assert_called_once_with(x, training=False, constants=None)
 
 
 class StatelessPointwiseFunctorTest(SequenceLayerTest):
 
   def create_layer(self, is_mask_required: bool) -> spec.SequenceLayer[Any]:
+    """Creates a stateless pointwise functor layer."""
 
-    class DummyLayer(DefaultTestLayer, self.sl.types.StatelessPointwiseFunctor):  # type: ignore[name-defined, misc]
+    backend_sl = self.sl
+
+    class DummyLayer(
+        DefaultTestLayer, backend_sl.types.StatelessPointwiseFunctor
+    ):
+      """Mock layer for testing."""
 
       @override
       def layer(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).layer(*args, **kwargs)  # type: ignore
+        return backend_sl.types.StatelessPointwiseFunctor.layer(
+            self, *args, **kwargs
+        )
 
       @override
       def get_output_shape(self, *args, **kwargs):
-        return super(DefaultTestLayer, self).get_output_shape(*args, **kwargs)  # type: ignore
+        return backend_sl.types.StatelessPointwiseFunctor.get_output_shape(
+            self, *args, **kwargs
+        )
 
       @property
       @override
-      def mask_required(self_inner) -> bool:
+      def mask_required(self) -> bool:
+        """Whether mask is required."""
         return is_mask_required
 
       @override
-      def fn(self_inner, values: Any, mask: Any) -> tuple[Any, Any]:
+      def fn(self, values: Any, mask: Any) -> tuple[Any, Any]:
+        """Pointwise function."""
         return values, mask
 
-    return DummyLayer()  # type: ignore
+    return DummyLayer()
 
+  @override
   def create_sequence(self) -> spec.Sequence[spec.Array, spec.Array]:
+    """Creates a test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
     )

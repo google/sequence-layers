@@ -32,8 +32,7 @@ import sequence_layers.jax as sl
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-
-from sequence_layers.specs import types_behaviors as types_behaviors_spec
+from sequence_layers.specs import test_utils as spec
 
 _SequenceLayerT = TypeVar('_SequenceLayerT', bound=types.SequenceLayer)
 _T = TypeVar('_T')
@@ -780,7 +779,7 @@ def _mask_and_pad_to_max_length(
   return a, b
 
 
-class SequenceLayerTest(types_behaviors_spec.SequenceLayerTest[types.Sequence]):
+class SequenceLayerTest(spec.SequenceLayerTest):
   """Base class for SequenceLayer tests."""
 
   sl = sl
