@@ -1,50 +1,54 @@
-import mlx.core as mx
-import numpy as np
-
-import sequence_layers.mlx as sl
+from sequence_layers.mlx import test_utils
 from sequence_layers.specs import types_behaviors as spec
-from absl.testing import parameterized
 from absl.testing import absltest
 
 
-class ModuleInterfaceTest(spec.ModuleInterfaceTest):
-  sl = sl
+class ModuleInterfaceTest(
+    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
+):
+  pass
 
 
-class SequenceTest(spec.SequenceTest):
-  sl = sl
+class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
+  pass
 
 
-class SequenceLayerConfigTest(spec.SequenceLayerConfigTest):
-  sl = sl
+class SequenceLayerConfigTest(
+    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
+):
+  pass
 
 
-class SteppableTest(spec.SteppableTest):
-  sl = sl
+class SteppableTest(test_utils.SequenceLayerTest, spec.SteppableTest):
+  pass
 
 
-class PreservesTypeTest(spec.PreservesTypeTest):
-  sl = sl
+class PreservesTypeTest(test_utils.SequenceLayerTest, spec.PreservesTypeTest):
+  pass
 
 
-class PreservesShapeTest(spec.PreservesShapeTest):
-  sl = sl
+class PreservesShapeTest(test_utils.SequenceLayerTest, spec.PreservesShapeTest):
+  pass
 
 
-class StatelessTest(spec.StatelessTest):
-  sl = sl
+class StatelessTest(test_utils.SequenceLayerTest, spec.StatelessTest):
+  pass
 
 
-class EmittingTest(spec.EmittingTest):
-  sl = sl
+class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
+  pass
 
 
-class StatelessEmittingTest(spec.StatelessEmittingTest):
-  sl = sl
+class StatelessEmittingTest(
+    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
+):
+  pass
 
 
-class StatelessPointwiseFunctorTest(spec.StatelessPointwiseFunctorTest):
-  sl = sl
+class StatelessPointwiseFunctorTest(
+    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
+):
+  pass
 
 
 if __name__ == '__main__':

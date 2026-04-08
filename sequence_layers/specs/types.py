@@ -865,6 +865,18 @@ class ModuleSpec(Protocol):
   def StatelessPointwiseFunctor(self) -> type[StatelessPointwiseFunctor]:
     ...
 
+  @property
+  def PreservesType(self) -> type[PreservesType]:
+    ...
+
+  @property
+  def Emitting(self) -> type[Emitting]:
+    ...
+
+  @property
+  def StatelessEmitting(self) -> type[StatelessEmitting]:
+    ...
+
 
 __all__ = [
     name
