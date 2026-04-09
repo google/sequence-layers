@@ -18,7 +18,9 @@ import functools
 import itertools
 import logging
 import random
-from typing import Any, Callable, Iterable, Mapping, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Iterable, Mapping
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -28,10 +30,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import sequence_layers.jax as sl
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
+import sequence_layers.jax as sl
 from sequence_layers.specs import test_utils as spec
 
 _SequenceLayerT = TypeVar('_SequenceLayerT', bound=types.SequenceLayer)
