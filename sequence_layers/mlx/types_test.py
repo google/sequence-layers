@@ -1,6 +1,9 @@
+"""Tests for MLX sequence types."""
+
+from absl.testing import absltest
+
 from sequence_layers.mlx import test_utils
 from sequence_layers.specs import types_behaviors as spec
-from absl.testing import absltest
 
 
 class ModuleInterfaceTest(
@@ -49,6 +52,7 @@ class StatelessPointwiseFunctorTest(
     test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
 ):
   pass
+
 
 
 if __name__ == '__main__':
