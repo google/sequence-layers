@@ -1,10 +1,12 @@
 """Test utilities for MLX sequence layers."""
 
 from typing import override
-import numpy as np
+
 import mlx.core as mx
-import sequence_layers.mlx as sl
+import numpy as np
+
 from sequence_layers.mlx import types
+import sequence_layers.mlx as sl
 from sequence_layers.specs import test_utils as spec
 
 
@@ -26,7 +28,7 @@ def _mask_and_pad_to_max_length(
 class SequenceLayerTest(spec.SequenceLayerTest):
   """Base class for MLX SequenceLayer tests."""
 
-  sl = sl
+  sl = sl  # pyrefly: ignore[bad-assignment]  # module-as-protocol
 
   @override
   def assertAllEqual(self, x, y):
@@ -36,7 +38,9 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     np.testing.assert_array_equal(x_np, y_np)
 
   @override
-  def assertSequencesEqual(self, x: types.Sequence, y: types.Sequence):
+  def assertSequencesEqual(  # pyrefly: ignore[bad-override]
+      self, x: types.Sequence, y: types.Sequence
+  ):
     """After padding, checks sequence values are equal and masks are equal."""
     x, y = _mask_and_pad_to_max_length(x, y)
     self.assertAllEqual(x.values, y.values)

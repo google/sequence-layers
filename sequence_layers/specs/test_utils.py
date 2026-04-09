@@ -2,7 +2,9 @@
 
 import abc
 from typing import Any
+
 from absl.testing import parameterized
+
 from sequence_layers import specs
 from sequence_layers.specs import backend as backend_spec
 from sequence_layers.specs import types as spec

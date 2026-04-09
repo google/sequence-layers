@@ -4,10 +4,10 @@ from typing import Any, Protocol, runtime_checkable
 
 from sequence_layers.specs import types as types_spec
 
-
 Array = types_spec.Array
 
 
+# pylint: disable=invalid-name
 class xp(Protocol):
   """NumPy-compatible interface to enable generic behavior tests.
 
@@ -19,10 +19,10 @@ class xp(Protocol):
   int32: Any
 
   def array(self, a: Any, dtype: Any = None) -> Array:
-    ...
+    """Creates an array."""
 
   def zeros(self, shape: tuple[int, ...], dtype: Any = None) -> Array:
-    ...
+    """Creates an array of zeros."""
 
 
 @runtime_checkable
@@ -31,7 +31,7 @@ class ModuleSpec(Protocol):
 
   @property
   def xp(self) -> xp:
-    ...
+    """Returns the NumPy-compatible interface."""
 
 
 __all__ = [

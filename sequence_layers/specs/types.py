@@ -10,24 +10,13 @@ import abc
 import enum
 import fractions
 from types import EllipsisType
-from typing import (
-    Any,
-    Callable,
-    Concatenate,
-    Iterable,
-    Literal,
-    MutableMapping,
-    override,
-    Protocol,
-    runtime_checkable,
-    Self,
-    TypeVar,
-)
+from typing import (Any, Callable, Concatenate, Iterable, Literal,
+                    MutableMapping, override, Protocol, runtime_checkable, Self,
+                    TypeVar)
 
 import jaxtyping as jt
 import numpy.typing as npt
 
-# NEW
 ArrayLike = npt.ArrayLike
 
 Array = jt.Shaped[Any, '...']
@@ -44,24 +33,24 @@ class ChannelSpec(Protocol):
 
   @property
   def shape(self) -> Shape:
-    ...
+    """The shape of the channel."""
 
   @property
   def dtype(self) -> Any:
-    ...
+    """The dtype of the channel."""
 
 
 State = Any
 Constants = MutableMapping[str, jt.PyTree[Array]]
 Emits = jt.PyTree[Array]
 
-# TODO: Do these defaults do anything? apparently not
+
 ValuesT = TypeVar('ValuesT', bound=Array)
 MaskT = TypeVar('MaskT', bound=Array)
 ChannelSpecT = TypeVar('ChannelSpecT', bound=ChannelSpec)
 
 LengthsT = TypeVar('LengthsT', bound=Array)
-# SequenceT = TypeVar('SequenceT', bound='Sequence[Array, Array]', default='Sequence[Array, Array]')
+
 InputT = TypeVar('InputT', bound='Sequence')
 OutputT = TypeVar('OutputT', bound='Sequence')
 
@@ -194,27 +183,27 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
   @property
   @abc.abstractmethod
   def shape(self) -> Shape:
-    ...
+    """The shape of the sequence as (batch, time, ...channels)."""
 
   @property
   @abc.abstractmethod
   def ndim(self) -> int:
-    ...
+    """The number of dimensions of the sequence values."""
 
   @property
   @abc.abstractmethod
   def channel_shape(self) -> Shape:
-    ...
+    """The shape of the channels in the sequence."""
 
   @property
   @abc.abstractmethod
   def dtype(self) -> DType:
-    ...
+    """The dtype of the sequence values."""
 
   @classmethod
   @abc.abstractmethod
   def from_values(cls, values: ValuesT) -> Self:
-    ...
+    """Creates a Sequence from values with a default mask."""
 
   @classmethod
   @abc.abstractmethod
@@ -224,16 +213,16 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       lengths: LengthsT,
       is_masked: bool = False,
   ) -> Self:
-    ...
+    """Creates a Sequence from values and lengths."""
 
   @classmethod
   @abc.abstractmethod
   def concatenate_sequences(cls, sequences: Iterable[Self]) -> Self:
-    ...
+    """Concatenates multiple sequences into one."""
 
   @abc.abstractmethod
   def expanded_mask(self) -> Any:
-    ...
+    """Returns the mask expanded to the shape of the values."""
 
   @abc.abstractmethod
   def apply_values[NewValuesT: Array, **P](
@@ -242,7 +231,7 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       *args: P.args,
       **kwargs: P.kwargs,
   ) -> 'Sequence[NewValuesT, MaskT]':
-    ...
+    """Applies a function to the sequence values."""
 
   @abc.abstractmethod
   def apply_values_masked[NewValuesT: Array, **P](
@@ -251,7 +240,7 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       *args: P.args,
       **kwargs: P.kwargs,
   ) -> 'Sequence[NewValuesT, MaskT]':
-    ...
+    """Applies a function to the sequence values, respecting the mask."""
 
   @abc.abstractmethod
   def apply[NewValuesT: Array, NewMaskT: Array, **P](
@@ -260,7 +249,7 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       *args: P.args,
       **kwargs: P.kwargs,
   ) -> 'Sequence[NewValuesT, NewMaskT]':
-    ...
+    """Applies a function to both values and mask."""
 
   @abc.abstractmethod
   def apply_masked[NewValuesT: Array, NewMaskT: Array, **P](
@@ -269,15 +258,15 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       *args: P.args,
       **kwargs: P.kwargs,
   ) -> 'Sequence[NewValuesT, NewMaskT]':
-    ...
+    """Applies a function to values and mask, respecting the mask."""
 
   @abc.abstractmethod
   def astype(self, dtype: DType | None) -> Self:
-    ...
+    """Returns a copy of the sequence with a new dtype."""
 
   @abc.abstractmethod
   def lengths(self) -> Any:
-    ...
+    """Returns the lengths of the sequences in the batch."""
 
   @abc.abstractmethod
   def __getitem__(
@@ -294,21 +283,21 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
       valid: bool,
       pad_value: Any | None = None,
   ) -> Self:
-    ...
+    """Pads the sequence along the time dimension."""
 
   @abc.abstractmethod
   def concatenate(self, other: Self) -> Self:
-    ...
+    """Concatenates another sequence to this one."""
 
   @abc.abstractmethod
   def mask_invalid(
       self, mask_value: Any | None = None
   ) -> 'Sequence[ValuesT, MaskT]':
-    ...
+    """Returns a MaskedSequence with invalid timesteps zeroed."""
 
   @abc.abstractmethod
   def unmask(self) -> 'Sequence[ValuesT, MaskT]':
-    ...
+    """Returns a Sequence with no masking applied."""
 
 
 class MaskedSequence(Sequence[ValuesT, MaskT]):
@@ -362,35 +351,35 @@ class Steppable[
   @property
   @abc.abstractmethod
   def block_size(self) -> int:
-    ...
+    """The block size this layer processes at once."""
 
   @property
   @abc.abstractmethod
   def output_ratio(self) -> fractions.Fraction:
-    ...
+    """The ratio of output timesteps to input timesteps."""
 
   @property
   @abc.abstractmethod
   def supports_step(self) -> bool:
-    ...
+    """Returns True if the layer supports stepwise processing."""
 
   @property
   @abc.abstractmethod
   def input_latency(self) -> int:
-    ...
+    """The number of future timesteps required for the current output."""
 
   @property
   @abc.abstractmethod
   def output_latency(self) -> int:
-    ...
+    """The number of timesteps the output is delayed."""
 
   @abc.abstractmethod
   def get_accumulated_input_latency(self, input_latency: int) -> int:
-    ...
+    """Calculates the total input latency including previous layers."""
 
   @abc.abstractmethod
   def get_accumulated_output_latency(self, output_latency: int) -> int:
-    ...
+    """Calculates the total output latency including previous layers."""
 
   @abc.abstractmethod
   def layer(
@@ -593,7 +582,7 @@ class Steppable[
   @property
   @abc.abstractmethod
   def receptive_field(self) -> Any:
-    ...
+    """The receptive field of the layer."""
 
 
 class SequenceLayer[
@@ -910,51 +899,51 @@ class ModuleSpec(Protocol):
 
   @property
   def Sequence(self) -> type[Sequence]:
-    ...
+    """The Sequence class for this backend."""
 
   @property
   def MaskedSequence(self) -> type[MaskedSequence]:
-    ...
+    """The MaskedSequence class for this backend."""
 
   @property
   def SequenceLayer(self) -> type[SequenceLayer]:
-    ...
+    """The SequenceLayer class for this backend."""
 
   @property
   def SequenceLayerConfig(self) -> type[SequenceLayerConfig]:
-    ...
+    """The SequenceLayerConfig class for this backend."""
 
   @property
   def Steppable(self) -> type[Steppable]:
-    ...
+    """The Steppable class for this backend."""
 
   @property
   def PreservesShape(self) -> type[PreservesShape]:
-    ...
+    """The PreservesShape class for this backend."""
 
   @property
   def Stateless(self) -> type[Stateless]:
-    ...
+    """The Stateless class for this backend."""
 
   @property
   def StatelessPointwise(self) -> type[StatelessPointwise]:
-    ...
+    """The StatelessPointwise class for this backend."""
 
   @property
   def StatelessPointwiseFunctor(self) -> type[StatelessPointwiseFunctor]:
-    ...
+    """The StatelessPointwiseFunctor class for this backend."""
 
   @property
   def PreservesType(self) -> type[PreservesType]:
-    ...
+    """The PreservesType class for this backend."""
 
   @property
   def Emitting(self) -> type[Emitting]:
-    ...
+    """The Emitting class for this backend."""
 
   @property
   def StatelessEmitting(self) -> type[StatelessEmitting]:
-    ...
+    """The StatelessEmitting class for this backend."""
 
 
 __all__ = [

@@ -20,7 +20,21 @@ import fractions
 import functools
 import math
 import typing
-from typing import Any, Callable, Generic, Iterable, Literal, MutableMapping, ParamSpec, Protocol, Self, Sequence as TypingSequence, TypeVar, override
+from typing import (
+    Any,
+    Callable,
+    Concatenate,
+    Generic,
+    Iterable,
+    Literal,
+    MutableMapping,
+    override,
+    ParamSpec,
+    Protocol,
+    Self,
+)
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 from absl import logging
 from flax import linen as nn
@@ -29,12 +43,11 @@ import jax
 from jax import numpy as jnp
 import jaxtyping
 import numpy as np
-
-from sequence_layers.specs import types as spec
-from sequence_layers.jax import sharding as sharding_lib
-from sequence_layers.jax import typing as jt
 import typeguard
 
+from sequence_layers.jax import sharding as sharding_lib
+from sequence_layers.jax import typing as jt
+from sequence_layers.specs import types as spec
 
 __all__ = (
     # go/keep-sorted start
@@ -254,8 +267,8 @@ def sequence_mask(lengths: LengthsT, maxlen: int) -> MaskT:
   )
 
 
-class Sequence[ValuesT, MaskT](
-    spec.Sequence[ValuesT, MaskT], struct.PyTreeNode
+class Sequence(
+    Generic[ValuesT, MaskT], spec.Sequence[ValuesT, MaskT], struct.PyTreeNode
 ):
   """A generic sequence container that preserves masking information."""
 
@@ -346,6 +359,7 @@ class Sequence[ValuesT, MaskT](
     return self.values.dtype
 
   @classmethod
+  @override
   def from_lengths(
       cls, values: ValuesT, lengths: LengthsT, is_masked: bool = False
   ) -> 'Sequence':
@@ -407,7 +421,7 @@ class Sequence[ValuesT, MaskT](
     return Sequence(values_fn(self.values, *args, **kwargs), self.mask)
 
   @override
-  def apply_values_masked(
+  def apply_values_masked(  # pyrefly: ignore[bad-override]
       self: SequenceSelf,
       values_fn: Callable[..., ValuesT],
       *args: ApplyValuesMaskedParams.args,
@@ -428,7 +442,7 @@ class Sequence[ValuesT, MaskT](
     return Sequence(values, mask)
 
   @override
-  def apply_masked(
+  def apply_masked(  # pyrefly: ignore[bad-override]
       self: SequenceSelf,
       apply_fn: Callable[..., tuple[ValuesT, MaskT]],
       *args: ApplyMaskedParams.args,
@@ -473,7 +487,7 @@ class Sequence[ValuesT, MaskT](
     )
 
   @override
-  def pad_time(
+  def pad_time(  # pyrefly: ignore[bad-override]
       self: SequenceSelf,
       pad_left: jt.ScalarInt,
       pad_right: jt.ScalarInt,
@@ -539,7 +553,7 @@ class Sequence[ValuesT, MaskT](
     return self
 
 
-class MaskedSequence(
+class MaskedSequence(  # pyrefly: ignore[inconsistent-inheritance]
     Sequence[ValuesT, MaskT], spec.MaskedSequence[ValuesT, MaskT]
 ):
   """Sequence whose invalid timesteps are masked to zero."""
@@ -559,21 +573,19 @@ class MaskedSequence(
 
 
 def mask_invalid(
-    sequence: Sequence,
+    self: Sequence,
     mask_value: complex | None = None,
 ) -> 'Sequence':
   """Returns a sequence whose invalid timesteps are replaced with mask_value."""
-  expanded_mask = sequence.expanded_mask()
+  expanded_mask = self.expanded_mask()
   if mask_value is None:
-    masked_values = jnp.zeros_like(sequence.values)
+    masked_values = jnp.zeros_like(self.values)
     result_type = MaskedSequence
   else:
-    masked_values = jnp.full(
-        sequence.values.shape, mask_value, sequence.values.dtype
-    )
+    masked_values = jnp.full(self.values.shape, mask_value, self.values.dtype)
     result_type = Sequence
-  masked_values = jnp.where(expanded_mask, sequence.values, masked_values)
-  return result_type(masked_values, sequence.mask)
+  masked_values = jnp.where(expanded_mask, self.values, masked_values)
+  return result_type(masked_values, self.mask)
 
 
 # Defined outside of Sequence so that mask_invalid can return a MaskedSequence.
@@ -617,22 +629,22 @@ def _sequence_checker_fn(value, origin_type, args, memo):
   values_dtype, mask_dtype = args
 
   try:
-    typeguard.check_type_internal(
+    typeguard.check_type_internal(  # pyrefly: ignore[missing-attribute]
         value.values,
         values_dtype,
         memo=memo,
     )
-  except typeguard.TypeCheckError as exc:
+  except typeguard.TypeCheckError as exc:  # pyrefly: ignore[missing-attribute]
     exc.append_path_element('values')
     raise
 
   try:
-    typeguard.check_type_internal(
+    typeguard.check_type_internal(  # pyrefly: ignore[missing-attribute]
         value.mask,
         mask_dtype,
         memo=memo,
     )
-  except typeguard.TypeCheckError as exc:
+  except typeguard.TypeCheckError as exc:  # pyrefly: ignore[missing-attribute]
     exc.append_path_element('mask')
     raise
 
@@ -675,7 +687,7 @@ def _add_custom_checker_lookup_fn(lookup_fn):
 _add_custom_checker_lookup_fn(_sequence_checker_lookup_fn)
 
 
-class Steppable(spec.Steppable):
+class Steppable(spec.Steppable[Sequence, Sequence, ChannelSpec]):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   # Step-wise execution:
@@ -741,7 +753,7 @@ class Steppable(spec.Steppable):
   ```
   """
 
-  path: str  # Provided by nn.Module.
+  path: tuple[str, ...]  # Provided by nn.Module.
 
   @property
   @override
@@ -945,6 +957,7 @@ class Steppable(spec.Steppable):
     return self.layer(x, training=training, constants=constants)
 
   @abc.abstractmethod
+  @override
   def step(
       self,
       x: Sequence,
@@ -1010,6 +1023,7 @@ class Steppable(spec.Steppable):
     return outputs, state, ()
 
   @abc.abstractmethod
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -1107,6 +1121,7 @@ class Steppable(spec.Steppable):
     """Returns the layer's output dtype for the specified input dtype."""
 
   @nn.nowrap
+  @override
   def get_output_spec(
       self,
       input_spec: ChannelSpec,
@@ -1273,11 +1288,15 @@ def check_step_with_emits(step_with_emits_fn):
   return check_step_with_emits_fn
 
 
-class SequenceLayer(nn.Module, Steppable, spec.SequenceLayer):
+class SequenceLayer(
+    nn.Module, Steppable, spec.SequenceLayer[Sequence, Sequence, ChannelSpec]
+):
   """Base Module for Sequence Layers."""
 
 
-class PreservesType(SequenceLayer, spec.PreservesType):
+class PreservesType(
+    SequenceLayer, spec.PreservesType[Sequence, Sequence, ChannelSpec]
+):
   """A mix-in for layers that do not change the input dtype."""
 
   @nn.nowrap
@@ -1289,7 +1308,9 @@ class PreservesType(SequenceLayer, spec.PreservesType):
     return input_dtype
 
 
-class PreservesShape(SequenceLayer, spec.PreservesShape):
+class PreservesShape(
+    SequenceLayer, spec.PreservesShape[Sequence, Sequence, ChannelSpec]
+):
   """A mix-in for layers that do not change the input shape."""
 
   @nn.nowrap
@@ -1301,7 +1322,7 @@ class PreservesShape(SequenceLayer, spec.PreservesShape):
     return tuple(input_shape)
 
 
-class Emitting(SequenceLayer, spec.Emitting):
+class Emitting(SequenceLayer, spec.Emitting[Sequence, Sequence, ChannelSpec]):
   """A SequenceLayer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
@@ -1362,7 +1383,7 @@ class Emitting(SequenceLayer, spec.Emitting):
     pass
 
 
-class Stateless(SequenceLayer, spec.Stateless):
+class Stateless(SequenceLayer, spec.Stateless[Sequence, Sequence, ChannelSpec]):
   """A SequenceLayer with no state over time required for step-wise processing.
 
   Sub-classes must only implement:
@@ -1372,6 +1393,7 @@ class Stateless(SequenceLayer, spec.Stateless):
   """
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
     return {0: (0, 0)}
 
@@ -1427,7 +1449,9 @@ class Stateless(SequenceLayer, spec.Stateless):
     pass
 
 
-class StatelessEmitting(Emitting, spec.StatelessEmitting):
+class StatelessEmitting(
+    Emitting, spec.StatelessEmitting[Sequence, Sequence, ChannelSpec]
+):
   """A SequenceLayer with no state over time that emits auxiliary arrays.
 
   Sub-classes must only implement:
@@ -1437,6 +1461,7 @@ class StatelessEmitting(Emitting, spec.StatelessEmitting):
   """
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, ReceptiveField]:
     return {0: (0, 0)}
 
@@ -1454,6 +1479,7 @@ class StatelessEmitting(Emitting, spec.StatelessEmitting):
     )
     return outputs, state, emits
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -1469,42 +1495,52 @@ class StatelessEmitting(Emitting, spec.StatelessEmitting):
     return ()
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self, input_shape: ShapeLike, *, constants: Constants | None = None
   ) -> Shape:
     pass
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self, input_dtype: DType, *, constants: Constants | None = None
   ) -> DType:
     pass
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
-      x: Sequence,
+      x: Sequence[ValuesT, MaskT],
       *,
       training: bool,
       constants: Constants | None = None,
-  ) -> tuple[Sequence, Emits]:
+  ) -> tuple[Sequence[ValuesT, MaskT], Emits]:
     pass
 
 
-class StatelessPointwise(PreservesShape, Stateless, spec.StatelessPointwise):
+class StatelessPointwise(
+    PreservesShape,
+    Stateless,
+    spec.StatelessPointwise[Sequence, Sequence, ChannelSpec],
+):
   """A SequenceLayer that has no state and operates pointwise on its input."""
 
 
 class StatelessPointwiseFunctor(
-    StatelessPointwise, spec.StatelessPointwiseFunctor
+    StatelessPointwise,
+    spec.StatelessPointwiseFunctor[Sequence, Sequence, ChannelSpec],
 ):
   """A stateless SequenceLayer for simple pointwise processing fns."""
 
   @abc.abstractmethod
+  @override
   def fn(self, values: ValuesT, mask: MaskT) -> tuple[ValuesT, MaskT]:
     """Transforms each scalar in values independently."""
 
   @property
+  @override
   def mask_required(self):
     """Returns true if fn can change the sequence's masked state.
 
@@ -1513,7 +1549,8 @@ class StatelessPointwiseFunctor(
     return True
 
   @check_layer
-  def layer(
+  @override
+  def layer(  # pyrefly: ignore[missing-override-decorator]
       self,
       x: Sequence,
       *,
@@ -1542,9 +1579,11 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
   """
 
   @abc.abstractmethod
+  @override
   def make(self) -> SequenceLayer:
     """Builds a SequenceLayer from this config."""
 
+  @override
   def copy(self, **kwargs) -> Self:
     """Create a copy of this config.
 
@@ -1576,6 +1615,7 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
       )
 
     try:
+      assert not isinstance(self, type), 'replace must be called on an instance'
       return typing.cast(Self, dataclasses.replace(self, **kwargs))
     except TypeError as type_error:
       raise AttributeError(

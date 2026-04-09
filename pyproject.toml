@@ -53,6 +53,7 @@ dev = [
     "absl-py>=2.4.0",
     "chex",
     "orbax",
+    "isort",
     "pyink",
     "pylint>=2.6.0",
     "pyrefly>=0.58.0",
@@ -68,11 +69,21 @@ unstable = true
 pyink-indentation = 2
 pyink-use-majority-quotes = true
 
+[tool.isort]
+profile = "google"
+line_length = 80
+
+[tool.pylint.master]
+extension-pkg-whitelist = ["mlx", "mlx.core"]
+
 [tool.pylint.format]
 indent-string = "  "
 
 [tool.pylint.basic]
-no-docstring-rgx = "^(_)?test_|^.*Test$"
+no-docstring-rgx = "^(_)?test_|^.*Test$|^__.*__$"
+
+[tool.pylint.messages_control]
+disable = ["too-many-lines", "too-many-ancestors", "too-few-public-methods", "duplicate-code"]
 
 
 
