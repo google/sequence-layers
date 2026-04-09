@@ -2,16 +2,25 @@
 
 import abc
 import dataclasses
-import enum
 import fractions
 import functools
+import math
 import types
-from typing import Any, Callable, Generic, Iterable, Self, TypeVar, override, cast
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Generic,
+    Iterable,
+    MutableMapping,
+    override,
+    Self,
+    TypeVar,
+)
 
 import jaxtyping as jt
+from mlx import nn
 import mlx.core as mx
-import mlx.nn as nn
-import numpy as np
 
 from sequence_layers.specs import types as spec
 
@@ -30,8 +39,8 @@ Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
 DType = mx.Dtype
 State = object  # Any pytree.
-Constants = dict[str, object]
-Emits = object
+Constants = MutableMapping[str, jt.PyTree[mx.array]]
+Emits = jt.PyTree[mx.array]
 
 # Receptive field.
 ReceptiveField = tuple[float | int, float | int] | None
@@ -81,9 +90,11 @@ class ShapeDType:
     self.shape = shape
     self.dtype = dtype
 
+  @override
   def __repr__(self) -> str:
     return f'ShapeDType(shape={self.shape}, dtype={self.dtype})'
 
+  @override
   def __eq__(self, other: object) -> bool:
     if not isinstance(other, ShapeDType):
       return NotImplemented
@@ -99,7 +110,8 @@ PaddingMode = spec.PaddingMode
 
 
 def sequence_mask(lengths: LengthsT, maxlen: int) -> mx.array:
-  return mx.arange(maxlen)[None, :] < mx.array(lengths)[:, None]
+  """Generates a boolean mask for sequences based on lengths."""
+  return mx.arange(maxlen)[None, :] < mx.array(lengths)[:, None]  # pylint: disable=unsubscriptable-object
 
 
 class Sequence[ValuesT: mx.array, MaskT: mx.array](
@@ -258,8 +270,8 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
     if isinstance(the_slice, slice):
       the_slice = (the_slice,)
     return type(self)(
-        self.values.__getitem__(the_slice),
-        self.mask.__getitem__(the_slice[:2]),
+        self.values[the_slice],
+        self.mask[the_slice[:2]],
     )
 
   @override
@@ -294,8 +306,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
     mask = mx.concatenate([self.mask, other.mask], axis=1)
     if type(self) is type(other):
       return type(self)(values, mask)
-    else:
-      return Sequence(values, mask)
+    return Sequence(values, mask)
 
   @override
   def mask_invalid(self, mask_value: complex | None = None) -> 'Sequence':
@@ -375,6 +386,7 @@ Sequence.mask_invalid = mask_invalid  # type: ignore[assignment]
 
 
 def _check_output_spec(layer, x, y, constants):
+  """Checks that the output spec of a layer matches the expected spec."""
   expected = layer.get_output_spec(x.channel_spec, constants=constants)
   if y.channel_shape != expected.shape:
     raise ValueError(
@@ -386,6 +398,7 @@ def _check_output_spec(layer, x, y, constants):
 
 
 def _check_output_ratio(layer, x, y):
+  """Checks that the output length of a layer matches the expected length."""
   expected_length = x.shape[1] * layer.output_ratio
   if y.shape[1] != expected_length:
     raise ValueError(
@@ -433,7 +446,9 @@ def check_step(step_fn):
 # ---------------------------------------------------------------------------
 
 
-class Steppable(spec.Steppable[InputT, OutputT], Generic[InputT, OutputT]):
+class Steppable[InputT: Sequence, OutputT: Sequence](
+    spec.Steppable[InputT, OutputT, ChannelSpec]
+):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   # Step-wise execution:
@@ -526,8 +541,6 @@ class Steppable(spec.Steppable[InputT, OutputT], Generic[InputT, OutputT]):
 
   @override
   def get_accumulated_input_latency(self, input_latency: int) -> int:
-    import math
-
     return math.ceil(input_latency / self.output_ratio) + self.input_latency
 
   @override
@@ -736,12 +749,25 @@ class Steppable(spec.Steppable[InputT, OutputT], Generic[InputT, OutputT]):
       The dtype of the output features.
     """
 
+  @override
   def get_output_spec(
       self,
       input_spec: ChannelSpec,
       *,
       constants: Constants | None = None,
   ) -> ChannelSpec:
+    """Returns the output spec this layer produces for the provided input spec.
+
+    Args:
+      input_spec: A ChannelSpec which represents the channels shape and dtype of
+        the input sequence (i.e. not including the batch or time dimension).
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing.
+
+    Returns:
+      The ChannelSpec of the output features.
+    """
     shape = self.get_output_shape(input_spec.shape, constants=constants)
     dtype = self.get_output_dtype(input_spec.dtype, constants=constants)
     return ChannelSpec(shape, dtype)
@@ -753,7 +779,10 @@ class Steppable(spec.Steppable[InputT, OutputT], Generic[InputT, OutputT]):
 
 
 class SequenceLayer[InputT: Sequence, OutputT: Sequence](
-    nn.Module, Steppable[InputT, OutputT], spec.SequenceLayer[InputT, OutputT]
+    nn.Module,
+    Steppable[InputT, OutputT],
+    spec.SequenceLayer[InputT, OutputT, ChannelSpec],
+    metaclass=abc.ABCMeta,
 ):
   """Base Module for Sequence Layers."""
 
@@ -762,9 +791,11 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects."""
 
   @abc.abstractmethod
+  @override
   def make(self) -> SequenceLayer:
     """Builds a SequenceLayer from this config."""
 
+  @override
   def copy(self, **kwargs) -> Self:
     """Returns a copy of the config with updated fields."""
     return cast(Self, dataclasses.replace(cast(Any, self), **kwargs))
@@ -775,7 +806,11 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
 # ---------------------------------------------------------------------------
 
 
-class PreservesType(SequenceLayer, spec.PreservesType):
+class PreservesType[InputT: Sequence, OutputT: Sequence](
+    SequenceLayer[InputT, OutputT],
+    spec.PreservesType[InputT, OutputT, ChannelSpec],
+    metaclass=abc.ABCMeta,
+):
   """A mix-in for layers that do not change the input dtype."""
 
   @override
@@ -790,7 +825,9 @@ class PreservesType(SequenceLayer, spec.PreservesType):
 
 
 class PreservesShape[InputT: Sequence, OutputT: Sequence](
-    SequenceLayer[InputT, OutputT], spec.PreservesShape[InputT, OutputT]
+    SequenceLayer[InputT, OutputT],
+    spec.PreservesShape[InputT, OutputT, ChannelSpec],
+    metaclass=abc.ABCMeta,
 ):
   """A mix-in for layers that do not change the input shape."""
 
@@ -811,7 +848,7 @@ class PreservesShape[InputT: Sequence, OutputT: Sequence](
 
 
 class Stateless[InputT: Sequence, OutputT: Sequence](
-    SequenceLayer[InputT, OutputT], spec.Stateless[InputT, OutputT]
+    SequenceLayer[InputT, OutputT], spec.Stateless[InputT, OutputT, ChannelSpec]
 ):
   """A SequenceLayer with no state over time required for step-wise processing.
 
@@ -882,14 +919,15 @@ class Stateless[InputT: Sequence, OutputT: Sequence](
 class StatelessPointwise[InputT: Sequence, OutputT: Sequence](
     PreservesShape[InputT, OutputT],
     Stateless[InputT, OutputT],
-    spec.StatelessPointwise[InputT, OutputT],
+    spec.StatelessPointwise[InputT, OutputT, ChannelSpec],
+    metaclass=abc.ABCMeta,
 ):
   """A SequenceLayer that has no state and operates pointwise on its input."""
 
 
 class StatelessPointwiseFunctor[InputT: Sequence, OutputT: Sequence](
     StatelessPointwise[InputT, OutputT],
-    spec.StatelessPointwiseFunctor[InputT, OutputT],
+    spec.StatelessPointwiseFunctor[InputT, OutputT, ChannelSpec],
 ):
   """A stateless SequenceLayer for simple pointwise processing fns."""
 
@@ -907,9 +945,9 @@ class StatelessPointwiseFunctor[InputT: Sequence, OutputT: Sequence](
     """
     return True
 
-  @check_layer
   @override
-  def layer(
+  @check_layer
+  def layer(  # pyrefly: ignore[missing-override-decorator]
       self,
       x: InputT,
       *,
@@ -932,10 +970,9 @@ class StatelessPointwiseFunctor[InputT: Sequence, OutputT: Sequence](
 # ---------------------------------------------------------------------------
 
 
-class Emitting(
+class Emitting[InputT: Sequence, OutputT: Sequence](
     SequenceLayer[InputT, OutputT],
-    spec.Emitting[InputT, OutputT],
-    Generic[InputT, OutputT],
+    spec.Emitting[InputT, OutputT, ChannelSpec],
 ):
   """A SequenceLayer that emits auxiliary arrays.
 
@@ -1030,7 +1067,8 @@ class Emitting(
 
 
 class StatelessEmitting[InputT: Sequence, OutputT: Sequence](
-    Emitting[InputT, OutputT], spec.StatelessEmitting[InputT, OutputT]
+    Emitting[InputT, OutputT],
+    spec.StatelessEmitting[InputT, OutputT, ChannelSpec],
 ):
   """A SequenceLayer with no state over time that emits auxiliary arrays.
 

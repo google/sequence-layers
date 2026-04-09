@@ -10,12 +10,22 @@ import abc
 import enum
 import fractions
 from types import EllipsisType
-from typing import Any, Callable, Concatenate, Generic, Iterable, Literal, Protocol, Self, TypeVar, override, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Concatenate,
+    Iterable,
+    Literal,
+    MutableMapping,
+    override,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TypeVar,
+)
 
-import numpy as np
-import numpy.typing as npt
 import jaxtyping as jt
-
+import numpy.typing as npt
 
 # NEW
 ArrayLike = npt.ArrayLike
@@ -27,14 +37,28 @@ T = TypeVar('T')
 Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
 DType = Any  # Can be numpy, jax, or mlx dtype
-ChannelSpec = Any  # Typically ShapeDType or compatible
+
+
+class ChannelSpec(Protocol):
+  """Protocol for channel specifications."""
+
+  @property
+  def shape(self) -> Shape:
+    ...
+
+  @property
+  def dtype(self) -> Any:
+    ...
+
+
 State = Any
-Constants = Any
-Emits = Any
+Constants = MutableMapping[str, jt.PyTree[Array]]
+Emits = jt.PyTree[Array]
 
 # TODO: Do these defaults do anything? apparently not
 ValuesT = TypeVar('ValuesT', bound=Array)
 MaskT = TypeVar('MaskT', bound=Array)
+ChannelSpecT = TypeVar('ChannelSpecT', bound=ChannelSpec)
 
 LengthsT = TypeVar('LengthsT', bound=Array)
 # SequenceT = TypeVar('SequenceT', bound='Sequence[Array, Array]', default='Sequence[Array, Array]')
@@ -164,9 +188,8 @@ class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
   values: ValuesT
   mask: MaskT
 
-  @abc.abstractmethod
   def __init__(self, values: ValuesT, mask: MaskT):
-    ...
+    raise NotImplementedError('Subclasses must implement __init__')
 
   @property
   @abc.abstractmethod
@@ -292,6 +315,7 @@ class MaskedSequence(Sequence[ValuesT, MaskT]):
   """A sequence whose invalid timesteps are masked to zero."""
 
   @abc.abstractmethod
+  @override
   def apply_values_masked[NewValuesT: Array, **P](
       self,
       values_fn: Callable[Concatenate[ValuesT, P], NewValuesT],
@@ -301,6 +325,7 @@ class MaskedSequence(Sequence[ValuesT, MaskT]):
     ...
 
   @abc.abstractmethod
+  @override
   def apply_masked[NewValuesT: Array, NewMaskT: Array, **P](
       self,
       apply_fn: Callable[Concatenate[ValuesT, P], tuple[NewValuesT, NewMaskT]],
@@ -322,7 +347,11 @@ class SequenceLayerConfig(metaclass=abc.ABCMeta):
     """Returns a copy of the config with updated fields."""
 
 
-class Steppable[InputT = Sequence, OutputT = Sequence](metaclass=abc.ABCMeta):
+class Steppable[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](metaclass=abc.ABCMeta):
   """A sequence processing layer that can be executed layerwise or stepwise.
 
   The backend must implement:
@@ -479,7 +508,7 @@ class Steppable[InputT = Sequence, OutputT = Sequence](metaclass=abc.ABCMeta):
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: ChannelSpec,
+      input_spec: ChannelSpecT,
       *,
       training: bool,
       constants: Constants | None = None,
@@ -541,18 +570,38 @@ class Steppable[InputT = Sequence, OutputT = Sequence](metaclass=abc.ABCMeta):
       The dtype of the output features.
     """
 
+  @abc.abstractmethod
+  def get_output_spec(
+      self,
+      input_spec: ChannelSpecT,
+      *,
+      constants: Constants | None = None,
+  ) -> ChannelSpec:
+    """Returns the output spec this layer produces for the provided input spec.
+
+    Args:
+      input_spec: A ChannelSpec which represents the channels shape and dtype of
+        the input sequence (i.e. not including the batch or time dimension).
+      constants: A dictionary of constant name to array or sl.Sequence.
+        Values or sequences that are "constant" with respect to the
+        SequenceLayer, but may affect its processing.
+
+    Returns:
+      The ChannelSpec of the output features.
+    """
+
   @property
   @abc.abstractmethod
   def receptive_field(self) -> Any:
     ...
 
 
-class SequenceLayer[InputT = Sequence, OutputT = Sequence](
-    Steppable[InputT, OutputT]
-):
+class SequenceLayer[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](Steppable[InputT, OutputT, ChannelSpecT], metaclass=abc.ABCMeta):
   """Base class for Sequence Layers."""
-
-  ...
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +609,11 @@ class SequenceLayer[InputT = Sequence, OutputT = Sequence](
 # ---------------------------------------------------------------------------
 
 
-class PreservesType(SequenceLayer):
+class PreservesType[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](SequenceLayer[InputT, OutputT, ChannelSpecT]):
   """A mix-in for layers that do not change the input dtype."""
 
   @abc.abstractmethod
@@ -574,9 +627,11 @@ class PreservesType(SequenceLayer):
     ...
 
 
-class PreservesShape[InputT = Sequence, OutputT = Sequence](
-    SequenceLayer[InputT, OutputT]
-):
+class PreservesShape[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](SequenceLayer[InputT, OutputT, ChannelSpecT]):
   """A mix-in for layers that do not change the input channel shape."""
 
   @abc.abstractmethod
@@ -595,9 +650,11 @@ class PreservesShape[InputT = Sequence, OutputT = Sequence](
 # ---------------------------------------------------------------------------
 
 
-class Stateless[InputT = Sequence, OutputT = Sequence](
-    SequenceLayer[InputT, OutputT]
-):
+class Stateless[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](SequenceLayer[InputT, OutputT, ChannelSpecT]):
   """A layer with no state over time required for step-wise processing.
 
   The backend must implement:
@@ -639,7 +696,7 @@ class Stateless[InputT = Sequence, OutputT = Sequence](
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: ChannelSpec,
+      input_spec: ChannelSpecT,
       *,
       training: bool,
       constants: Constants | None = None,
@@ -659,15 +716,23 @@ class Stateless[InputT = Sequence, OutputT = Sequence](
     ...
 
 
-class StatelessPointwise[InputT = Sequence, OutputT = Sequence](
-    PreservesShape[InputT, OutputT], Stateless[InputT, OutputT]
+class StatelessPointwise[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](
+    PreservesShape[InputT, OutputT, ChannelSpecT],
+    Stateless[InputT, OutputT, ChannelSpecT],
+    metaclass=abc.ABCMeta,
 ):
   """Stateless layer that operates pointwise (preserves shape)."""
 
 
-class StatelessPointwiseFunctor[InputT = Sequence, OutputT = Sequence](
-    StatelessPointwise[InputT, OutputT]
-):
+class StatelessPointwiseFunctor[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](StatelessPointwise[InputT, OutputT, ChannelSpecT]):
   """Stateless pointwise layer defined by a fn(values, mask).
 
   The backend must implement:
@@ -706,9 +771,11 @@ class StatelessPointwiseFunctor[InputT = Sequence, OutputT = Sequence](
 # ---------------------------------------------------------------------------
 
 
-class Emitting[InputT = Sequence, OutputT = Sequence](
-    SequenceLayer[InputT, OutputT]
-):
+class Emitting[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](SequenceLayer[InputT, OutputT, ChannelSpecT]):
   """A Steppable layer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
@@ -723,6 +790,7 @@ class Emitting[InputT = Sequence, OutputT = Sequence](
   """
 
   @abc.abstractmethod
+  @override
   def step(
       self,
       x: InputT,
@@ -734,6 +802,7 @@ class Emitting[InputT = Sequence, OutputT = Sequence](
     ...
 
   @abc.abstractmethod
+  @override
   def layer(
       self,
       x: InputT,
@@ -744,6 +813,7 @@ class Emitting[InputT = Sequence, OutputT = Sequence](
     ...
 
   @abc.abstractmethod
+  @override
   def step_with_emits(
       self,
       x: InputT,
@@ -755,6 +825,7 @@ class Emitting[InputT = Sequence, OutputT = Sequence](
     ...
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
       x: InputT,
@@ -765,9 +836,11 @@ class Emitting[InputT = Sequence, OutputT = Sequence](
     ...
 
 
-class StatelessEmitting[InputT = Sequence, OutputT = Sequence](
-    Emitting[InputT, OutputT]
-):
+class StatelessEmitting[
+    InputT = Sequence,
+    OutputT = Sequence,
+    ChannelSpecT: ChannelSpec = ChannelSpec,
+](Emitting[InputT, OutputT, ChannelSpecT]):
   """A Steppable layer with no state over time that emits auxiliary arrays.
 
   The backend must implement:
@@ -784,7 +857,7 @@ class StatelessEmitting[InputT = Sequence, OutputT = Sequence](
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: ChannelSpec,
+      input_spec: ChannelSpecT,
       *,
       training: bool,
       constants: Constants | None = None,
@@ -792,6 +865,7 @@ class StatelessEmitting[InputT = Sequence, OutputT = Sequence](
     ...
 
   @abc.abstractmethod
+  @override
   def step_with_emits(
       self,
       x: InputT,
@@ -803,18 +877,21 @@ class StatelessEmitting[InputT = Sequence, OutputT = Sequence](
     ...
 
   @abc.abstractmethod
+  @override
   def get_output_shape(
       self, input_shape: ShapeLike, *, constants: Constants | None = None
   ) -> Shape:
     ...
 
   @abc.abstractmethod
+  @override
   def get_output_dtype(
       self, input_dtype: DType, *, constants: Constants | None = None
   ) -> DType:
     ...
 
   @abc.abstractmethod
+  @override
   def layer_with_emits(
       self,
       x: InputT,
@@ -828,6 +905,8 @@ class StatelessEmitting[InputT = Sequence, OutputT = Sequence](
 @runtime_checkable
 class ModuleSpec(Protocol):
   """Specification for sequence_layers.<backend>.types"""
+
+  # pylint: disable=invalid-name
 
   @property
   def Sequence(self) -> type[Sequence]:
