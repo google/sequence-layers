@@ -634,7 +634,7 @@ class KerasZoneoutWrapper(tf.keras.layers.AbstractRNNCell):
 
   @classmethod
   def from_config(
-      cls, config: dict[str, Any], custom_objects: ... = None
+      cls, config: dict[str, Any], custom_objects=None
   ) -> 'KerasZoneoutWrapper':
     config = copy.deepcopy(config)
     cell = tf.keras.layers.deserialize(

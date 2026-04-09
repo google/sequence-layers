@@ -210,7 +210,7 @@ class PreprocessConstants(abc.ABC):
 def FeedforwardBlock(
     hidden_dim: int,
     output_dim: int,
-    activation: ...,
+    activation,
     dropout_rate: float,
 ) -> sl.SequenceLayer:
   """T5-style feed-forward block."""
@@ -695,7 +695,7 @@ def TransformerEncoderBlock(
         InterpolatedRelativePositionBiasesConfig
         | T5RelativePositionEmbeddingConfig
     ),
-    ffn_activation: ... = tf.nn.gelu,
+    ffn_activation=tf.nn.gelu,
     dropout_rate: float = 0.1,
 ) -> sl.SequenceLayer:
   """Self-attention + feed-forward encoder block."""
@@ -744,7 +744,7 @@ def TextEncoder(
     max_distance: int = 64,
     num_heads: int = 8,
     num_buckets: int = 32,
-    ffn_activation: ... = tf.nn.gelu,
+    ffn_activation=tf.nn.gelu,
     dropout_rate: float = 0.1,
     name: str | None = None,
 ) -> sl.SequenceLayer:

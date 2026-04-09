@@ -27,7 +27,7 @@ import tensorflow.compat.v2 as tf
 
 
 def FeedforwardBlock(
-    dimension: int, hidden_dimension: int, activation: ..., dropout_rate: float
+    dimension: int, hidden_dimension: int, activation, dropout_rate: float
 ) -> sl.SequenceLayer:
   with tf.name_scope('ffn'):
     return sl.Residual([
@@ -97,7 +97,7 @@ def T5Encoder(
     dimension: int,
     num_heads: int,
     ffn_dimension: int,
-    ffn_activation: ... = tf.nn.relu,
+    ffn_activation=tf.nn.relu,
     dropout_rate: float = 0.0,
     name: Optional[str] = None,
 ) -> sl.SequenceLayer:
@@ -150,7 +150,7 @@ def T5DecoderBlock(
     source_name: str,
     max_past_horizon: int,
     ffn_dimension: int,
-    ffn_activation: ...,
+    ffn_activation,
     relative_position_embedding: sl.RelativePositionEmbedding,
 ) -> sl.SequenceLayer:
   """Construct a T5 decoder block (self attention, cross attention, FFN)."""
@@ -188,7 +188,7 @@ def T5Decoder(
     dimension: int,
     num_heads: int,
     ffn_dimension: int,
-    ffn_activation: ... = tf.nn.relu,
+    ffn_activation=tf.nn.relu,
     dropout_rate: float = 0.0,
     max_past_horizon: int = 128,
     name: Optional[str] = None,
