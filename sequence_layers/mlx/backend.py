@@ -4,11 +4,11 @@ from typing import override
 
 import mlx.core as mx
 
-from sequence_layers.specs import backend
+from sequence_layers.specs import backend as spec
 from sequence_layers.specs import types as types_spec
 
 
-class BackendWrapper(backend.xp):
+class BackendWrapper(spec.xp):
   """Thin wrapper around MLX to match NumPy interface for tests."""
 
   bool_ = mx.bool_
@@ -23,4 +23,4 @@ class BackendWrapper(backend.xp):
     return mx.zeros(shape, dtype=dtype)
 
 
-xp: backend.xp = BackendWrapper()
+xp: spec.xp = BackendWrapper()
