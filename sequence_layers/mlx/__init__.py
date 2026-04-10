@@ -14,3 +14,6 @@
 """Sequence layers in MLX."""
 
 from sequence_layers.mlx.types import *
+
+from . import backend
+from . import types

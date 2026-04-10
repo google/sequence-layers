@@ -21,13 +21,16 @@ import operator
 import pprint
 import re
 import typing
-from typing import Any, Callable, Protocol, Self, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Protocol, Self
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 import flax.core.scope
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
@@ -2228,6 +2231,7 @@ def layer_with_emits_spec(
       values_spec,
       types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
   )
+
   def layer_fn(
       layer: types.SequenceLayer,
       x: types.Sequence,

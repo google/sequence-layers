@@ -18,7 +18,9 @@ import functools
 import itertools
 import logging
 import random
-from typing import Any, Callable, Iterable, Mapping, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Iterable, Mapping
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -27,10 +29,12 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-
+import sequence_layers.jax as sl
+from sequence_layers.specs import test_utils as spec
 
 _SequenceLayerT = TypeVar('_SequenceLayerT', bound=types.SequenceLayer)
 _T = TypeVar('_T')
@@ -777,8 +781,10 @@ def _mask_and_pad_to_max_length(
   return a, b
 
 
-class SequenceLayerTest(parameterized.TestCase):
+class SequenceLayerTest(spec.SequenceLayerTest):
   """Base class for SequenceLayer tests."""
+
+  sl = sl
 
   def setUp(self):
     super().setUp()

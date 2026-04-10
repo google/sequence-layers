@@ -1,62 +1,57 @@
-import mlx.core as mx
-import numpy as np
-from sequence_layers.abstract import types_test_base
-from sequence_layers.mlx import types
-from absl.testing import parameterized
+"""Tests for MLX sequence types."""
+
 from absl.testing import absltest
 
-
-class SequenceTest(types_test_base.SequenceTest):
-
-  def get_backend(self):
-    return mx
-
-  @property
-  def Sequence(self):
-    return types.Sequence
-
-  @property
-  def MaskedSequence(self):
-    return types.MaskedSequence
-
-  def assertAllEqual(self, a, b):
-    a = np.array(a) if isinstance(a, mx.array) else a
-    b = np.array(b) if isinstance(b, mx.array) else b
-    np.testing.assert_array_equal(a, b)
-
-  def assertSequencesEqual(self, a, b):
-    self.assertAllEqual(a.values, b.values)
-    self.assertAllEqual(a.mask, b.mask)
+from sequence_layers.mlx import test_utils
+from sequence_layers.specs import types_behaviors as spec
 
 
-class SteppableTest(types_test_base.SteppableTest):
-
-  def create_steppable(self):
-
-    class DefaultSteppable(types.Steppable):
-
-      def layer(self, x, *, constants=None):
-        return x
-
-      def step(self, x, state, *, constants=None):
-        return x, state
-
-      def get_initial_state(self, batch_size, input_spec, *, constants=None):
-        return ()
-
-      def get_output_shape(self, input_shape, *, constants=None):
-        return input_shape
-
-      def get_output_dtype(self, input_dtype, *, constants=None):
-        return input_dtype
-
-    return DefaultSteppable()
+class ModuleInterfaceTest(
+    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
+):
+  pass
 
 
-class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
+class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
+  pass
 
-  def get_config_base_cls(self):
-    return types.SequenceLayerConfig
+
+class SequenceLayerConfigTest(
+    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
+):
+  pass
+
+
+class SteppableTest(test_utils.SequenceLayerTest, spec.SteppableTest):
+  pass
+
+
+class PreservesTypeTest(test_utils.SequenceLayerTest, spec.PreservesTypeTest):
+  pass
+
+
+class PreservesShapeTest(test_utils.SequenceLayerTest, spec.PreservesShapeTest):
+  pass
+
+
+class StatelessTest(test_utils.SequenceLayerTest, spec.StatelessTest):
+  pass
+
+
+class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
+  pass
+
+
+class StatelessEmittingTest(
+    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
+):
+  pass
+
+
+class StatelessPointwiseFunctorTest(
+    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
+):
+  pass
 
 
 if __name__ == '__main__':

@@ -15,9 +15,7 @@
 
 import dataclasses
 import typing
-from typing import Any
 
-from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -25,36 +23,32 @@ import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 
-from sequence_layers.abstract import types_test_base
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
+from sequence_layers.specs import types_behaviors as spec
 
 
-class Foo(nn.Module):
+class ModuleInterfaceTest(
+    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
+):
+  pass
 
-  @nn.compact
-  def __call__(self, x: types.Sequence) -> types.Sequence:
-    return x
 
-
-class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
+class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
   """Tests for the Sequence class."""
-
-  def get_backend(self):
-    return jnp
-
-  @property
-  def Sequence(self):
-    return types.Sequence
-
-  @property
-  def MaskedSequence(self):
-    return types.MaskedSequence
 
   def test_type_checks(self):
     """Test type checks in Sequence.__post_init__."""
+
+    class Foo(nn.Module):
+
+      @nn.compact
+      def __call__(
+          self, x: types.Sequence[types.ValuesT, types.MaskT]
+      ) -> types.Sequence:
+        return x
 
     # Allowed: Both array-like.
     types.Sequence(jnp.zeros((2, 3, 5)), jnp.zeros((2, 3), dtype=jnp.bool_))
@@ -109,26 +103,6 @@ class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
     with self.assertRaises(jaxtyping.TypeCheckError):
       types.Sequence(np.zeros((2, 3, 5)), np.zeros((1, 3), dtype=jnp.bool_))
 
-  def test_mask_invalid_idempotent(self):
-    values = jnp.array([
-        [1.0, 2.0, 3.0, 4.0],
-        [10.0, 20.0, 30.0, 40.0],
-    ])
-    mask = jnp.array([[True, True, False, False], [False, False, False, True]])
-
-    x = types.Sequence(values, mask)
-    masked = x.mask_invalid()
-    self.assertIsNot(masked, x)
-    self.assertIsInstance(masked, types.MaskedSequence)
-
-    masked_again = masked.mask_invalid()
-    self.assertIs(masked_again, masked)
-    self.assertIsInstance(masked_again, types.MaskedSequence)
-
-    masked2 = x.mask_invalid()
-    self.assertIsNot(masked2, masked)
-    self.assertIsInstance(masked2, types.MaskedSequence)
-
   def test_type_annotation(self):
     if not jt.runtime_type_checking_enabled:
       self.skipTest('Type checking is disabled.')
@@ -137,7 +111,7 @@ class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],
     ) -> types.SequenceT[jt.Float, 'B T C 1']:
-      return types.Sequence(x.values[..., jnp.newaxis], x.mask)
+      return types.Sequence(x.values[..., jnp.newaxis], x.mask)  # type: ignore[return-value]
 
     values = jnp.zeros((2, 3, 5))
     mask = jnp.zeros((2, 3), dtype=jnp.bool_)
@@ -171,7 +145,7 @@ class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
     def f(
         x: types.SequenceT[jt.Float, 'B T C'],
     ) -> types.SequenceT[jt.Float, 'B T C 1']:
-      return types.MaskedSequence(x.values[..., jnp.newaxis], x.mask)
+      return types.MaskedSequence(x.values[..., jnp.newaxis], x.mask)  # type: ignore[return-value]
 
     values = jnp.zeros((2, 3, 5))
     mask = jnp.zeros((2, 3), dtype=jnp.bool_)
@@ -222,28 +196,11 @@ class SequenceTest(types_test_base.SequenceTest, test_utils.SequenceLayerTest):
     y = fn(x)
     self.assertSequencesEqual(y, x)
 
-  def test_from_lengths(self):
-    x_expected = test_utils.random_sequence(5, 17, 2)
-    x = types.Sequence.from_lengths(x_expected.values, x_expected.lengths())
-    self.assertSequencesEqual(x, x_expected)
 
-    # Out of range lengths are clipped to 0 or max.
-    x = types.Sequence.from_lengths(x_expected.values, [-1, 0, 5, 17, 18])
-    self.assertAllEqual(x.lengths(), jnp.asarray([0, 0, 5, 17, 17]))
-    self.assertNotIsInstance(x, types.MaskedSequence)
-
-    # Return type is MaskedSequence if is_masked=True.
-    x = types.Sequence.from_lengths(
-        x_expected.values, [-1, 0, 5, 17, 18], is_masked=True
-    )
-    self.assertAllEqual(x.lengths(), jnp.asarray([0, 0, 5, 17, 17]))
-    self.assertIsInstance(x, types.MaskedSequence)
-
-
-class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
-
-  def get_config_base_cls(self):
-    return types.SequenceLayerConfig
+class SequenceLayerConfigTest(
+    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
+):
+  pass
 
   def test_copy_raises_on_mutable_attribute(self):
 
@@ -284,28 +241,36 @@ class SequenceLayerConfigTest(types_test_base.SequenceLayerConfigTest):
       del new_config
 
 
-class SteppableTest(types_test_base.SteppableTest):
+class SteppableTest(test_utils.SequenceLayerTest, spec.SteppableTest):
+  pass
 
-  def create_steppable(self):
 
-    class DefaultSteppable(types.Steppable):
+class PreservesTypeTest(test_utils.SequenceLayerTest, spec.PreservesTypeTest):
+  pass
 
-      def layer(self, x, *, constants=None):
-        return x
 
-      def step(self, x, state, *, constants=None):
-        return x, state
+class PreservesShapeTest(test_utils.SequenceLayerTest, spec.PreservesShapeTest):
+  pass
 
-      def get_initial_state(self, batch_size, input_spec, *, constants=None):
-        return 0
 
-      def get_output_shape(self, input_shape, *, constants=None):
-        return input_shape
+class StatelessTest(test_utils.SequenceLayerTest, spec.StatelessTest):
+  pass
 
-      def get_output_dtype(self, input_dtype, *, constants=None):
-        return input_dtype
 
-    return DefaultSteppable()
+class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
+  pass
+
+
+class StatelessEmittingTest(
+    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
+):
+  pass
+
+
+class StatelessPointwiseFunctorTest(
+    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
+):
+  pass
 
 
 if __name__ == '__main__':
