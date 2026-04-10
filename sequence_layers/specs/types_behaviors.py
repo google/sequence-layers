@@ -34,7 +34,7 @@ class ModuleSpecTest(test_utils_spec.ModuleSpecTest):
             issubclass(mod.SequenceLayerConfig, types_spec.SequenceLayerConfig)
         )
         self.assertTrue(issubclass(mod.Steppable, types_spec.Steppable))
->>>>>>> 6ad10e5 (refactor(test_utils): Abstract into spec and implementations.)
+
 
 
 class DummyChannelSpec(NamedTuple):
