@@ -17,12 +17,16 @@ class xp(Protocol):
 
   bool_: Any
   int32: Any
+  float32: Any
 
   def array(self, a: Any, dtype: Any = None) -> Array:
     """Creates an array."""
 
   def zeros(self, shape: tuple[int, ...], dtype: Any = None) -> Array:
     """Creates an array of zeros."""
+
+  def concatenate(self, arrays: list[Array], axis: int = 0) -> Array:
+    ...
 
 
 @runtime_checkable

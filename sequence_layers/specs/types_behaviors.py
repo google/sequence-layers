@@ -1,5 +1,5 @@
 # pylint: disable=abstract-method
-"""Generic tests for Sequence types."""
+"""Generic tests for Sequence types_spec."""
 
 import dataclasses
 import fractions
@@ -9,8 +9,32 @@ import unittest.mock
 from absl.testing import parameterized
 import numpy as np
 
+from sequence_layers import specs
+from sequence_layers.specs import test_utils as test_utils_spec
 from sequence_layers.specs import types as types_spec
 from sequence_layers.specs.test_utils import SequenceLayerTest
+
+
+class ModuleSpecTest(test_utils_spec.ModuleSpecTest):
+
+  @override
+  def module_spec_pairs(self, backend_sl: specs.ModuleSpec):
+    return {backend_sl.types: types_spec.ModuleSpec}
+
+  def test_backend_specific_types_are_subclasses(self) -> None:
+    pairs = self.module_spec_pairs(self.sl)
+    for mod, protocol in pairs.items():
+      if protocol is types_spec.ModuleSpec:
+        self.assertTrue(issubclass(mod.Sequence, types_spec.Sequence))
+        self.assertTrue(
+            issubclass(mod.MaskedSequence, types_spec.MaskedSequence)
+        )
+        self.assertTrue(issubclass(mod.SequenceLayer, types_spec.SequenceLayer))
+        self.assertTrue(
+            issubclass(mod.SequenceLayerConfig, types_spec.SequenceLayerConfig)
+        )
+        self.assertTrue(issubclass(mod.Steppable, types_spec.Steppable))
+>>>>>>> 6ad10e5 (refactor(test_utils): Abstract into spec and implementations.)
 
 
 class DummyChannelSpec(NamedTuple):
@@ -155,7 +179,7 @@ class ModuleInterfaceTest(SequenceLayerTest):
 
 
 class SequenceTest(SequenceLayerTest):
-  """Generic tests for the Sequence class."""
+  """Abstract tests for the Sequence class."""
 
   @parameterized.named_parameters(
       ('mask_value=None', 0.0, None),
@@ -377,7 +401,8 @@ class SequenceTest(SequenceLayerTest):
     self.assertIsInstance(x, self.sl.MaskedSequence)
 
 
-class SteppableTest(SequenceLayerTest):
+class SteppableTest(test_utils_spec.SequenceLayerTest):
+  """Abstract tests for Steppable layers."""
 
   def create_steppable(self) -> types_spec.Steppable:
     """Creates a basic Steppable instance."""
@@ -449,7 +474,7 @@ class SteppableTest(SequenceLayerTest):
       mock_step.assert_called_with(seq, state_in, training=True, constants=None)
 
 
-class SequenceLayerConfigTest(SequenceLayerTest):
+class SequenceLayerConfigTest(test_utils_spec.SequenceLayerTest):
 
   def test_copy(self) -> None:
     backend_sl = self.sl
@@ -466,7 +491,12 @@ class SequenceLayerConfigTest(SequenceLayerTest):
         """Makes a dummy layer."""
         return 'dummy_layer'
 
-    config = Config()  # type: ignore
+      @override
+      def copy(self, **kwargs: Any) -> Any:
+        """Returns a copy of the config."""
+        return dataclasses.replace(self, **kwargs)
+
+    config = Config()
     new_config = config.copy(b='new string')
     self.assertEqual(new_config.a, config.a)
     self.assertEqual(new_config.b, 'new string')
@@ -482,7 +512,12 @@ class SequenceLayerConfigTest(SequenceLayerTest):
         """Makes a dummy layer."""
         return 'dummy_layer'
 
-    config = NonDataclassConfig()  # type: ignore
+      @override
+      def copy(self, **kwargs: Any) -> Any:
+        """Returns a copy of the config."""
+        raise TypeError('Mock non-dataclass config')
+
+    config = NonDataclassConfig()
     with self.assertRaises(TypeError):
       new_config = config.copy()
       del new_config
@@ -499,7 +534,12 @@ class SequenceLayerConfigTest(SequenceLayerTest):
         """Makes a dummy layer."""
         return 'dummy_layer'
 
-    config = Config()  # type: ignore
+      @override
+      def copy(self, **kwargs: Any) -> Any:
+        """Returns a copy of the config."""
+        return dataclasses.replace(self, **kwargs)
+
+    config = Config()
     # dataclasses.replace raises TypeError for unknown arguments
     # JAX implementation wraps it in AttributeError
     with self.assertRaises((TypeError, AttributeError)):
@@ -507,7 +547,7 @@ class SequenceLayerConfigTest(SequenceLayerTest):
       del new_config
 
 
-class PreservesTypeTest(SequenceLayerTest):
+class PreservesTypeTest(test_utils_spec.SequenceLayerTest):
 
   def create_layer(self) -> types_spec.PreservesType:
     """Creates a preserves type layer."""
@@ -529,7 +569,7 @@ class PreservesTypeTest(SequenceLayerTest):
     self.assertEqual(layer.get_output_dtype('fake_dtype123'), 'fake_dtype123')
 
 
-class PreservesShapeTest(SequenceLayerTest):
+class PreservesShapeTest(test_utils_spec.SequenceLayerTest):
 
   def create_layer(self) -> types_spec.PreservesShape:
     """Creates a preserves shape layer."""
@@ -551,7 +591,7 @@ class PreservesShapeTest(SequenceLayerTest):
     self.assertEqual(layer.get_output_shape((1, 2, 3, 5)), (1, 2, 3, 5))
 
 
-class StatelessTest(SequenceLayerTest):
+class StatelessTest(test_utils_spec.SequenceLayerTest):
 
   def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
@@ -604,7 +644,7 @@ class StatelessTest(SequenceLayerTest):
       mock_layer.assert_called_once_with(x, training=True, constants={'c': 1})
 
 
-class EmittingTest(SequenceLayerTest):
+class EmittingTest(test_utils_spec.SequenceLayerTest):
 
   def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
@@ -650,7 +690,7 @@ class EmittingTest(SequenceLayerTest):
       )
 
 
-class StatelessEmittingTest(SequenceLayerTest):
+class StatelessEmittingTest(test_utils_spec.SequenceLayerTest):
 
   def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
@@ -702,7 +742,7 @@ class StatelessEmittingTest(SequenceLayerTest):
       m_layer.assert_called_once_with(x, training=False, constants=None)
 
 
-class StatelessPointwiseFunctorTest(SequenceLayerTest):
+class StatelessPointwiseFunctorTest(test_utils_spec.SequenceLayerTest):
 
   def create_layer(
       self, is_mask_required: bool

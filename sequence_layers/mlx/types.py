@@ -6,16 +6,8 @@ import fractions
 import functools
 import math
 import types
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Iterable,
-    MutableMapping,
-    override,
-    Self,
-    TypeVar,
-)
+from typing import (Any, Callable, cast, Iterable, MutableMapping, override,
+                    Self, TypeVar)
 
 import jaxtyping as jt
 from mlx import nn
