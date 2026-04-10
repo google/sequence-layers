@@ -9,18 +9,18 @@ import unittest.mock
 from absl.testing import parameterized
 import numpy as np
 
-from sequence_layers.specs import types as spec
+from sequence_layers.specs import types as types_spec
 from sequence_layers.specs.test_utils import SequenceLayerTest
 
 
 class DummyChannelSpec(NamedTuple):
   """Dummy channel spec for testing."""
 
-  shape: spec.Shape
-  dtype: spec.DType
+  shape: types_spec.Shape
+  dtype: types_spec.DType
 
 
-class DefaultTestLayer(spec.SequenceLayer):
+class DefaultTestLayer(types_spec.SequenceLayer):
   """A default test layer for testing."""
 
   @property
@@ -64,21 +64,21 @@ class DefaultTestLayer(spec.SequenceLayer):
   @override
   def layer(
       self,
-      x: spec.Sequence,
+      x: types_spec.Sequence,
       *,
       training: bool,
-      constants: spec.Constants | None = None,
-  ) -> spec.Sequence:
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.Sequence:
     return x
 
   @override
   def layer_with_emits(
       self,
-      x: spec.Sequence,
+      x: types_spec.Sequence,
       *,
       training: bool,
-      constants: spec.Constants | None = None,
-  ) -> tuple[spec.Sequence, spec.Emits]:
+      constants: types_spec.Constants | None = None,
+  ) -> tuple[types_spec.Sequence, types_spec.Emits]:
     return self.layer(x, training=training, constants=constants), (
         'test_emits',
     )
@@ -86,23 +86,23 @@ class DefaultTestLayer(spec.SequenceLayer):
   @override
   def step(
       self,
-      x: spec.Sequence,
-      state: spec.State,
+      x: types_spec.Sequence,
+      state: types_spec.State,
       *,
       training: bool,
-      constants: spec.Constants | None = None,
-  ) -> tuple[spec.Sequence, spec.State]:
+      constants: types_spec.Constants | None = None,
+  ) -> tuple[types_spec.Sequence, types_spec.State]:
     return x, ('new_test_state',)
 
   @override
   def step_with_emits(
       self,
-      x: spec.Sequence,
-      state: spec.State,
+      x: types_spec.Sequence,
+      state: types_spec.State,
       *,
       training: bool,
-      constants: spec.Constants | None = None,
-  ) -> tuple[spec.Sequence, spec.State, spec.Emits]:
+      constants: types_spec.Constants | None = None,
+  ) -> tuple[types_spec.Sequence, types_spec.State, types_spec.Emits]:
     return *self.step(x, state, training=training, constants=constants), (
         'test_emits',
     )
@@ -111,26 +111,29 @@ class DefaultTestLayer(spec.SequenceLayer):
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: spec.ChannelSpec,
+      input_spec: types_spec.ChannelSpec,
       *,
       training: bool,
-      constants: spec.Constants | None = None,
-  ) -> spec.State:
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.State:
     return ('test_state',)
 
   @override
   def get_output_shape(
       self,
-      input_shape: spec.ShapeLike,
+      input_shape: types_spec.ShapeLike,
       *,
-      constants: spec.Constants | None = None,
-  ) -> spec.Shape:
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.Shape:
     return tuple(input_shape) + (1,)
 
   @override
   def get_output_dtype(
-      self, input_dtype: spec.DType, *, constants: spec.Constants | None = None
-  ) -> spec.DType:
+      self,
+      input_dtype: types_spec.DType,
+      *,
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.DType:
     return np.float64
 
   @override
@@ -138,7 +141,7 @@ class DefaultTestLayer(spec.SequenceLayer):
       self,
       input_spec: Any,
       *,
-      constants: spec.Constants | None = None,
+      constants: types_spec.Constants | None = None,
   ) -> Any:
     shape = self.get_output_shape(input_spec.shape, constants=constants)
     dtype = self.get_output_dtype(input_spec.dtype, constants=constants)
@@ -148,7 +151,7 @@ class DefaultTestLayer(spec.SequenceLayer):
 class ModuleInterfaceTest(SequenceLayerTest):
 
   def test_backend_specific_module_has_interface(self) -> None:
-    self.assertIsInstance(self.sl.types, spec.ModuleSpec)
+    self.assertIsInstance(self.sl.types, types_spec.ModuleSpec)
 
 
 class SequenceTest(SequenceLayerTest):
@@ -216,8 +219,8 @@ class SequenceTest(SequenceLayerTest):
     self.assertAllEqual(y.mask, x_left1.mask)
 
   def _create_test_sequence(
-      self, shape: spec.Shape
-  ) -> spec.Sequence[spec.Array, spec.Array]:
+      self, shape: types_spec.Shape
+  ) -> types_spec.Sequence[types_spec.Array, types_spec.Array]:
     """Creates a test sequence with specific shape."""
     size = 1
     for d in shape:
@@ -376,7 +379,7 @@ class SequenceTest(SequenceLayerTest):
 
 class SteppableTest(SequenceLayerTest):
 
-  def create_steppable(self) -> spec.Steppable:
+  def create_steppable(self) -> types_spec.Steppable:
     """Creates a basic Steppable instance."""
     backend_sl = self.sl
 
@@ -412,7 +415,7 @@ class SteppableTest(SequenceLayerTest):
     self.assertEqual(output_spec.shape, (2, 3, 1))
     self.assertEqual(output_spec.dtype, np.float64)
 
-  def create_sequence(self) -> spec.Sequence:
+  def create_sequence(self) -> types_spec.Sequence:
     """Creates a test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
@@ -506,7 +509,7 @@ class SequenceLayerConfigTest(SequenceLayerTest):
 
 class PreservesTypeTest(SequenceLayerTest):
 
-  def create_layer(self) -> spec.PreservesType:
+  def create_layer(self) -> types_spec.PreservesType:
     """Creates a preserves type layer."""
     backend_sl = self.sl
 
@@ -528,7 +531,7 @@ class PreservesTypeTest(SequenceLayerTest):
 
 class PreservesShapeTest(SequenceLayerTest):
 
-  def create_layer(self) -> spec.PreservesShape:
+  def create_layer(self) -> types_spec.PreservesShape:
     """Creates a preserves shape layer."""
     backend_sl = self.sl
 
@@ -550,13 +553,13 @@ class PreservesShapeTest(SequenceLayerTest):
 
 class StatelessTest(SequenceLayerTest):
 
-  def create_sequence(self) -> spec.Sequence:
+  def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
     )
 
-  def create_layer(self) -> spec.Stateless:
+  def create_layer(self) -> types_spec.Stateless:
     """Creates a stateless layer."""
     backend_sl = self.sl
 
@@ -603,13 +606,13 @@ class StatelessTest(SequenceLayerTest):
 
 class EmittingTest(SequenceLayerTest):
 
-  def create_sequence(self) -> spec.Sequence:
+  def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
     )
 
-  def create_layer(self) -> spec.Emitting:
+  def create_layer(self) -> types_spec.Emitting:
     """Creates an emitting layer."""
     backend_sl = self.sl
 
@@ -649,13 +652,13 @@ class EmittingTest(SequenceLayerTest):
 
 class StatelessEmittingTest(SequenceLayerTest):
 
-  def create_sequence(self) -> spec.Sequence:
+  def create_sequence(self) -> types_spec.Sequence:
     """Creates a default test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)
     )
 
-  def create_layer(self) -> spec.SequenceLayer:
+  def create_layer(self) -> types_spec.SequenceLayer:
     """Creates a stateless emitting layer."""
     backend_sl = self.sl
 
@@ -701,7 +704,9 @@ class StatelessEmittingTest(SequenceLayerTest):
 
 class StatelessPointwiseFunctorTest(SequenceLayerTest):
 
-  def create_layer(self, is_mask_required: bool) -> spec.SequenceLayer[Any]:
+  def create_layer(
+      self, is_mask_required: bool
+  ) -> types_spec.SequenceLayer[Any]:
     """Creates a stateless pointwise functor layer."""
 
     backend_sl = self.sl
@@ -736,7 +741,9 @@ class StatelessPointwiseFunctorTest(SequenceLayerTest):
 
     return DummyLayer()
 
-  def create_sequence(self) -> spec.Sequence[spec.Array, spec.Array]:
+  def create_sequence(
+      self,
+  ) -> types_spec.Sequence[types_spec.Array, types_spec.Array]:
     """Creates a test sequence."""
     return self.sl.Sequence(
         self.xp.zeros((2, 3, 5)), self.xp.zeros((2, 3), dtype=self.xp.bool_)

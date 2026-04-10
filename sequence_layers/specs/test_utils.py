@@ -7,14 +7,14 @@ from absl.testing import parameterized
 
 from sequence_layers import specs
 from sequence_layers.specs import backend as backend_spec
-from sequence_layers.specs import types as spec
+from sequence_layers.specs import types as types_spec
 
 
 class _AbcParameterizedTestCaseMeta(abc.ABCMeta, type(parameterized.TestCase)):
-  pass
+  """Metaclass for abstract parameterized test cases."""
 
 
-class SequenceLayerTest[SequenceT: spec.Sequence = spec.Sequence](
+class SequenceLayerTest[SequenceT: types_spec.Sequence = types_spec.Sequence](
     parameterized.TestCase, metaclass=_AbcParameterizedTestCaseMeta
 ):
   """Base test class providing common sequence testing assertions.
