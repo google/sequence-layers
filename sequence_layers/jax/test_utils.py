@@ -15,15 +15,13 @@
 
 import dataclasses
 import functools
-import itertools
 import logging
 import random
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, override
 from typing import Sequence as TypingSequence
 from typing import TypeVar
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -78,7 +76,7 @@ def random_sequence(
     raise ValueError('Must not specify random_mask and random_lengths.')
   if len(dims) < 2:
     raise ValueError(
-        'random_sequence expects at least 2 dimensions, got: %s' % (dims,)
+        f'random_sequence expects at least 2 dimensions, got: {dims}'
     )
 
   is_complex = dtype in (np.complex64, np.complex128)
@@ -326,8 +324,7 @@ def get_grad_tols(
       compute_dtype is None or compute_dtype == jnp.float32
   ):
     return {'grad_rtol': 1e-5, 'grad_atol': 1e-5}
-  else:
-    return {'grad_rtol': 1e-1, 'grad_atol': 1e-1}
+  return {'grad_rtol': 1e-1, 'grad_atol': 1e-1}
 
 
 def flax_init(layer: nn.Module, *args, **kwargs):
@@ -344,6 +341,7 @@ def flax_init(layer: nn.Module, *args, **kwargs):
 
 
 def flax_apply(layer: nn.Module, params, *args, **kwargs):
+  """Applies a Flax module with the given parameters."""
   method = kwargs.pop('method', '__call__')
   should_jit = kwargs.pop('jit', True)
 
@@ -356,6 +354,7 @@ def flax_apply(layer: nn.Module, params, *args, **kwargs):
 
 
 def sl_init(layer: types.SequenceLayer, *args, **kwargs):
+  """Initializes a SequenceLayer."""
   training = kwargs.pop('training', False)
   method = kwargs.pop('method', '__call__')
   should_jit = kwargs.pop('jit', True)
@@ -423,11 +422,10 @@ def pad_batch_axis_with_garbage(tree):
 
     if isinstance(x, jax.Array):
       return jnp.pad(x, paddings, constant_values=pad_value)
-    else:
-      return type(x)(
-          jnp.pad(x.values, paddings, constant_values=pad_value),
-          jnp.pad(x.mask, [(1, 1), (0, 0)], constant_values=True),
-      )
+    return type(x)(
+        jnp.pad(x.values, paddings, constant_values=pad_value),
+        jnp.pad(x.mask, [(1, 1), (0, 0)], constant_values=True),
+    )
 
   return jax.tree.map(
       pad_with_garbage, tree, is_leaf=lambda x: isinstance(x, types.Sequence)
@@ -544,8 +542,12 @@ def _gradient_receptive_field(
     # avoid large gradient matrices.
     return jax.lax.reduce_sum(jnp.abs(y), axes=list(range(2, y.ndim)))
 
-  x_real_fn = lambda x_: types.Sequence(x_ + 1j * jnp.imag(x.values), x.mask)
-  x_imag_fn = lambda x_: types.Sequence(jnp.real(x.values) + 1j * x_, x.mask)
+  def x_real_fn(x_):
+    return types.Sequence(x_ + 1j * jnp.imag(x.values), x.mask)
+
+  def x_imag_fn(x_):
+    return types.Sequence(jnp.real(x.values) + 1j * x_, x.mask)
+
   jac_fn_real_y = functools.partial(
       fn, x_fn=lambda x_: types.Sequence(x_, x.mask), y_fn=jnp.real
   )
@@ -690,6 +692,7 @@ def _gradient_receptive_field(
 def _mask_and_pad_to_max_length(
     a: types.Sequence, b: types.Sequence
 ) -> tuple[types.Sequence, types.Sequence]:
+  """Masks invalid timesteps and pads two sequences to the same maximum length."""
   # Only compare values in non-masked regions.
   a = a.mask_invalid()
   b = b.mask_invalid()
@@ -762,18 +765,24 @@ class SequenceLayerTest(spec.SequenceLayerTest):
 
     return layer.bind(variables)
 
+  def init_layer(self, layer, x, **kwargs):
+    """Initialize and bind variables for JAX."""
+    key = jax.random.PRNGKey(1234)
+    return self.init_and_bind_layer(key, layer, x, **kwargs)
+
   def verify_masked(self, x: types.Sequence):
     """Asserts all invalid timesteps in x have values masked to zero."""
     # Manually mask even if x is a MaskedSequence.
     expected = types.Sequence(x.values, x.mask).mask_invalid()
     self.assertAllEqual(x.values, expected.values)
 
+  @override
   def verify_contract(
       self,
       l: types.SequenceLayer,
       x: types.Sequence,
       *,
-      training: bool,
+      training: bool = False,
       constants: types.Constants | None = None,
       stream_constants: bool = False,
       stream_constants_list: list[types.Constants] | None = None,
@@ -791,6 +800,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       test_padding_invariance: bool = True,
       test_receptive_field: bool = True,
       test_receptive_field_relaxed: bool = False,
+      **kwargs,
   ) -> types.Sequence:
     """Verifies that the provided layer obeys the SequenceLayer contract.
 
@@ -1046,6 +1056,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       # Property 1: Check layer-wise and step-wise equivalence.
       self.assertSequencesClose(y_layer, y_step, rtol=rtol, atol=atol)
       if test_2x_step:
+        assert y_step_2x is not None
         self.assertSequencesClose(y_layer, y_step_2x, rtol=rtol, atol=atol)
 
       # Property 2: Padding invariance.
@@ -1062,6 +1073,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
         # is an integer type. go/jax-integer-autodiff
         assert y_layer_x_grad is not None
         if y_layer_x_grad.dtype != jax.dtypes.float0:
+          assert y_step_x_grad is not None
           self.assertSequencesClose(
               y_layer_x_grad, y_step_x_grad, rtol=grad_rtol, atol=grad_atol
           )
@@ -1149,17 +1161,69 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     )
 
   @override
-  def assertSequencesClose(  # pylint: disable=invalid-name
+  # pyrefly: ignore[bad-override]
+  def _step_by_step(
       self,
-      a: types.Sequence,
-      b: types.Sequence,
+      layer: types.SequenceLayer,
+      x: types.Sequence,
+      *,
+      block_size: int = 1,
+      constants=None,
+      stream_constants=None,
+  ) -> tuple[types.Sequence, Any]:
+    batch = x.values.shape[0] if hasattr(x, 'values') else x.shape[0]
+    time = x.values.shape[1] if hasattr(x, 'values') else x.shape[1]
+
+    input_spec = types.ShapeDType(x.channel_shape, x.dtype)
+
+    init_constants = dict(constants) if constants else {}
+    if stream_constants:
+      init_constants.update(stream_constants)
+
+    state = layer.get_initial_state(
+        batch, input_spec, constants=init_constants or None, training=False
+    )
+
+    outputs_values = []
+    outputs_masks = []
+
+    for t in range(0, time, block_size):
+      x_block = types.Sequence(
+          x.values[:, t : t + block_size],
+          x.mask[:, t : t + block_size],
+      )
+
+      step_constants = dict(constants) if constants else {}
+      if stream_constants:
+        for name, seq in stream_constants.items():
+          step_constants[name] = types.Sequence(
+              seq.values[:, t : t + block_size],
+              seq.mask[:, t : t + block_size],
+          )
+
+      y_block, state = layer.step(
+          x_block, state, constants=step_constants or None, training=False
+      )
+      outputs_values.append(y_block.values)
+      outputs_masks.append(y_block.mask)
+
+    y_values = jnp.concatenate(outputs_values, axis=1)
+    y_mask = jnp.concatenate(outputs_masks, axis=1)
+
+    return types.Sequence(y_values, y_mask), state
+
+  @override
+  def assertSequencesClose(  # pylint: disable=arguments-differ  # pyrefly: ignore[bad-override]
+      self,
+      x: types.Sequence,
+      y: types.Sequence,
       atol: float = 1e-6,
       rtol: float = 1e-6,
   ):
     """After padding, checks sequence values are close and masks are equal."""
-    a, b = _mask_and_pad_to_max_length(a, b)
-    self.assertAllClose(a.values, b.values, atol=atol, rtol=rtol)
-    self.assertAllEqual(a.mask, b.mask)
+    x, y = _mask_and_pad_to_max_length(x, y)
+    self.assertAllClose(x.values, y.values, atol=atol, rtol=rtol)
+    self.assertAllEqual(x.mask, y.mask)
 
   def assertSequencesNotClose(  # pylint: disable=invalid-name
       self,
@@ -1173,15 +1237,14 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     self.assertNotAllClose(a.values, b.values, atol=atol, rtol=rtol)
     self.assertAllEqual(a.mask, b.mask)
 
-  def assertSequencesEqual(  # pylint: disable=invalid-name
-      self,
-      a: types.Sequence,
-      b: types.Sequence,
-  ):
+  @override
+  def assertSequencesEqual(  # pyrefly: ignore[bad-override]
+      self, x: types.Sequence, y: types.Sequence
+  ) -> None:
     """After padding, checks sequence values are equal and masks are equal."""
-    a, b = _mask_and_pad_to_max_length(a, b)
-    self.assertAllEqual(a.values, b.values)
-    self.assertAllEqual(a.mask, b.mask)
+    x, y = _mask_and_pad_to_max_length(x, y)
+    self.assertAllEqual(x.values, y.values)
+    self.assertAllEqual(x.mask, y.mask)
 
   def assertSequencesNotEqual(  # pylint: disable=invalid-name
       self,
@@ -1193,15 +1256,16 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     self.assertNotAllEqual(a.values, b.values)
     self.assertAllEqual(a.mask, b.mask)
 
-  def assertAllEqual(self, a, b):  # pylint: disable=invalid-name
+  @override
+  def assertAllEqual(self, x, y):  # pylint: disable=invalid-name
     """Asserts that two arrays are equal."""
-    if jnp.iscomplexobj(a) or jnp.iscomplexobj(b):
-      a_real, a_imag = jnp.real(a), jnp.imag(a)
-      b_real, b_imag = jnp.real(b), jnp.imag(b)
-      chex.assert_trees_all_equal(a_real, b_real)
-      chex.assert_trees_all_equal(a_imag, b_imag)
+    if jnp.iscomplexobj(x) or jnp.iscomplexobj(y):
+      x_real, x_imag = jnp.real(x), jnp.imag(x)
+      y_real, y_imag = jnp.real(y), jnp.imag(y)
+      chex.assert_trees_all_equal(x_real, y_real)
+      chex.assert_trees_all_equal(x_imag, y_imag)
     else:
-      chex.assert_trees_all_equal(a, b)
+      chex.assert_trees_all_equal(x, y)
 
   def assertAllClose(self, a, b, atol: float = 1e-6, rtol: float = 1e-6):  # pylint: disable=invalid-name
     """Asserts that two arrays have close values."""
@@ -1219,9 +1283,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       chex.assert_trees_all_equal(a, b)
     except AssertionError:
       return
-    raise AssertionError(
-        'The two values are equal at all elements. %s %s' % (a, b)
-    )
+    raise AssertionError(f'The two values are equal at all elements. {a} {b}')
 
   def assertNotAllClose(self, a, b, atol: float = 1e-6, rtol: float = 1e-6):  # pylint: disable=invalid-name
     """Asserts that two arrays do not have close values."""
@@ -1229,9 +1291,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       self.assertAllClose(a, b, atol=atol, rtol=rtol)
     except AssertionError:
       return
-    raise AssertionError(
-        'The two values are close at all elements. %s %s' % (a, b)
-    )
+    raise AssertionError(f'The two values are close at all elements. {a} {b}')
 
 
 class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
@@ -1239,6 +1299,8 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    """Configuration for AssertConstantsLayer."""
+
     expected_constant: str = 'test'
     name: str | None = None
 
@@ -1293,6 +1355,8 @@ class NonSteppableLayer(types.PreservesType, types.StatelessPointwise):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    """Configuration for NonSteppableLayer."""
+
     name: str | None = None
 
     @override
