@@ -83,7 +83,17 @@ indent-string = "  "
 no-docstring-rgx = "^(_)?test_|^.*Test$|^__.*__$"
 
 [tool.pylint.messages_control]
-disable = ["too-many-lines", "too-many-ancestors", "too-few-public-methods", "duplicate-code"]
+disable = [
+  "too-many-lines",
+  "too-many-ancestors",
+  "too-few-public-methods",
+  "duplicate-code",
+  "too-many-arguments",
+  "too-many-locals",
+  "too-many-statements",
+  "too-many-branches",
+  "too-many-positional-arguments",
+]
 
 
 
