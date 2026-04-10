@@ -15,15 +15,13 @@
 
 import dataclasses
 import functools
-import itertools
 import logging
 import random
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, override
 from typing import Sequence as TypingSequence
 from typing import TypeVar
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import chex
 import flax.linen as nn
 import jax
@@ -78,7 +76,7 @@ def random_sequence(
     raise ValueError('Must not specify random_mask and random_lengths.')
   if len(dims) < 2:
     raise ValueError(
-        'random_sequence expects at least 2 dimensions, got: %s' % (dims,)
+        f'random_sequence expects at least 2 dimensions, got: {dims}'
     )
 
   is_complex = dtype in (np.complex64, np.complex128)
@@ -275,33 +273,7 @@ def zip_longest(
     zipped argument internally sorted (target, source). If either input sequence
     was longer, the last element of the shorter input sequence is repeated.
   """
-
-  results = []
-  prev_source, prev_target = None, None
-  for source, target in itertools.zip_longest(sources, targets):
-    # If either runs out ahead-of-time, we repeat the final non-None element.
-    # (This is safest as we cannot inspect the function's defaults.)
-    if source is None:
-      source = prev_source
-    elif target is None:
-      target = prev_target
-
-    if isinstance(target, Mapping):
-      assert isinstance(source, Mapping)
-      results.append({**target, **source})
-    elif isinstance(sources, Iterable):
-      # target is a non-mapping iterable, like tuple or list.
-      if isinstance(source, Mapping):
-        # To match the target, we replace the source with its unlabeled values.
-        source = source.values()
-      results.append((*target, *source))
-      prev_source, prev_target = source, target
-    else:
-      raise NotImplementedError(
-          f'Targets of type {type(target)=} are unsupported.'
-      )
-
-  return results
+  return spec.zip_longest(targets, sources)
 
 
 def named_product(
@@ -326,62 +298,8 @@ def named_product(
     `{first_item_name}_{second_item_name}`. If both iterators' items are
     mappings, the product's items are mappings; otherwise they are ordered
     tuples.
-
-    For example, if `first` is
-    `[{**foo, 'testcase_name': 'foo'}, {**bar, 'testcase_name': 'bar'}]` and
-    `second` is `[['baz', *baz], ['qux', *qux]]`, the items will be
-    `('foo_baz', *foo.values(), *baz), ('foo_qux', *foo.values(), *qux), ...`
-
-  Raises:
-    ValueError: A testcase_name is missing; either an iterator item is empty, or
-      one is a mapping without a `testcase_name` key.
   """
-
-  results = []
-
-  for p1, p2 in itertools.product(first, second):
-
-    for source, parameters in enumerate([p1, p2]):
-      if isinstance(parameters, Mapping):
-        if 'testcase_name' not in parameters:
-          raise ValueError(
-              f'Mapping {parameters} from iterable #{source+1} does not have'
-              ' key `testcase_name`.'
-          )
-      elif not parameters:
-        raise ValueError(
-            f'An sequence from iterable #{source+1} is empty; the first entry'
-            ' is expected to be a testcase name.'
-        )
-
-    # When both are mappings, we merge by key:
-    if isinstance(p1, Mapping) and isinstance(p2, Mapping):
-      testcase_name = f'{p1["testcase_name"]}_{p2["testcase_name"]}'
-      p1 = {k: v for k, v in p1.items() if k != 'testcase_name'}
-      p2 = {k: v for k, v in p2.items() if k != 'testcase_name'}
-      results.append({**p1, **p2, 'testcase_name': testcase_name})
-
-    # Else, we return an ordered tuple based on each parameter set's order:
-    else:
-
-      if isinstance(p1, Mapping):
-        p1_name = p1['testcase_name']
-        p1 = tuple(v for k, v in p1.items() if k != 'testcase_name')
-      else:
-        p1_name = p1[0]
-        p1 = p1[1:]
-
-      if isinstance(p2, Mapping):
-        p2_name = p2['testcase_name']
-        p2 = tuple(v for k, v in p2.items() if k != 'testcase_name')
-      else:
-        p2_name = p2[0]
-        p2 = p2[1:]
-
-      testcase_name = f'{p1_name}_{p2_name}'
-      results.append((testcase_name, *p1, *p2))
-
-  return parameterized.named_parameters(*results)
+  return spec.named_product(first, second)
 
 
 def get_grad_tols(
@@ -406,8 +324,7 @@ def get_grad_tols(
       compute_dtype is None or compute_dtype == jnp.float32
   ):
     return {'grad_rtol': 1e-5, 'grad_atol': 1e-5}
-  else:
-    return {'grad_rtol': 1e-1, 'grad_atol': 1e-1}
+  return {'grad_rtol': 1e-1, 'grad_atol': 1e-1}
 
 
 def flax_init(layer: nn.Module, *args, **kwargs):
@@ -424,6 +341,7 @@ def flax_init(layer: nn.Module, *args, **kwargs):
 
 
 def flax_apply(layer: nn.Module, params, *args, **kwargs):
+  """Applies a Flax module with the given parameters."""
   method = kwargs.pop('method', '__call__')
   should_jit = kwargs.pop('jit', True)
 
@@ -436,6 +354,7 @@ def flax_apply(layer: nn.Module, params, *args, **kwargs):
 
 
 def sl_init(layer: types.SequenceLayer, *args, **kwargs):
+  """Initializes a SequenceLayer."""
   training = kwargs.pop('training', False)
   method = kwargs.pop('method', '__call__')
   should_jit = kwargs.pop('jit', True)
@@ -503,11 +422,10 @@ def pad_batch_axis_with_garbage(tree):
 
     if isinstance(x, jax.Array):
       return jnp.pad(x, paddings, constant_values=pad_value)
-    else:
-      return type(x)(
-          jnp.pad(x.values, paddings, constant_values=pad_value),
-          jnp.pad(x.mask, [(1, 1), (0, 0)], constant_values=True),
-      )
+    return type(x)(
+        jnp.pad(x.values, paddings, constant_values=pad_value),
+        jnp.pad(x.mask, [(1, 1), (0, 0)], constant_values=True),
+    )
 
   return jax.tree.map(
       pad_with_garbage, tree, is_leaf=lambda x: isinstance(x, types.Sequence)
@@ -624,8 +542,12 @@ def _gradient_receptive_field(
     # avoid large gradient matrices.
     return jax.lax.reduce_sum(jnp.abs(y), axes=list(range(2, y.ndim)))
 
-  x_real_fn = lambda x_: types.Sequence(x_ + 1j * jnp.imag(x.values), x.mask)
-  x_imag_fn = lambda x_: types.Sequence(jnp.real(x.values) + 1j * x_, x.mask)
+  def x_real_fn(x_):
+    return types.Sequence(x_ + 1j * jnp.imag(x.values), x.mask)
+
+  def x_imag_fn(x_):
+    return types.Sequence(jnp.real(x.values) + 1j * x_, x.mask)
+
   jac_fn_real_y = functools.partial(
       fn, x_fn=lambda x_: types.Sequence(x_, x.mask), y_fn=jnp.real
   )
@@ -770,6 +692,7 @@ def _gradient_receptive_field(
 def _mask_and_pad_to_max_length(
     a: types.Sequence, b: types.Sequence
 ) -> tuple[types.Sequence, types.Sequence]:
+  """Masks invalid timesteps and pads two sequences to the same maximum length."""
   # Only compare values in non-masked regions.
   a = a.mask_invalid()
   b = b.mask_invalid()
@@ -786,6 +709,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
 
   sl = sl
 
+  @override
   def setUp(self):
     super().setUp()
     # To avoid flakes, fix random seeds.
@@ -841,18 +765,24 @@ class SequenceLayerTest(spec.SequenceLayerTest):
 
     return layer.bind(variables)
 
+  def init_layer(self, layer, x, **kwargs):
+    """Initialize and bind variables for JAX."""
+    key = jax.random.PRNGKey(1234)
+    return self.init_and_bind_layer(key, layer, x, **kwargs)
+
   def verify_masked(self, x: types.Sequence):
     """Asserts all invalid timesteps in x have values masked to zero."""
     # Manually mask even if x is a MaskedSequence.
     expected = types.Sequence(x.values, x.mask).mask_invalid()
     self.assertAllEqual(x.values, expected.values)
 
+  @override
   def verify_contract(
       self,
       l: types.SequenceLayer,
       x: types.Sequence,
       *,
-      training: bool,
+      training: bool = False,
       constants: types.Constants | None = None,
       stream_constants: bool = False,
       stream_constants_list: list[types.Constants] | None = None,
@@ -870,6 +800,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       test_padding_invariance: bool = True,
       test_receptive_field: bool = True,
       test_receptive_field_relaxed: bool = False,
+      **kwargs,
   ) -> types.Sequence:
     """Verifies that the provided layer obeys the SequenceLayer contract.
 
@@ -1125,6 +1056,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       # Property 1: Check layer-wise and step-wise equivalence.
       self.assertSequencesClose(y_layer, y_step, rtol=rtol, atol=atol)
       if test_2x_step:
+        assert y_step_2x is not None
         self.assertSequencesClose(y_layer, y_step_2x, rtol=rtol, atol=atol)
 
       # Property 2: Padding invariance.
@@ -1141,6 +1073,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
         # is an integer type. go/jax-integer-autodiff
         assert y_layer_x_grad is not None
         if y_layer_x_grad.dtype != jax.dtypes.float0:
+          assert y_step_x_grad is not None
           self.assertSequencesClose(
               y_layer_x_grad, y_step_x_grad, rtol=grad_rtol, atol=grad_atol
           )
@@ -1204,17 +1137,93 @@ class SequenceLayerTest(spec.SequenceLayerTest):
             self.assertEqual(receptive_field, expected_receptive_field)
     return y_layer
 
-  def assertSequencesClose(  # pylint: disable=invalid-name
+  @override
+  def random_sequence(
       self,
-      a: types.Sequence,
-      b: types.Sequence,
+      *dims: int,
+      dtype=jnp.float32,
+      random_mask: bool = False,
+      random_lengths: bool | None = None,
+      low: int | None = 0,
+      high: int | None = 10,
+      low_length: int = 0,
+      high_length: int | None = None,
+  ) -> types.Sequence:
+    return random_sequence(
+        *dims,
+        dtype=dtype,
+        random_mask=random_mask,
+        random_lengths=random_lengths,
+        low=low,
+        high=high,
+        low_length=low_length,
+        high_length=high_length,
+    )
+
+  @override
+  # pyrefly: ignore[bad-override]
+  def _step_by_step(
+      self,
+      layer: types.SequenceLayer,
+      x: types.Sequence,
+      *,
+      block_size: int = 1,
+      constants=None,
+      stream_constants=None,
+  ) -> tuple[types.Sequence, Any]:
+    batch = x.values.shape[0] if hasattr(x, 'values') else x.shape[0]
+    time = x.values.shape[1] if hasattr(x, 'values') else x.shape[1]
+
+    input_spec = types.ShapeDType(x.channel_shape, x.dtype)
+
+    init_constants = dict(constants) if constants else {}
+    if stream_constants:
+      init_constants.update(stream_constants)
+
+    state = layer.get_initial_state(
+        batch, input_spec, constants=init_constants or None, training=False
+    )
+
+    outputs_values = []
+    outputs_masks = []
+
+    for t in range(0, time, block_size):
+      x_block = types.Sequence(
+          x.values[:, t : t + block_size],
+          x.mask[:, t : t + block_size],
+      )
+
+      step_constants = dict(constants) if constants else {}
+      if stream_constants:
+        for name, seq in stream_constants.items():
+          step_constants[name] = types.Sequence(
+              seq.values[:, t : t + block_size],
+              seq.mask[:, t : t + block_size],
+          )
+
+      y_block, state = layer.step(
+          x_block, state, constants=step_constants or None, training=False
+      )
+      outputs_values.append(y_block.values)
+      outputs_masks.append(y_block.mask)
+
+    y_values = jnp.concatenate(outputs_values, axis=1)
+    y_mask = jnp.concatenate(outputs_masks, axis=1)
+
+    return types.Sequence(y_values, y_mask), state
+
+  @override
+  def assertSequencesClose(  # pylint: disable=arguments-differ  # pyrefly: ignore[bad-override]
+      self,
+      x: types.Sequence,
+      y: types.Sequence,
       atol: float = 1e-6,
       rtol: float = 1e-6,
   ):
     """After padding, checks sequence values are close and masks are equal."""
-    a, b = _mask_and_pad_to_max_length(a, b)
-    self.assertAllClose(a.values, b.values, atol=atol, rtol=rtol)
-    self.assertAllEqual(a.mask, b.mask)
+    x, y = _mask_and_pad_to_max_length(x, y)
+    self.assertAllClose(x.values, y.values, atol=atol, rtol=rtol)
+    self.assertAllEqual(x.mask, y.mask)
 
   def assertSequencesNotClose(  # pylint: disable=invalid-name
       self,
@@ -1228,15 +1237,14 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     self.assertNotAllClose(a.values, b.values, atol=atol, rtol=rtol)
     self.assertAllEqual(a.mask, b.mask)
 
-  def assertSequencesEqual(  # pylint: disable=invalid-name
-      self,
-      a: types.Sequence,
-      b: types.Sequence,
-  ):
+  @override
+  def assertSequencesEqual(  # pyrefly: ignore[bad-override]
+      self, x: types.Sequence, y: types.Sequence
+  ) -> None:
     """After padding, checks sequence values are equal and masks are equal."""
-    a, b = _mask_and_pad_to_max_length(a, b)
-    self.assertAllEqual(a.values, b.values)
-    self.assertAllEqual(a.mask, b.mask)
+    x, y = _mask_and_pad_to_max_length(x, y)
+    self.assertAllEqual(x.values, y.values)
+    self.assertAllEqual(x.mask, y.mask)
 
   def assertSequencesNotEqual(  # pylint: disable=invalid-name
       self,
@@ -1248,15 +1256,16 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     self.assertNotAllEqual(a.values, b.values)
     self.assertAllEqual(a.mask, b.mask)
 
-  def assertAllEqual(self, a, b):  # pylint: disable=invalid-name
+  @override
+  def assertAllEqual(self, x, y):  # pylint: disable=invalid-name
     """Asserts that two arrays are equal."""
-    if jnp.iscomplexobj(a) or jnp.iscomplexobj(b):
-      a_real, a_imag = jnp.real(a), jnp.imag(a)
-      b_real, b_imag = jnp.real(b), jnp.imag(b)
-      chex.assert_trees_all_equal(a_real, b_real)
-      chex.assert_trees_all_equal(a_imag, b_imag)
+    if jnp.iscomplexobj(x) or jnp.iscomplexobj(y):
+      x_real, x_imag = jnp.real(x), jnp.imag(x)
+      y_real, y_imag = jnp.real(y), jnp.imag(y)
+      chex.assert_trees_all_equal(x_real, y_real)
+      chex.assert_trees_all_equal(x_imag, y_imag)
     else:
-      chex.assert_trees_all_equal(a, b)
+      chex.assert_trees_all_equal(x, y)
 
   def assertAllClose(self, a, b, atol: float = 1e-6, rtol: float = 1e-6):  # pylint: disable=invalid-name
     """Asserts that two arrays have close values."""
@@ -1274,9 +1283,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       chex.assert_trees_all_equal(a, b)
     except AssertionError:
       return
-    raise AssertionError(
-        'The two values are equal at all elements. %s %s' % (a, b)
-    )
+    raise AssertionError(f'The two values are equal at all elements. {a} {b}')
 
   def assertNotAllClose(self, a, b, atol: float = 1e-6, rtol: float = 1e-6):  # pylint: disable=invalid-name
     """Asserts that two arrays do not have close values."""
@@ -1284,9 +1291,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       self.assertAllClose(a, b, atol=atol, rtol=rtol)
     except AssertionError:
       return
-    raise AssertionError(
-        'The two values are close at all elements. %s %s' % (a, b)
-    )
+    raise AssertionError(f'The two values are close at all elements. {a} {b}')
 
 
 class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
@@ -1294,14 +1299,18 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    """Configuration for AssertConstantsLayer."""
+
     expected_constant: str = 'test'
     name: str | None = None
 
+    @override
     def make(self) -> 'AssertConstantsLayer':
       return AssertConstantsLayer(self, name=self.name)
 
   config: Config
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -1316,6 +1325,7 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
         batch_size, input_spec, training=training, constants=constants
     )
 
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -1326,6 +1336,7 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       raise ValueError(f'{self.config.expected_constant=} not present')
     return super().get_output_shape(input_shape, constants=constants)
 
+  @override
   def layer(
       self,
       x: types.Sequence,
@@ -1344,17 +1355,22 @@ class NonSteppableLayer(types.PreservesType, types.StatelessPointwise):
 
   @dataclasses.dataclass(frozen=True)
   class Config(types.SequenceLayerConfig):
+    """Configuration for NonSteppableLayer."""
+
     name: str | None = None
 
+    @override
     def make(self) -> 'NonSteppableLayer':
       return NonSteppableLayer(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def supports_step(self):
     return False
 
+  @override
   def layer(
       self,
       x: types.Sequence,
