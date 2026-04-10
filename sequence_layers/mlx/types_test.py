@@ -6,9 +6,7 @@ from sequence_layers.mlx import test_utils
 from sequence_layers.specs import types_behaviors as spec
 
 
-class ModuleInterfaceTest(
-    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
-):
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
   pass
 
 

@@ -13,17 +13,47 @@
 # limitations under the License.
 """Tests for the test utilities."""
 
-from unittest import mock
 from absl.testing import parameterized
-import numpy as np
+import jax
+import jax.numpy as jnp
+import sequence_layers.jax as sl
 from sequence_layers.jax import test_utils
+from sequence_layers.specs import test_utils_behaviors as spec
+
+
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
+  pass
+
+
+class VerifyContractTest(test_utils.SequenceLayerTest, spec.VerifyContractTest):
+
+  def get_dummy_layer(self, mismatch: bool):
+    l = super().get_dummy_layer(mismatch)
+    key = jax.random.PRNGKey(1234)
+    x = test_utils.random_sequence(2, 5, 10)
+    l = self.init_and_bind_layer(key, l, x)
+    return l
+
+  def test_verify_contract_with_jax_flags(self):
+    """Tests that disabling optional JAX features (gradients, batching) doesn't crash.
+    
+    Default paths (with these flags as True) are tested in all other tests.
+    """
+    layer = self.get_dummy_layer(mismatch=False)
+    x = sl.Sequence(
+        jnp.ones((2, 5, 10)),
+        jnp.ones((2, 5), dtype=bool),
+    )
+    self.verify_contract(
+        layer, x, training=False, test_gradients=False, test_batching=False
+    )
 
 
 class StandardDtypeConfigsTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
       (
-          dict(),
+          {},
           {
               'p-fp32_i-fp32_c-None',  # default
               'p-bf16_i-bf16_c-bf16',  # praxis
@@ -33,7 +63,7 @@ class StandardDtypeConfigsTest(test_utils.SequenceLayerTest):
           },
       ),
       (
-          dict(param=True, compute=True),
+          {'param': True, 'compute': True},
           {
               'p-fp32_c-None',  # default
               'p-bf16_c-bf16',  # praxis
@@ -43,7 +73,7 @@ class StandardDtypeConfigsTest(test_utils.SequenceLayerTest):
           },
       ),
       (
-          dict(praxis_only=True),
+          {'praxis_only': True},
           {
               'p-fp32_i-fp32_c-None',  # default
               'p-bf16_i-bf16_c-bf16',  # praxis
@@ -58,113 +88,55 @@ class StandardDtypeConfigsTest(test_utils.SequenceLayerTest):
     self.assertEqual(expected, names)
 
 
-class NamedProductTest(test_utils.SequenceLayerTest):
+class NamedProductTest(test_utils.SequenceLayerTest, spec.NamedProductTest):
+  pass
 
-  @parameterized.parameters(
-      dict(
-          first=[('a', 'alpha'), ('b', 'beta')],
-          second=[('1', 1), ('2', 2), ('3', 3)],
-          expected=[
-              ('a_1', 'alpha', 1),
-              ('a_2', 'alpha', 2),
-              ('a_3', 'alpha', 3),
-              ('b_1', 'beta', 1),
-              ('b_2', 'beta', 2),
-              ('b_3', 'beta', 3),
-          ],
-      ),
-      dict(
-          first=[{'a': 'alpha', 'testcase_name': 'test'}],
-          second=[('1', 1), ('2', 2)],
-          expected=[
-              ('test_1', 'alpha', 1),
-              ('test_2', 'alpha', 2),
-          ],
-      ),
-      dict(
-          first=[
-              {'letter': 'a', 'testcase_name': 'alpha'},
-              {'testcase_name': 'beta', 'letter': 'b'},
-          ],
-          second=[
-              {'testcase_name': 'one', 'number': 1},
-              {'number': 2, 'testcase_name': 'two'},
-          ],
-          expected=[
-              {'letter': 'a', 'number': 1, 'testcase_name': 'alpha_one'},
-              {'letter': 'a', 'number': 2, 'testcase_name': 'alpha_two'},
-              {'letter': 'b', 'number': 1, 'testcase_name': 'beta_one'},
-              {'letter': 'b', 'number': 2, 'testcase_name': 'beta_two'},
-          ],
-      ),
-  )
-  @mock.patch.object(parameterized, 'named_parameters', autospec=True)
-  def test_builds_named_products(self, mock_fn, first, second, expected):
-    test_utils.named_product(first, second)
-    self.assertSequenceEqual(mock_fn.call_args.args, expected)
 
-  @parameterized.parameters(
-      dict(
-          first=[{'testcase_name': 'alpha', 'letter': 'a'}, {'letter': 'b'}],
-          second=[('1', 1), ('2', 2), ('3', 3)],
-          iterator_without_testcase_name=1,
-      ),
-      dict(
-          first=[{'testcase_name': 'alpha', 'letter': 'a'}],
-          second=[('1', 1), ()],
-          iterator_without_testcase_name=2,
-      ),
-  )
-  def test_raises_on_missing_testcase_names(
-      self, first, second, iterator_without_testcase_name
-  ):
-    with self.assertRaisesRegex(
-        ValueError, str(iterator_without_testcase_name)
-    ):
-      test_utils.named_product(first, second)
+class ZipLongestTest(test_utils.SequenceLayerTest, spec.ZipLongestTest):
+  pass
 
 
 class Shear2dTest(test_utils.SequenceLayerTest):
 
   @parameterized.named_parameters(
-      dict(
-          testcase_name='basic_3x3',
-          input_array=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
-          expected_output=[
+      {
+          'testcase_name': 'basic_3x3',
+          'input_array': [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+          'expected_output': [
               [0, 0, 1, 2, 3],
               [0, 4, 5, 6, 0],
               [7, 8, 9, 0, 0],
           ],
-      ),
-      dict(
-          testcase_name='rect_more_rows',
-          input_array=[[1, 2], [3, 4], [5, 6]],
-          expected_output=[[0, 0, 1, 2], [0, 3, 4, 0], [5, 6, 0, 0]],
-      ),
-      dict(
-          testcase_name='rect_more_cols',
-          input_array=[[1, 2, 3, 4], [5, 6, 7, 8]],
-          expected_output=[[0, 1, 2, 3, 4], [5, 6, 7, 8, 0]],
-      ),
-      dict(
-          testcase_name='single_row',
-          input_array=[[1, 2, 3]],
-          expected_output=[[1, 2, 3]],
-      ),
-      dict(
-          testcase_name='single_col',
-          input_array=[[1], [2], [3]],
-          expected_output=[[0, 0, 1], [0, 2, 0], [3, 0, 0]],
-      ),
-      dict(
-          testcase_name='with_zeros',
-          input_array=[[0, 1], [0, 0]],
-          expected_output=[[0, 0, 1], [0, 0, 0]],
-      ),
+      },
+      {
+          'testcase_name': 'rect_more_rows',
+          'input_array': [[1, 2], [3, 4], [5, 6]],
+          'expected_output': [[0, 0, 1, 2], [0, 3, 4, 0], [5, 6, 0, 0]],
+      },
+      {
+          'testcase_name': 'rect_more_cols',
+          'input_array': [[1, 2, 3, 4], [5, 6, 7, 8]],
+          'expected_output': [[0, 1, 2, 3, 4], [5, 6, 7, 8, 0]],
+      },
+      {
+          'testcase_name': 'single_row',
+          'input_array': [[1, 2, 3]],
+          'expected_output': [[1, 2, 3]],
+      },
+      {
+          'testcase_name': 'single_col',
+          'input_array': [[1], [2], [3]],
+          'expected_output': [[0, 0, 1], [0, 2, 0], [3, 0, 0]],
+      },
+      {
+          'testcase_name': 'with_zeros',
+          'input_array': [[0, 1], [0, 0]],
+          'expected_output': [[0, 0, 1], [0, 0, 0]],
+      },
   )
   def test_shear_2d(self, input_array, expected_output):
-    output = test_utils._shear_2d(np.array(input_array))
-    self.assertAllEqual(output, np.array(expected_output))
+    output = test_utils._shear_2d(jnp.array(input_array))  # pylint: disable=protected-access
+    self.assertAllEqual(output, jnp.array(expected_output))
 
 
 if __name__ == '__main__':

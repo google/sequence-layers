@@ -13,7 +13,10 @@
 # limitations under the License.
 """Sequence layers in MLX."""
 
-from sequence_layers.mlx.types import *
+# (re-export the names for typechecking)
+from . import backend as backend
+from . import types as types
+from . import test_utils as test_utils
+from .test_utils import SequenceLayerTest
 
-from . import backend
-from . import types
+from sequence_layers.mlx.types import *

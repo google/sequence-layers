@@ -1,9 +1,14 @@
 # https://typing.python.org/en/latest/spec/protocol.html#modules-as-implementations-of-protocols
 
-from typing import Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
 from . import types as _types
+
+# Import test_utils only for type checking to avoid circular imports,
+# as test_utils.py imports specs.ModuleSpec defined below.
+if TYPE_CHECKING:
+  from . import test_utils as _test_utils
 
 
 @runtime_checkable
@@ -16,6 +21,10 @@ class ModuleSpec(Protocol):
 
   @property
   def types(self) -> _types.ModuleSpec:
+    ...
+
+  @property
+  def test_utils(self) -> '_test_utils.ModuleSpec':
     ...
 
   # Identifiers that backend-specific implementations should expose at top level.
@@ -35,4 +44,8 @@ class ModuleSpec(Protocol):
 
   @property
   def SequenceLayerConfig(self) -> type[_types.SequenceLayerConfig]:
+    ...
+
+  @property
+  def SequenceLayerTest(self) -> type:
     ...

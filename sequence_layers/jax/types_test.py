@@ -14,7 +14,7 @@
 """Types test."""
 
 import dataclasses
-import typing
+from typing import Sequence
 
 import chex
 import flax.linen as nn
@@ -30,9 +30,7 @@ from sequence_layers.jax import typing as jt
 from sequence_layers.specs import types_behaviors as spec
 
 
-class ModuleInterfaceTest(
-    test_utils.SequenceLayerTest, spec.ModuleInterfaceTest
-):
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
   pass
 
 
@@ -197,16 +195,13 @@ class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
     self.assertSequencesEqual(y, x)
 
 
-class SequenceLayerConfigTest(
-    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
-):
-  pass
+class SequenceLayerConfigTest(test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest):
 
   def test_copy_raises_on_mutable_attribute(self):
 
     @dataclasses.dataclass(slots=True)
     class ConfigWithSequence(types.SequenceLayerConfig):
-      seq: typing.Sequence[int]
+      seq: Sequence[int]
 
       def make(self) -> simple.Identity:
         return simple.Identity.Config().make()
@@ -261,15 +256,11 @@ class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
   pass
 
 
-class StatelessEmittingTest(
-    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
-):
+class StatelessEmittingTest(test_utils.SequenceLayerTest, spec.StatelessEmittingTest):
   pass
 
 
-class StatelessPointwiseFunctorTest(
-    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
-):
+class StatelessPointwiseFunctorTest(test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest):
   pass
 
 

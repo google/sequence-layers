@@ -275,33 +275,7 @@ def zip_longest(
     zipped argument internally sorted (target, source). If either input sequence
     was longer, the last element of the shorter input sequence is repeated.
   """
-
-  results = []
-  prev_source, prev_target = None, None
-  for source, target in itertools.zip_longest(sources, targets):
-    # If either runs out ahead-of-time, we repeat the final non-None element.
-    # (This is safest as we cannot inspect the function's defaults.)
-    if source is None:
-      source = prev_source
-    elif target is None:
-      target = prev_target
-
-    if isinstance(target, Mapping):
-      assert isinstance(source, Mapping)
-      results.append({**target, **source})
-    elif isinstance(sources, Iterable):
-      # target is a non-mapping iterable, like tuple or list.
-      if isinstance(source, Mapping):
-        # To match the target, we replace the source with its unlabeled values.
-        source = source.values()
-      results.append((*target, *source))
-      prev_source, prev_target = source, target
-    else:
-      raise NotImplementedError(
-          f'Targets of type {type(target)=} are unsupported.'
-      )
-
-  return results
+  return spec.zip_longest(targets, sources)
 
 
 def named_product(
@@ -326,62 +300,8 @@ def named_product(
     `{first_item_name}_{second_item_name}`. If both iterators' items are
     mappings, the product's items are mappings; otherwise they are ordered
     tuples.
-
-    For example, if `first` is
-    `[{**foo, 'testcase_name': 'foo'}, {**bar, 'testcase_name': 'bar'}]` and
-    `second` is `[['baz', *baz], ['qux', *qux]]`, the items will be
-    `('foo_baz', *foo.values(), *baz), ('foo_qux', *foo.values(), *qux), ...`
-
-  Raises:
-    ValueError: A testcase_name is missing; either an iterator item is empty, or
-      one is a mapping without a `testcase_name` key.
   """
-
-  results = []
-
-  for p1, p2 in itertools.product(first, second):
-
-    for source, parameters in enumerate([p1, p2]):
-      if isinstance(parameters, Mapping):
-        if 'testcase_name' not in parameters:
-          raise ValueError(
-              f'Mapping {parameters} from iterable #{source+1} does not have'
-              ' key `testcase_name`.'
-          )
-      elif not parameters:
-        raise ValueError(
-            f'An sequence from iterable #{source+1} is empty; the first entry'
-            ' is expected to be a testcase name.'
-        )
-
-    # When both are mappings, we merge by key:
-    if isinstance(p1, Mapping) and isinstance(p2, Mapping):
-      testcase_name = f'{p1["testcase_name"]}_{p2["testcase_name"]}'
-      p1 = {k: v for k, v in p1.items() if k != 'testcase_name'}
-      p2 = {k: v for k, v in p2.items() if k != 'testcase_name'}
-      results.append({**p1, **p2, 'testcase_name': testcase_name})
-
-    # Else, we return an ordered tuple based on each parameter set's order:
-    else:
-
-      if isinstance(p1, Mapping):
-        p1_name = p1['testcase_name']
-        p1 = tuple(v for k, v in p1.items() if k != 'testcase_name')
-      else:
-        p1_name = p1[0]
-        p1 = p1[1:]
-
-      if isinstance(p2, Mapping):
-        p2_name = p2['testcase_name']
-        p2 = tuple(v for k, v in p2.items() if k != 'testcase_name')
-      else:
-        p2_name = p2[0]
-        p2 = p2[1:]
-
-      testcase_name = f'{p1_name}_{p2_name}'
-      results.append((testcase_name, *p1, *p2))
-
-  return parameterized.named_parameters(*results)
+  return spec.named_product(first, second)
 
 
 def get_grad_tols(
@@ -786,6 +706,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
 
   sl = sl
 
+  @override
   def setUp(self):
     super().setUp()
     # To avoid flakes, fix random seeds.
@@ -1204,6 +1125,30 @@ class SequenceLayerTest(spec.SequenceLayerTest):
             self.assertEqual(receptive_field, expected_receptive_field)
     return y_layer
 
+  @override
+  def random_sequence(
+      self,
+      *dims: int,
+      dtype=jnp.float32,
+      random_mask: bool = False,
+      random_lengths: bool | None = None,
+      low: int | None = 0,
+      high: int | None = 10,
+      low_length: int = 0,
+      high_length: int | None = None,
+  ) -> types.Sequence:
+    return random_sequence(
+        *dims,
+        dtype=dtype,
+        random_mask=random_mask,
+        random_lengths=random_lengths,
+        low=low,
+        high=high,
+        low_length=low_length,
+        high_length=high_length,
+    )
+
+  @override
   def assertSequencesClose(  # pylint: disable=invalid-name
       self,
       a: types.Sequence,
@@ -1297,11 +1242,13 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
     expected_constant: str = 'test'
     name: str | None = None
 
+    @override
     def make(self) -> 'AssertConstantsLayer':
       return AssertConstantsLayer(self, name=self.name)
 
   config: Config
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -1316,6 +1263,7 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
         batch_size, input_spec, training=training, constants=constants
     )
 
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -1326,6 +1274,7 @@ class AssertConstantsLayer(types.PreservesType, types.StatelessPointwise):
       raise ValueError(f'{self.config.expected_constant=} not present')
     return super().get_output_shape(input_shape, constants=constants)
 
+  @override
   def layer(
       self,
       x: types.Sequence,
@@ -1346,15 +1295,18 @@ class NonSteppableLayer(types.PreservesType, types.StatelessPointwise):
   class Config(types.SequenceLayerConfig):
     name: str | None = None
 
+    @override
     def make(self) -> 'NonSteppableLayer':
       return NonSteppableLayer(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def supports_step(self):
     return False
 
+  @override
   def layer(
       self,
       x: types.Sequence,

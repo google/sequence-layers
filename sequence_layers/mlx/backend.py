@@ -13,6 +13,7 @@ class BackendWrapper(spec.xp):
 
   bool_ = mx.bool_
   int32 = mx.int32
+  float32 = mx.float32
 
   @override
   def array(self, a, dtype=None) -> types_spec.Array:
@@ -21,6 +22,10 @@ class BackendWrapper(spec.xp):
   @override
   def zeros(self, shape, dtype=None) -> types_spec.Array:
     return mx.zeros(shape, dtype=dtype)
+
+  @override
+  def concatenate(self, arrays, axis=0) -> types_spec.Array:
+    return mx.concatenate(arrays, axis=axis)
 
 
 xp: spec.xp = BackendWrapper()
