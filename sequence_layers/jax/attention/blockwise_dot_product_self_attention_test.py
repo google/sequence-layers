@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from absl.testing import parameterized
+import chex
 import jax
+import jax.numpy as jnp
 from sequence_layers.jax import position
 from sequence_layers.jax import test_utils
 from sequence_layers.jax.attention import blockwise_dot_product_self_attention
@@ -305,6 +307,102 @@ class BlockwiseDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         grad_atol=1e-5,
         grad_rtol=1e-5,
     )
+
+  def test_position_name(self):
+    key = jax.random.PRNGKey(1234)
+    batch_size = 2
+    seq_len = 8
+    block_size = 4
+
+    layer_no_pos = blockwise_dot_product_self_attention.BlockwiseDotProductSelfAttention.Config(
+        block_size=block_size,
+        num_heads=2,
+        units_per_head=3,
+        max_past_horizon_blocks=1,
+        max_future_horizon_blocks=1,
+        name='blockwise_dot_product_self_attention',
+    ).make()
+
+    layer_pos = blockwise_dot_product_self_attention.BlockwiseDotProductSelfAttention.Config(
+        block_size=block_size,
+        num_heads=2,
+        units_per_head=3,
+        max_past_horizon_blocks=1,
+        max_future_horizon_blocks=1,
+        position_name='pos',
+        name='blockwise_dot_product_self_attention',
+    ).make()
+
+    x = test_utils.random_sequence(batch_size, seq_len, 1)
+    # Positions match what would be generated internally: 0, 1, 2...
+    pos = jnp.tile(jnp.arange(seq_len)[jnp.newaxis, :], (batch_size, 1))
+    constants = {'pos': pos}
+
+    variables_no_pos = layer_no_pos.init(key, x, training=False)
+    variables_pos = layer_pos.init(key, x, training=False, constants=constants)
+    chex.assert_trees_all_close(variables_no_pos, variables_pos)
+
+    y_no_pos, _ = layer_no_pos.apply(
+        variables_no_pos,
+        x,
+        training=False,
+        method=layer_no_pos.layer_with_emits,
+    )
+    y_pos, _ = layer_pos.apply(
+        variables_pos,
+        x,
+        training=False,
+        constants=constants,
+        method=layer_pos.layer_with_emits,
+    )
+    self.assertSequencesClose(y_no_pos, y_pos)
+
+    state_pos = layer_pos.apply(
+        variables_pos,
+        batch_size,
+        x.channel_spec,
+        training=False,
+        constants=constants,
+        method=layer_pos.get_initial_state,
+    )
+    # state tuple: (kv_bundle, time_step, ...)
+    self.assertIsNone(state_pos[1])
+
+    state_no_pos = layer_no_pos.apply(
+        variables_no_pos,
+        batch_size,
+        x.channel_spec,
+        training=False,
+        method=layer_no_pos.get_initial_state,
+    )
+    self.assertIsNotNone(state_no_pos[1])
+
+    x_step = test_utils.random_sequence(batch_size, block_size, 1)
+    pos_step0 = jnp.tile(
+        jnp.arange(block_size)[jnp.newaxis, :], (batch_size, 1)
+    )
+    constants_step0 = {'pos': pos_step0}
+
+    y_step_no_pos, state_no_pos, _ = layer_no_pos.apply(
+        variables_no_pos,
+        x_step,
+        state_no_pos,
+        training=False,
+        method=layer_no_pos.step_with_emits,
+    )
+
+    y_step_pos, state_pos, _ = layer_pos.apply(
+        variables_pos,
+        x_step,
+        state_pos,
+        training=False,
+        constants=constants_step0,
+        method=layer_pos.step_with_emits,
+    )
+
+    self.assertSequencesClose(y_step_no_pos, y_step_pos)
+    self.assertIsNotNone(state_no_pos[1])
+    self.assertIsNone(state_pos[1])
 
 
 if __name__ == '__main__':

@@ -336,7 +336,10 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     else:
       query_delay_buffer = ()
 
-    time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
+    if self.config.position_name:
+      time_step = None
+    else:
+      time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
 
     query_input_spec = types.ShapeDType(
         (self.config.num_heads, self.config.units_per_head), compute_dtype
@@ -438,8 +441,8 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     ) = state
 
     if self.config.position_name:
-      x_position = common.get_source(
-          self, self.config.position_name, constants, required_rank=2
+      x_position = utils.get_constant_array(
+          self, constants, self.config.position_name
       )
     else:
       x_position = (
@@ -577,9 +580,12 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     # Preserve last kv_buffer_size timesteps as state for next step.
     kv_bundle = jax.tree.map(lambda a: a[:, -kv_buffer_size:], kv_bundle)
 
+    if time_step is not None:
+      time_step = time_step + x_values_time
+
     state = (
         kv_bundle,
-        time_step + x_values_time,
+        time_step,
         query_network_state,
         key_network_state,
         value_network_state,
@@ -606,8 +612,8 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     queries, keys, values = self.input_projection.get_qkv(x)
 
     if self.config.position_name:
-      x_position = common.get_source(
-          self, self.config.position_name, constants, required_rank=2
+      x_position = utils.get_constant_array(
+          self, constants, self.config.position_name
       )
     else:
       x_position = jnp.arange(values_time)[jnp.newaxis, :]
