@@ -92,6 +92,41 @@ class BlockwiseDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         grad_rtol=1e-5,
     )
 
+  def test_blockwise_dot_product_self_attention_ringbuffer(self):
+    key = jax.random.PRNGKey(1234)
+    batch_size = 2
+    block_size = 4
+    num_heads = 3
+    units_per_head = 5
+    max_past_horizon_blocks = 2
+    max_future_horizon_blocks = 1
+
+    l = blockwise_dot_product_self_attention.BlockwiseDotProductSelfAttention.Config(
+        block_size=block_size,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon_blocks=max_past_horizon_blocks,
+        max_future_horizon_blocks=max_future_horizon_blocks,
+        precision=jax.lax.Precision.HIGHEST,
+        per_dim_scale=True,
+        use_kv_cache_ringbuffer=True,
+        name='blockwise_dot_product_self_attention_ringbuffer',
+    ).make()
+
+    channels = 1
+    x = test_utils.random_sequence(batch_size, 64, channels, random_mask=True)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertTrue(l.config.use_kv_cache_ringbuffer)
+
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        grad_atol=1e-5,
+        grad_rtol=1e-5,
+    )
+
   @parameterized.product(
       test_utils.standard_dtype_configs(),
       config=(
