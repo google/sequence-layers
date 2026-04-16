@@ -30,7 +30,7 @@ import numpy as np
 import typeguard
 
 if TYPE_CHECKING:
-  ArrayT = jax.Array | np.ndarray
+  ArrayT = jax.Array | np.ndarray | jax.ShapeDtypeStruct
 else:
 
   class _MetaArrayT(type):
