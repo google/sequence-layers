@@ -13,6 +13,7 @@
 # limitations under the License.
 """Combinators."""
 
+import copy
 import dataclasses
 import fractions
 import functools
@@ -61,6 +62,14 @@ def _wrap_layers(layers: SequenceLayerConfigOrList) -> types.SequenceLayer:
     return layers.make()
   else:
     return Serial.Config(layers=tuple(layers)).make()
+
+
+def _copy_constants(
+    constants: types.Constants | None,
+) -> types.Constants | None:
+  if constants is None:
+    return None
+  return copy.copy(constants)
 
 
 class WrapperMixin:
@@ -234,6 +243,7 @@ class SerialCombinatorMixin:
     """Returns initial state for the layer."""
     spec = input_spec
     states = []
+    constants = _copy_constants(constants)
     for child_layer in self.layers:
       states.append(
           child_layer.get_initial_state(
@@ -250,6 +260,7 @@ class SerialCombinatorMixin:
       *,
       constants: types.Constants | None = None,
   ) -> types.DType:
+    constants = _copy_constants(constants)
     dtype = input_dtype
     for child_layer in self.layers:
       dtype = child_layer.get_output_dtype(dtype, constants=constants)
@@ -263,6 +274,7 @@ class SerialCombinatorMixin:
       constants: types.Constants | None = None,
   ) -> types.Shape:
     shape = tuple(input_shape)
+    constants = _copy_constants(constants)
     for child_layer in self.layers:
       shape = child_layer.get_output_shape(shape, constants=constants)
     return shape
@@ -278,6 +290,7 @@ class SerialCombinatorMixin:
     """Applies the layer to a block of inputs."""
     new_state = []
     emits = {}
+    constants = _copy_constants(constants)
     if len(self.layers) != len(state):
       raise ValueError(
           f'{type(self)=} {self.path=} received unexpected state structure:'
@@ -302,6 +315,7 @@ class SerialCombinatorMixin:
   ) -> tuple[types.Sequence, types.Emits]:
     """Applies the layer to the input sequence."""
     emits = {}
+    constants = _copy_constants(constants)
     for child_layer in self.layers:
       x, emits_i = child_layer.layer_with_emits(
           x, training=training, constants=constants
@@ -507,6 +521,7 @@ class Parallel(types.Emitting):
   ) -> types.State:
     """Returns initial state for the layer."""
     states = []
+    constants = _copy_constants(constants)
     for child_layer in self.layers:
       states.append(
           child_layer.get_initial_state(
@@ -525,6 +540,8 @@ class Parallel(types.Emitting):
     if not self.layers:
       return tuple(input_shape)
 
+    constants = _copy_constants(constants)
+
     output_shapes = [
         child_layer.get_output_shape(input_shape, constants=constants)
         for child_layer in self.layers
@@ -542,6 +559,8 @@ class Parallel(types.Emitting):
   ) -> types.DType:
     if not self.layers:
       return input_dtype
+
+    constants = _copy_constants(constants)
 
     dtype = self.layers[0].get_output_dtype(input_dtype, constants=constants)
     for child_layer in self.layers[1:]:
@@ -562,6 +581,7 @@ class Parallel(types.Emitting):
   ) -> tuple[types.Sequence, types.State, types.Emits]:
     new_state = []
     emits = {}
+    constants = _copy_constants(constants)
     if len(self.layers) != len(state):
       raise ValueError(
           f'{type(self)=} {self.path=} received unexpected state structure:'
@@ -590,6 +610,7 @@ class Parallel(types.Emitting):
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Emits]:
     emits = {}
+    constants = _copy_constants(constants)
 
     if not self.layers:
       return x, emits
@@ -638,6 +659,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
+    constants = _copy_constants(constants)
     input_shape = list(input_shape)
     if not input_shape:
       raise ValueError(f'Input must be at least 3D, got: {input_shape=}.')
@@ -674,6 +696,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
   ) -> types.Sequence:
     self._validate_inputs(x)
 
+    constants = _copy_constants(constants)
     ys = [
         self.child_layer.layer(x_i, training=training, constants=constants)
         for x_i in utils.sequence_split(x, self.config.num_groups, axis=-1)
@@ -690,6 +713,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
   ) -> tuple[types.Sequence, types.Emits]:
     self._validate_inputs(x)
     ys, emits = [], []
+    constants = _copy_constants(constants)
     for x_i in utils.sequence_split(x, self.config.num_groups, axis=-1):
       y_i, emits_i = self.child_layer.layer_with_emits(
           x_i, training=training, constants=constants
@@ -714,6 +738,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
           f'Input channels ({input_spec.shape[-1]}) must be divisible by'
           f' num_groups ({self.config.num_groups}).'
       )
+    constants = _copy_constants(constants)
     input_shape = list(input_spec.shape)
     input_shape[-1] //= self.config.num_groups
     input_spec = types.ChannelSpec(
@@ -739,6 +764,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
     xs = utils.sequence_split(x, self.config.num_groups, axis=-1)
     ys = []
     states = []
+    constants = _copy_constants(constants)
     for x_i, state_i in zip(xs, state, strict=True):
       y_i, state_i = self.child_layer.step(
           x_i, state_i, training=training, constants=constants
@@ -763,6 +789,7 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
     ys = []
     states = []
     emits = []
+    constants = _copy_constants(constants)
     for x_i, state_i in zip(xs, state, strict=True):
       y_i, state_i, emits_i = self.child_layer.step_with_emits(
           x_i, state_i, training=training, constants=constants
@@ -952,6 +979,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
   ) -> tuple[types.Sequence, types.State, types.Emits]:
     self._validate(x.channel_spec, constants)
     body_state, shortcut_state = state
+    constants = _copy_constants(constants)
     y_body, body_state, body_emits = super().step_with_emits(
         x, body_state, training=training, constants=constants
     )
@@ -974,6 +1002,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Emits]:
     self._validate(x.channel_spec, constants)
+    constants = _copy_constants(constants)
     y_body, body_emits = super().layer_with_emits(
         x, training=training, constants=constants
     )
@@ -994,6 +1023,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.State:
+    constants = _copy_constants(constants)
     body_state = super().get_initial_state(
         batch_size, input_spec, training=training, constants=constants
     )
@@ -1009,6 +1039,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
       *,
       constants: types.Constants | None = None,
   ) -> types.DType:
+    constants = _copy_constants(constants)
     layer_dtype = super().get_output_dtype(input_dtype, constants=constants)
     shortcut_dtype = self.shortcut_layer.get_output_dtype(
         input_dtype, constants=constants
@@ -1291,6 +1322,7 @@ class Repeat(types.Emitting):
       with_emits: bool,
   ) -> tuple[types.Sequence, types.Emits]:
     self._validate(x.channel_spec, constants)
+    constants = _copy_constants(constants)
 
     def scan_fn(child_layer, scan_carry: types.Sequence, scan_input):
       del scan_input
@@ -1382,6 +1414,7 @@ class Repeat(types.Emitting):
       constants: types.Constants | None = None,
   ) -> types.State:
     self._validate(input_spec, constants)
+    constants = _copy_constants(constants)
 
     def scan_fn(
         child_layer: types.SequenceLayer,
@@ -1486,6 +1519,7 @@ class Repeat(types.Emitting):
       with_emits: bool,
   ) -> tuple[types.Sequence, types.State, types.Emits]:
     self._validate(x.channel_spec, constants)
+    constants = _copy_constants(constants)
 
     def scan_fn(
         child_layer: types.SequenceLayer,
