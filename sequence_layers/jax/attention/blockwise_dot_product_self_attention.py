@@ -112,6 +112,10 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     # accumulate the logits in float32 instead of simply upcasting the output of
     # the logits einsum to float32.
     experimental_accumulate_logits_in_float32: bool = False
+    # Whether to use an experimental ring buffer implementation for the KV cache
+    # updates. This implementation is more compute and memory efficient than the
+    # default implementation on TPU.
+    use_kv_cache_ringbuffer: bool = False
     # An optional name for the layer.
     name: str | None = None
 
@@ -336,10 +340,10 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     else:
       query_delay_buffer = ()
 
-    if self.config.position_name:
-      time_step = None
-    else:
+    if self.config.use_kv_cache_ringbuffer or not self.config.position_name:
       time_step = jnp.zeros((batch_size,), dtype=jnp.int32)
+    else:
+      time_step = None
 
     query_input_spec = types.ShapeDType(
         (self.config.num_heads, self.config.units_per_head), compute_dtype
@@ -503,10 +507,11 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
     )
 
     # To process a step, concatenate our kv_buffer_size KV buffer with the
-    # input source.shape[1] timesteps.
-    kv_bundle = jax.tree.map(
-        lambda a, b: jnp.concatenate([a, b], axis=1), kv_bundle, new_kv_bundle
-    )
+    # input source.shape[1] timesteps if not using ringbuffer.
+    if not self.config.use_kv_cache_ringbuffer:
+      kv_bundle = jax.tree.map(
+          lambda a, b: jnp.concatenate([a, b], axis=1), kv_bundle, new_kv_bundle
+      )
 
     # If we have a query delay buffer, we need to insert the current block of
     # queries into it, and pop the oldest x_values_time queries off. If no query
@@ -541,7 +546,10 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
       )
 
     # Compute context vectors:
-    kv_buffers = (kv_bundle,)
+    if self.config.use_kv_cache_ringbuffer:
+      kv_buffers = (kv_bundle, new_kv_bundle)
+    else:
+      kv_buffers = (kv_bundle,)
     key_block_sizes = self.config.flash_attention_key_block_size
 
     attention_mask_fns = []
@@ -577,8 +585,40 @@ class BlockwiseDotProductSelfAttention(types.Emitting):
         experimental_accumulate_logits_in_float32=self.config.experimental_accumulate_logits_in_float32,
     )
 
-    # Preserve last kv_buffer_size timesteps as state for next step.
-    kv_bundle = jax.tree.map(lambda a: a[:, -kv_buffer_size:], kv_bundle)
+    # Update KV caches and state.
+    if self.config.use_kv_cache_ringbuffer:
+      if kv_buffer_size > 0:
+        i = time_step % kv_buffer_size
+
+        def update_ringbuffer(x, u, idx):
+          indices = (idx + jnp.arange(x_values_time)) % kv_buffer_size
+          return x.at[indices].set(u)
+
+        update_fn = jax.vmap(update_ringbuffer)
+
+        kv_bundle_keys = update_fn(kv_bundle.keys, new_kv_bundle.keys, i)
+        kv_bundle_values = update_fn(kv_bundle.values, new_kv_bundle.values, i)
+        kv_bundle_mask = update_fn(kv_bundle.mask, new_kv_bundle.mask, i)
+        kv_bundle_position = update_fn(
+            kv_bundle.position, new_kv_bundle.position, i
+        )
+
+        kv_bundle_segment_ids = None
+        if self.config.segment_ids_name:
+          kv_bundle_segment_ids = update_fn(
+              kv_bundle.segment_ids, new_kv_bundle.segment_ids, i
+          )
+
+        kv_bundle = common.KVBundle(
+            keys=kv_bundle_keys,
+            values=kv_bundle_values,
+            segment_ids=kv_bundle_segment_ids,
+            position=kv_bundle_position,
+            mask=kv_bundle_mask,
+        )
+    else:
+      # Preserve last kv_buffer_size timesteps as state for next step.
+      kv_bundle = jax.tree.map(lambda a: a[:, -kv_buffer_size:], kv_bundle)
 
     if time_step is not None:
       time_step = time_step + x_values_time
