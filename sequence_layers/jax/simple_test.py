@@ -30,132 +30,20 @@ import jax._src.ad_checkpoint
 import jax.experimental.mesh_utils  # Required for OSS.
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
+from sequence_layers.specs import simple_behaviors as spec
 
 
-class ScaleTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(((2, 13, 5),), ((2, 13, 5, 9),))
-  def test_basic(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Scale.Config(scale=2.0, name='scale').make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'scale')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(lambda v: v * 2.0)
-    self.assertSequencesEqual(y, y_expected)
-
-  @parameterized.parameters(((2, 13, 5),), ((2, 13, 9, 5),))
-  def test_ndarray(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Scale.Config(
-        scale=np.arange(5, dtype=np.float32), name='scale'
-    ).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'scale')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(lambda v: v * np.arange(5, dtype=np.float32))
-    self.assertSequencesEqual(y, y_expected)
-
-  def test_broadcast(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Scale.Config(scale=np.ones((5, 9))).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 9))
-
-  def test_too_many_dims(self):
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Scale.Config(scale=np.ones((5, 5, 5))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
-
-  def test_broadcast_failure(self):
-    x = test_utils.random_sequence(2, 3, 5, 9)
-    l = simple.Scale.Config(scale=np.ones((5,))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
+class ScaleTest(test_utils.SequenceLayerTest, spec.ScaleTest):
+  pass
 
 
-class AddTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters((((2, 13, 5)),), (((2, 13, 5, 9)),))
-  def test_add(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Add.Config(-2.0, name='add').make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'add')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(lambda v: v - 2.0).mask_invalid()
-    self.assertSequencesEqual(y, y_expected)
-
-  @parameterized.parameters(((2, 13, 5),), ((2, 13, 9, 5),))
-  def test_ndarray(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Add.Config(
-        shift=np.arange(5, dtype=np.float32), name='add'
-    ).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'add')
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-    y_expected = x.apply_values(
-        lambda v: v + np.arange(5, dtype=np.float32)
-    ).mask_invalid()
-    self.assertSequencesEqual(y, y_expected)
-
-  def test_broadcast(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Add.Config(shift=np.ones((5, 9))).make()
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 9))
-
-  def test_too_many_dims(self):
-    x = test_utils.random_sequence(2, 3, 5, 1)
-    l = simple.Add.Config(shift=np.ones((5, 5, 5))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
-
-  def test_broadcast_failure(self):
-    x = test_utils.random_sequence(2, 3, 5, 9)
-    l = simple.Add.Config(shift=np.ones((5,))).make().bind({})
-    with self.assertRaises(ValueError):
-      l.get_output_shape_for_sequence(x)
-
-    with self.assertRaises(ValueError):
-      l.layer(x, training=False)
+class AddTest(test_utils.SequenceLayerTest, spec.AddTest):
+  pass
 
 
 class MinimumTest(test_utils.SequenceLayerTest):
@@ -344,34 +232,31 @@ class ModTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class GatedUnitTest(test_utils.SequenceLayerTest):
+class GatedUnitTest(test_utils.SequenceLayerTest, spec.GatedUnitTest):
 
   @parameterized.parameters(
       itertools.product(
-          (simple.GatedUnit.Config(None, None),  # Bilinear
-           simple.GatedUnit.Config(None, jax.nn.swish),  # SwiGLU
-           simple.GatedUnit.Config(None, jax.nn.gelu),  # GeGLU
-           simple.GatedUnit.Config(lambda x: x, None),  # Bilinear
-           simple.GatedUnit.Config(jax.nn.swish, jax.nn.tanh),
-           simple.GatedTanhUnit.Config(),
-           simple.GatedLinearUnit.Config()),
-          ((2, 13, 6), (2, 13, 5, 10)))
-      )  # pyformat: disable
-  def test_gated_activation(self, layer_config, shape):
+          (
+              simple.GatedUnit.Config(None, None),  # Bilinear
+              simple.GatedUnit.Config(None, jax.nn.swish),  # SwiGLU
+              simple.GatedUnit.Config(None, jax.nn.gelu),  # GeGLU
+              simple.GatedUnit.Config(lambda x: x, None),  # Bilinear
+              simple.GatedUnit.Config(jax.nn.swish, jax.nn.tanh),
+              simple.GatedTanhUnit.Config(),
+              simple.GatedLinearUnit.Config(),
+          ),
+          ((2, 13, 6), (2, 13, 5, 10)),
+      )
+  )  # pyformat: disable
+  def test_variables_empty(self, layer_config, shape):
     key = jax.random.PRNGKey(1234)
     x = test_utils.random_sequence(*shape)
     l = layer_config.make()
     l = self.init_and_bind_layer(key, l, x)
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(
-        l.get_output_shape_for_sequence(x), shape[2:-1] + (shape[-1] // 2,)
-    )
-    self.verify_contract(l, x, training=True)
     self.assertEmpty(l.variables)
 
 
-class DropoutTest(test_utils.SequenceLayerTest):
+class DropoutTest(test_utils.SequenceLayerTest, spec.DropoutTest):
 
   @parameterized.parameters(
       jnp.float32, jnp.bfloat16, jnp.int32, jnp.int8, jnp.bool
@@ -511,28 +396,8 @@ class SliceTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class FlattenTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(
-      (((2, 3, 5)),), (((2, 3, 5, 9)),), (((2, 3, 5, 9, 2)),)
-  )
-  def test_flatten(self, shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Flatten.Config(name='flatten').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    num_elements = np.prod(shape[2:])
-    self.assertEqual(l.get_output_shape_for_sequence(x), (num_elements,))
-    self.assertEqual(l.name, 'flatten')
-
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-
-    y_expected = x.apply_values(jnp.reshape, shape[:2] + (num_elements,))
-    self.assertSequencesEqual(y, y_expected)
+class FlattenTest(test_utils.SequenceLayerTest, spec.FlattenTest):
+  pass
 
 
 class GlobalReshapeTest(test_utils.SequenceLayerTest):
@@ -601,30 +466,7 @@ class GlobalReshapeTest(test_utils.SequenceLayerTest):
       self.init_and_bind_layer(key, l, x)
 
 
-class ReshapeTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(
-      ((2, 3, 5), (1, 5, 1)),
-      ((2, 3, 5, 9), (3, 3, 5)),
-      ((2, 3, 1), ()),
-      ((2, 3), (1,)),
-  )
-  def test_reshape(self, shape, output_shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = simple.Reshape.Config(output_shape, name='reshape').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
-    self.assertEqual(l.name, 'reshape')
-
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-
-    y_expected = x.apply_values(jnp.reshape, shape[:2] + output_shape)
-    self.assertSequencesEqual(y, y_expected)
+class ReshapeTest(test_utils.SequenceLayerTest, spec.ReshapeTest):
 
   def test_wrong_shape(self):
     l = simple.Reshape.Config([4], name='reshape').make().bind({})
@@ -637,36 +479,7 @@ class ReshapeTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class TransposeTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(
-      ((2, 3, 4, 5), (2, 3), (4, 5)),
-      ((2, 3, 4, 5, 6), (4, 2, 3), (6, 4, 5)),
-      ((2, 3, 1, 2, 3), None, (3, 2, 1)),
-      ((2, 3), tuple(), tuple()),
-      ((2, 3), None, tuple()),
-  )
-  def test_transpose(self, input_shape, axes, output_shape):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*input_shape)
-    l = simple.Transpose.Config(axes=axes, name='transpose').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), output_shape)
-    self.assertEqual(l.name, 'transpose')
-
-    y = self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-
-    if axes is not None:
-      y_expected = x.apply_values(jnp.transpose, (0, 1) + axes)
-    else:
-      axes = (0, 1) + tuple(range(2, x.ndim))[::-1]
-      y_expected = x.apply_values(jnp.transpose, axes)
-
-    self.assertSequencesEqual(y, y_expected)
+class TransposeTest(test_utils.SequenceLayerTest, spec.TransposeTest):
 
   @parameterized.parameters(
       ((2, 3), (2,)),
@@ -989,20 +802,20 @@ class GradientClippingTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(expected_gradients, y_layer_x_grad)
 
 
-class IdentityTest(test_utils.SequenceLayerTest):
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
+  pass
+
+
+class IdentityTest(test_utils.SequenceLayerTest, spec.IdentityTest):
 
   @parameterized.parameters((((2, 3, 5)),), (((2, 3, 5, 9)),))
-  def test_identity(self, shape):
+  def test_jax_specifics(self, shape):
     key = jax.random.PRNGKey(1234)
     x = test_utils.random_sequence(*shape)
     l = simple.Identity(name='identity')
     l = self.init_and_bind_layer(key, l, x)
 
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'identity')
-    self.verify_contract(l, x, training=False)
     self.assertEmpty(l.variables)
 
 
@@ -1047,10 +860,10 @@ class NamedEmitTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(emits['test_emit'], x)
 
 
-class OneHotTest(test_utils.SequenceLayerTest):
+class OneHotTest(test_utils.SequenceLayerTest, spec.OneHotTest):
 
   @parameterized.parameters(((1, 2, 3),), ((2, 3, 5, 9),), ((2, 3, 5, 9, 2),))
-  def test_one_hot(self, shape):
+  def test_variables_empty(self, shape):
     key = jax.random.PRNGKey(1234)
     depth = 4
     l = simple.OneHot.Config(depth, name='one_hot').make()
@@ -1103,11 +916,13 @@ def embedding_layer_from_weights(
   return layer
 
 
-class EmbeddingTest(test_utils.SequenceLayerTest):
+class EmbeddingTest(test_utils.SequenceLayerTest, spec.EmbeddingTest):
 
-  @parameterized.parameters(((1, 2, 3),), ((2, 3, 5, 9),), ((2, 3, 5, 9, 2),))
-  def test_embedding(self, shape):
-    key = jax.random.PRNGKey(1234)
+  def test_embedding(self):
+    super().test_embedding()
+
+    # JAX-specific variables check
+    shape = (2, 3, 5, 9)
     dimension, num_embeddings = 8, 5
 
     l = simple.Embedding.Config(
@@ -1116,22 +931,13 @@ class EmbeddingTest(test_utils.SequenceLayerTest):
     x = test_utils.random_sequence(
         *shape, dtype=jnp.int32, low=0, high=num_embeddings - 1
     )
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(
-        l.get_output_shape_for_sequence(x), shape[2:] + (dimension,)
-    )
-    self.assertEqual(l.name, 'embedding')
-    l = self.init_and_bind_layer(key, l, x)
+    l = self.init_and_bind_layer(jax.random.PRNGKey(1234), l, x)
 
     y = self.verify_contract(
         l,
         x,
         training=False,
-        # Integer tensors have no gradient to test.
         test_gradients=False,
-        # Receptive field test is not supported for integers.
         test_receptive_field=False,
     )
 
@@ -1399,9 +1205,7 @@ class SnakeTest(test_utils.SequenceLayerTest):
   def test_snake(self, shape, separate_beta: bool):
     key = jax.random.PRNGKey(1234)
     x = test_utils.random_sequence(*shape)
-    l = simple.Snake.Config(
-        separate_beta=separate_beta, name='snake'
-    ).make()
+    l = simple.Snake.Config(separate_beta=separate_beta, name='snake').make()
     l = self.init_and_bind_layer(key, l, x)
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
@@ -1420,9 +1224,7 @@ class SnakeTest(test_utils.SequenceLayerTest):
       expected_params['params']['beta_log'] = jnp.zeros(
           x.channel_shape, dtype=jnp.float32
       )
-    chex.assert_trees_all_equal_shapes_and_dtypes(
-        variables, expected_params
-    )
+    chex.assert_trees_all_equal_shapes_and_dtypes(variables, expected_params)
 
 
 class AffineTest(test_utils.SequenceLayerTest):
@@ -1605,11 +1407,10 @@ class AffineTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class PointwiseMathTest(test_utils.SequenceLayerTest):
+class PointwiseMathTest(test_utils.SequenceLayerTest, spec.PointwiseMathTest):
 
   @parameterized.parameters(
       (simple.Abs.Config(), jnp.abs, (jnp.float32, jnp.complex64), None),
-      (simple.Elu.Config(), jax.nn.elu, (jnp.float32,), None),
       (simple.Exp.Config(), jnp.exp, (jnp.float32,), None),
       (simple.Gelu.Config(), jax.nn.gelu, (jnp.float32,), None),
       (simple.LeakyRelu.Config(), jax.nn.leaky_relu, (jnp.float32,), None),
@@ -1622,14 +1423,10 @@ class PointwiseMathTest(test_utils.SequenceLayerTest):
       (simple.Log.Config(), jnp.log, (jnp.float32,), None),
       (simple.Power.Config(2), jnp.square, (jnp.float32,), None),
       (simple.Power.Config(0.5), jnp.sqrt, (jnp.float32,), None),
-      (simple.Relu.Config(), jax.nn.relu, (jnp.float32,), None),
-      (simple.Sigmoid.Config(), jax.nn.sigmoid, (jnp.float32,), None),
-      (simple.Softmax.Config(), jax.nn.softmax, (jnp.float32,), None),
-      (simple.Softplus.Config(), jax.nn.softplus, (jnp.float32,), None),
-      (simple.Swish.Config(), jax.nn.swish, (jnp.float32,), None),
-      (simple.Tanh.Config(), jnp.tanh, (jnp.float32,), None),
   )
-  def test_pointwise_math(self, config, op, dtypes, expected_params):
+  def test_jax_specific_pointwise_math(
+      self, config, op, dtypes, expected_params
+  ):
     key = jax.random.PRNGKey(1234)
     batch_size, time, channels = 2, 10, 4
     for dtype in dtypes:
@@ -1664,81 +1461,9 @@ class PointwiseMathTest(test_utils.SequenceLayerTest):
       y_expected = x.apply_values(op).mask_invalid()
       self.assertSequencesClose(y, y_expected)
 
-  @parameterized.parameters(
-      (simple.Softmax.Config(), jax.nn.softmax, (jnp.float32,), -1),
-      (simple.Softmax.Config(), jax.nn.softmax, (jnp.float32,), -2),
-      (simple.Softmax.Config(), jax.nn.softmax, (jnp.float32,), 2),
-      (simple.Softmax.Config(), jax.nn.softmax, (jnp.float32,), 3),
-  )
-  def test_pointwise_math_axis(self, config, op, dtypes, axis):
-    key = jax.random.PRNGKey(1234)
-    batch_size, time, channels, channels2 = 2, 10, 4, 3
-    for dtype in dtypes:
-      x = test_utils.random_sequence(
-          batch_size, time, channels, channels2, dtype=dtype
-      )
-      l = dataclasses.replace(config, name='test', axis=axis).make()
-      l = self.init_and_bind_layer(key, l, x)
 
-      self.assertEqual(l.block_size, 1)
-      self.assertEqual(l.output_ratio, 1)
-      self.assertEqual(
-          l.get_output_shape_for_sequence(x), (channels, channels2)
-      )
-      self.assertEqual(l.name, 'test')
-      y = self.verify_contract(l, x, training=False)
-      self.assertEmpty(l.variables)
-
-      y_expected = x.apply_values(
-          functools.partial(op, axis=axis)
-      ).mask_invalid()
-      self.assertSequencesClose(y, y_expected)
-
-  @parameterized.parameters(
-      (simple.Softmax.Config(), (2, 10, 4), -2),
-      (simple.Softmax.Config(), (2, 10, 4), -3),
-      (simple.Softmax.Config(), (2, 10, 4), 0),
-      (simple.Softmax.Config(), (2, 10, 4), 1),
-      (simple.Softmax.Config(), (2, 10), -1),
-  )
-  def test_pointwise_math_axis_invalid(self, config, shape, axis):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape)
-    l = dataclasses.replace(config, name='test', axis=axis).make()
-
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-
-class CastTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(
-      (((2, 3, 5)), jnp.float16),
-      (((2, 3, 5, 9)), jnp.int32),
-  )
-  def test_cast(self, shape, target_dtype):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(*shape, dtype=jnp.float32)
-    l = simple.Cast.Config(target_dtype, name='cast').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-    self.assertEqual(l.name, 'cast')
-
-    test_receptive_field = jnp.issubdtype(target_dtype, jnp.inexact)
-    y = self.verify_contract(
-        l,
-        x,
-        training=False,
-        padding_invariance_pad_value=jnp.nan
-        if target_dtype == jnp.float16
-        else 32768,
-        test_receptive_field=test_receptive_field,
-    )
-    self.assertEmpty(l.variables)
-    self.assertEqual(y.values.dtype, target_dtype)
+class CastTest(test_utils.SequenceLayerTest, spec.CastTest):
+  pass
 
 
 class ApplyShardingTest(test_utils.SequenceLayerTest):
@@ -1781,79 +1506,8 @@ class ApplyShardingTest(test_utils.SequenceLayerTest):
       # TODO(rryan): Test sharding was applied.
 
 
-class LambdaTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(True, False)
-  def test_array_fn(self, mask_required: bool):
-    def fn(v: jax.Array) -> jax.Array:
-      if mask_required:
-        # Change the masked status by adding 1.
-        v = v + 1.0
-      return v.reshape(v.shape + (1,)) > 0.5
-
-    l = (
-        simple.Lambda.Config(
-            fn,
-            mask_required=mask_required,
-            expected_input_spec=types.ShapeDType((5,), jnp.float32),
-            name='lambda',
-        )
-        .make()
-        .bind({})
-    )
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    # Output spec reflects the changed shape and dtype.
-    x = test_utils.random_sequence(2, 3, 5)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 1))
-    self.assertEqual(l.get_output_dtype(x.dtype), jnp.bool_)
-    self.assertEqual(l.name, 'lambda')
-    y = self.verify_contract(
-        l,
-        x,
-        training=False,
-        # Receptive field test is not supported for bools.
-        test_receptive_field=False,
-    )
-    self.assertEmpty(l.variables)
-    self.assertSequencesClose(y, x.apply_values(fn).mask_invalid())
-
-  @parameterized.parameters(True, False)
-  def test_sequence_fn(self, mask_required: bool):
-    def fn(x: types.Sequence) -> types.Sequence:
-      if mask_required:
-        # Change the masked status by adding 1.
-        x = x.apply_values(lambda v: v + 1.0)
-      return x.apply_values_masked(lambda v: v.reshape(v.shape + (1,)) > 0.5)
-
-    l = (
-        simple.Lambda.Config(
-            fn,
-            sequence_input=True,
-            expected_input_spec=types.ShapeDType((5,), jnp.float32),
-            name='lambda',
-        )
-        .make()
-        .bind({})
-    )
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    # Output spec reflects the changed shape and dtype.
-    x = test_utils.random_sequence(2, 3, 5)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 1))
-    self.assertEqual(l.get_output_dtype(x.dtype), jnp.bool_)
-    self.assertEqual(l.name, 'lambda')
-    y = self.verify_contract(
-        l,
-        x,
-        training=False,
-        # Receptive field test is not supported for bools.
-        test_receptive_field=False,
-    )
-    self.assertEmpty(l.variables)
-    self.assertSequencesClose(y, fn(x).mask_invalid())
+class LambdaTest(test_utils.SequenceLayerTest, spec.LambdaTest):
+  """Test behavior of Lambda layer."""
 
   def test_invalid_input(self):
     """Input that does not match expected_input_spec raises ValueError."""
@@ -1895,22 +1549,18 @@ class LambdaTest(test_utils.SequenceLayerTest):
       l.layer(x, training=False)
 
 
-class CheckpointNameTest(test_utils.SequenceLayerTest):
+class CheckpointNameTest(test_utils.SequenceLayerTest, spec.CheckpointNameTest):
+  """Test behavior of CheckpointName layer."""
 
   def test_basic(self):
-    key = jax.random.PRNGKey(1234)
+    super().test_basic()
+
     x = test_utils.random_sequence(2, 3, 5)
+    key = jax.random.PRNGKey(1234)
     l = simple.CheckpointName.Config(
         checkpoint_name='test', name='checkpoint_name'
     ).make()
     l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5,))
-    self.assertEqual(l.name, 'checkpoint_name')
-    self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
 
     policy = jax.checkpoint_policies.save_only_these_names('test')
 
@@ -1928,42 +1578,12 @@ class CheckpointNameTest(test_utils.SequenceLayerTest):
     )
 
 
-class Downsample1DTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(((2, 3, 5), 2), ((2, 3, 5, 9), 3))
-  def test_downsample1d(self, shape, rate):
-    l = simple.Downsample1D.Config(rate, name='downsample_1d').make().bind({})
-
-    self.assertEqual(l.block_size, rate)
-    self.assertEqual(1 / l.output_ratio, rate)
-    self.assertTrue(l.supports_step)
-    self.assertEqual(l.name, 'downsample_1d')
-    self.assertEmpty(l.variables)
-
-    x = test_utils.random_sequence(*shape)
-    self.assertEqual(l.get_output_shape_for_sequence(x), x.channel_shape)
-    y = self.verify_contract(l, x, training=False)
-    self.assertAllEqual(x.values[:, ::rate], y.values)
-    self.assertAllEqual(x.mask[:, ::rate], y.mask)
+class Downsample1DTest(test_utils.SequenceLayerTest, spec.Downsample1DTest):
+  pass
 
 
-class Upsample1DTest(test_utils.SequenceLayerTest):
-
-  @parameterized.parameters(((2, 3, 5), 2), ((2, 3, 5, 9), 3))
-  def test_upsample1d(self, shape, rate):
-    l = simple.Upsample1D.Config(rate, name='upsample_1d').make().bind({})
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, rate)
-    self.assertTrue(l.supports_step)
-    self.assertEqual(l.name, 'upsample_1d')
-    self.assertEmpty(l.variables)
-
-    x = test_utils.random_sequence(*shape)
-    self.assertEqual(l.get_output_shape_for_sequence(x), x.channel_shape)
-    y = self.verify_contract(l, x, training=False)
-    for i in range(rate):
-      self.assertAllEqual(x.values, y.values[:, i::rate])
+class Upsample1DTest(test_utils.SequenceLayerTest, spec.Upsample1DTest):
+  pass
 
 
 class Upsample2DTest(test_utils.SequenceLayerTest):
@@ -1989,24 +1609,8 @@ class Upsample2DTest(test_utils.SequenceLayerTest):
       self.assertAllEqual(x.values, y.values[:, i :: rate[0], j :: rate[1], :])
 
 
-class MaskInvalidTest(test_utils.SequenceLayerTest):
-
-  def test_basic(self):
-    x = test_utils.random_sequence(2, 15, 5)
-    l = simple.MaskInvalid.Config(name='mask_invalid').make().bind({})
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5,))
-    self.assertEqual(l.name, 'mask_invalid')
-    self.verify_contract(l, x, training=False)
-    self.assertEmpty(l.variables)
-
-    x = x.mask_invalid(np.nan)
-    self.assertIsInstance(x, types.Sequence)
-    y = l.layer(x, training=False)
-    self.assertIsInstance(y, types.MaskedSequence)
-    self.assertSequencesEqual(x.mask_invalid(), y)
+class MaskInvalidTest(test_utils.SequenceLayerTest, spec.MaskInvalidTest):
+  pass
 
 
 class ReduceTest(test_utils.SequenceLayerTest):
@@ -2089,106 +1693,8 @@ class ReduceTest(test_utils.SequenceLayerTest):
       self.init_and_bind_layer(key, l, x)
 
 
-class Has:
-  """A simple `HAS(v)` matcher that tests whether something has `v` in it."""
-
-  def __init__(self, value):
-    self._v = value
-
-  def __eq__(self, o):
-    return self._v in o
-
-  def __ne__(self, o):
-    return not self == o
-
-  def __repr__(self):
-    return '<HAS(%r)>' % self._v
-
-
-class Not:
-  """Negates a matcher."""
-
-  def __init__(self, matcher):
-    self._matcher = matcher
-
-  def __eq__(self, o):
-    return self._matcher != o
-
-  def __ne__(self, o):
-    return not self == o
-
-  def __repr__(self):
-    return '<NOT(%r)>' % self._matcher
-
-
-class LoggingTest(test_utils.SequenceLayerTest):
-
-  @mock.patch.object(logging, 'info', wraps=logging.info)
-  def test_logs_tensors(self, mock_logger):
-    x = types.Sequence.from_values(jnp.asarray([[1.414, 2, 3, 4]]))
-    state = types.Sequence.from_values(jnp.asarray([[1, 2.718, 3, 4]]))
-    training = False
-    constants = {
-        'foo': jnp.asarray([[1, 2, 3.14, 4]]),
-        'bar': np.asarray([[1, 2, 3, 4.2]]),
-    }
-
-    with self.subTest('prefix'):
-      l = simple.Logging.Config(prefix='test string').make().bind({})
-      l.layer(x, training=training, constants=constants)
-      mock_logger.assert_called_with(Has('test string'))
-
-    with self.subTest('specs_only'):
-      l = simple.Logging.Config(dump_tensors=False).make().bind({})
-      with self.subTest('layer'):
-        l.layer(x, training=training, constants=constants)
-        mock_logger.assert_called_with(Not(Has('1.414')))
-        mock_logger.assert_called_with(Not(Has('3.14')))
-        mock_logger.assert_called_with(Not(Has('4.2')))
-        mock_logger.assert_called_with(Has('(1, 4)'))
-        mock_logger.assert_called_with(Has('float32'))
-      with self.subTest('get_initial_state'):
-        l.get_initial_state(
-            batch_size=x.shape[0],
-            input_spec=x.channel_spec,
-            training=training,
-            constants=constants,
-        )
-        mock_logger.assert_called_with(Not(Has('3.14')))
-        mock_logger.assert_called_with(Not(Has('4.2')))
-        mock_logger.assert_called_with(Has('(1, 4)'))
-        mock_logger.assert_called_with(Has('float32'))
-      with self.subTest('step'):
-        l.step(x, state, training=training, constants=constants)
-        mock_logger.assert_called_with(Not(Has('1.414')))
-        mock_logger.assert_called_with(Not(Has('2.718')))
-        mock_logger.assert_called_with(Not(Has('3.14')))
-        mock_logger.assert_called_with(Not(Has('4.2')))
-        mock_logger.assert_called_with(Has('(1, 4)'))
-        mock_logger.assert_called_with(Has('float32'))
-
-    with self.subTest('dumps_tensors'):
-      l = simple.Logging.Config(dump_tensors=True).make().bind({})
-      with self.subTest('layer'):
-        l.layer(x, training=training, constants=constants)
-        mock_logger.assert_called_with(Has('1.414'))
-        mock_logger.assert_called_with(Has('3.14'))
-        mock_logger.assert_called_with(Has('4.2'))
-      with self.subTest('get_initial_state'):
-        l.get_initial_state(
-            batch_size=x.shape[0],
-            input_spec=x.channel_spec,
-            training=training,
-            constants=constants,
-        )
-        mock_logger.assert_called_with(Has('3.14'))
-        mock_logger.assert_called_with(Has('4.2'))
-      with self.subTest('step'):
-        l.step(x, state, training=training, constants=constants)
-        mock_logger.assert_called_with(Has('1.414'))
-        mock_logger.assert_called_with(Has('2.718'))
-        mock_logger.assert_called_with(Has('3.14'))
-        mock_logger.assert_called_with(Has('4.2'))
+class LoggingTest(test_utils.SequenceLayerTest, spec.LoggingTest):
+  """Test behavior of Logging layer."""
 
 
 class ArgmaxTest(test_utils.SequenceLayerTest):
@@ -2222,63 +1728,7 @@ class ArgmaxTest(test_utils.SequenceLayerTest):
     self.assertAllEqual(y.values, jnp.array([[2], [0]]))
 
 
-class SqueezeTest(test_utils.SequenceLayerTest):
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='float_input',
-          input_array=np.array(
-              [[[3]]],
-              dtype=np.float32,
-          ),
-          expected_output=np.array([[3]]),
-      ),
-      dict(
-          testcase_name='int_input',
-          input_array=np.array(
-              [[[3]]],
-              dtype=np.int32,
-          ),
-          expected_output=np.array([[3]], dtype=np.int32),
-      ),
-      dict(
-          testcase_name='no_op_input',
-          input_array=np.array(
-              [[3]],
-              dtype=np.float32,
-          ),
-          expected_output=np.array([[3]]),
-      ),
-      dict(
-          testcase_name='input_with_extra_dims',
-          input_array=np.array(
-              [[[[[3], [4]]]]],
-              dtype=np.float32,
-          ),
-          expected_output=np.array([[[3, 4]]]),
-      ),
-  )
-  def test_squeeze(
-      self, input_array: jnp.ndarray, expected_output: jnp.ndarray
-  ):
-    key = jax.random.PRNGKey(1234)
-    x = types.Sequence.from_values(input_array)
-    l = simple.Squeeze.Config(name='squeeze').make()
-    l = self.init_and_bind_layer(key, l, x)
-
-    _ = l.layer(x, training=False)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(
-        l.get_output_shape_for_sequence(x), expected_output.shape[2:]
-    )
-    self.assertEqual(l.name, 'squeeze')
-    test_receptive_field = jnp.issubdtype(input_array.dtype, jnp.inexact)
-    self.verify_contract(
-        l, x, training=False, test_receptive_field=test_receptive_field
-    )
-    self.assertEmpty(l.variables)
+class SqueezeTest(test_utils.SequenceLayerTest, spec.SqueezeTest):
 
   @parameterized.parameters(
       ((2, 3, 1, 1, 1), 2, (1, 1)),

@@ -116,4 +116,7 @@ exclude = [
 ]
 
 [tool.pyrefly]
-errors = { missing-override-decorator = "error" }
+# Pyrefly fails to properly support config: Config without defaults in Flax Modules
+# (used in JAX), incorrectly treating them as dataclasses and complaining about
+# field ordering. This effectively only impacts JAX files.
+errors = { missing-override-decorator = "error", bad-class-definition = "ignore" }
