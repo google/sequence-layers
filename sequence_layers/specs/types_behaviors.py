@@ -36,7 +36,6 @@ class ModuleSpecTest(test_utils_spec.ModuleSpecTest):
         self.assertTrue(issubclass(mod.Steppable, types_spec.Steppable))
 
 
-
 class DummyChannelSpec(NamedTuple):
   """Dummy channel spec for testing."""
 
@@ -84,6 +83,15 @@ class DefaultTestLayer(types_spec.SequenceLayer):
   @override
   def get_accumulated_output_latency(self, output_latency: int) -> int:
     return output_latency
+
+  @override
+  def get_output_shape_for_sequence(
+      self,
+      x: types_spec.Sequence,
+      *,
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.Shape:
+    return x.channel_shape
 
   @override
   def layer(
@@ -180,6 +188,23 @@ class ModuleInterfaceTest(SequenceLayerTest):
 
 class SequenceTest(SequenceLayerTest):
   """Abstract tests for the Sequence class."""
+
+  def test_accepts_numpy_arrays(self) -> None:
+    """Tests that Sequence accepts numpy arrays and doesn't convert them."""
+    values_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    mask_np = np.array([[True, False], [False, True]], dtype=bool)
+
+    x = self.sl.Sequence(values_np, mask_np)
+
+    # Verify they are stored as numpy arrays
+    self.assertIsInstance(x.values, np.ndarray)
+    self.assertIsInstance(x.mask, np.ndarray)
+
+    # And verify that operations like mask_invalid still work (returning backend arrays for values)
+    masked = x.mask_invalid()
+    self.assertNotIsInstance(masked.values, np.ndarray)
+    # We don't assert masked.mask is not ndarray, as it might stay ndarray if it
+    # was initialized as such, following JAX behavior.
 
   @parameterized.named_parameters(
       ('mask_value=None', 0.0, None),
@@ -781,6 +806,36 @@ class StatelessPointwiseFunctorTest(test_utils_spec.SequenceLayerTest):
 
     return DummyLayer()
 
+  def test_mask_required_default(self) -> None:
+    """Tests that mask_required defaults to True."""
+    backend_sl = self.sl
+
+    class DefaultLayer(
+        DefaultTestLayer, backend_sl.types.StatelessPointwiseFunctor
+    ):
+      """Mock layer for testing defaults."""
+
+      def fn(self, values: Any, mask: Any) -> tuple[Any, Any]:
+        """Pointwise function."""
+        return values, mask
+
+      @override
+      def layer(self, *args, **kwargs):
+        """Calls base layer."""
+        return backend_sl.types.StatelessPointwiseFunctor.layer(
+            self, *args, **kwargs
+        )
+
+      @override
+      def get_output_shape(self, *args, **kwargs):
+        """Calls base get_output_shape."""
+        return backend_sl.types.StatelessPointwiseFunctor.get_output_shape(
+            self, *args, **kwargs
+        )
+
+    layer = DefaultLayer()
+    self.assertTrue(layer.mask_required)
+
   def create_sequence(
       self,
   ) -> types_spec.Sequence[types_spec.Array, types_spec.Array]:
@@ -810,3 +865,28 @@ class StatelessPointwiseFunctorTest(test_utils_spec.SequenceLayerTest):
             else:
               mock_apply_masked.assert_called_once()
               mock_apply.assert_not_called()
+
+
+class HashableArrayTest(test_utils_spec.SequenceLayerTest):
+  """Tests for HashableArray."""
+
+  def test_hashable_array(self) -> None:
+    # We need to get HashableArray from the backend types!
+    HashableArray = self.sl.types.HashableArray
+
+    # Create a numpy array
+    x = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    # Create HashableArray
+    ha = HashableArray.from_array(x)
+
+    # Check properties
+    self.assertEqual(ha.dtype, x.dtype)
+
+    # Check to_array
+    x_back = ha.to_array()
+    np.testing.assert_array_equal(x, x_back)
+
+    # Check hashability
+    h = hash(ha)
+    self.assertIsInstance(h, int)
