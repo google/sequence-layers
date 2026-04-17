@@ -19,21 +19,14 @@ import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+
 from sequence_layers.jax import dense
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
+from sequence_layers.specs import dense_behaviors as spec
 
 
-class DenseTest(test_utils.SequenceLayerTest):
-
-  def test_rank2_unsupported(self):
-    key = jax.random.PRNGKey(1234)
-    l = dense.Dense.Config(
-        3, bias_init=nn.initializers.normal(), name='dense'
-    ).make()
-    x = test_utils.random_sequence(2, 13)
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
+class DenseTest(test_utils.SequenceLayerTest, spec.DenseTest):
 
   @parameterized.parameters(((5,),), ((5, 7),))
   def test_dense(self, channels_shape):
@@ -49,7 +42,7 @@ class DenseTest(test_utils.SequenceLayerTest):
     self.assertEqual(
         l.get_output_shape_for_sequence(x), channels_shape[:-1] + (3,)
     )
-    self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
+    self.verify_contract(l, x, training=False, rtol=1e-5, atol=1e-5, grad_rtol=1e-5, grad_atol=1e-5)
 
     chex.assert_trees_all_equal_shapes_and_dtypes(
         flax.core.meta.unbox(l.variables),
@@ -59,17 +52,6 @@ class DenseTest(test_utils.SequenceLayerTest):
                 'bias': jnp.zeros((3,)),
             }
         },
-    )
-
-  @parameterized.parameters(True, False)
-  def test_use_bias(self, use_bias):
-    """Check that use_bias controls whether a bias is created."""
-    key = jax.random.PRNGKey(1234)
-    l = dense.Dense.Config(3, use_bias=use_bias).make()
-    x = test_utils.random_sequence(2, 3, 5)
-    l = self.init_and_bind_layer(key, l, x)
-    self.assertCountEqual(
-        l.variables['params'], ['kernel', 'bias'] if use_bias else ['kernel']
     )
 
   def test_use_einsum_factory(self):
@@ -254,7 +236,7 @@ class DenseShapedTest(test_utils.SequenceLayerTest):
     )
 
 
-class EinsumDenseTest(test_utils.SequenceLayerTest):
+class EinsumDenseTest(test_utils.SequenceLayerTest, spec.EinsumDenseTest):
 
   @parameterized.parameters(
       (
@@ -461,22 +443,22 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
   @parameterized.product(
       test_utils.standard_dtype_configs(),
       (
-          dict(
-              shape=(2, 3, 5, 7, 11),
-              equation='...abc,bd->...bd',
-              output_shape=(None, 13),
-              expected_kernel_shape=(7, 13),
-              bias_axes='',
-              expected_bias_shape=None,
-          ),
-          dict(
-              shape=(2, 3, 5),
-              equation='...a,abcd->...bcd',
-              output_shape=(7, 11, 13),
-              expected_kernel_shape=(5, 7, 11, 13),
-              bias_axes='cd',
-              expected_bias_shape=(11, 13),
-          ),
+          {
+              'shape': (2, 3, 5, 7, 11),
+              'equation': '...abc,bd->...bd',
+              'output_shape': (None, 13),
+              'expected_kernel_shape': (7, 13),
+              'bias_axes': '',
+              'expected_bias_shape': None,
+          },
+          {
+              'shape': (2, 3, 5),
+              'equation': '...a,abcd->...bcd',
+              'output_shape': (7, 11, 13),
+              'expected_kernel_shape': (5, 7, 11, 13),
+              'bias_axes': 'cd',
+              'expected_bias_shape': (11, 13),
+          },
       ),
   )
   def test_dtypes(
@@ -535,27 +517,6 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
           + bias.astype(compute_dtype if compute_dtype else param_dtype)
       ).mask_invalid()
     self.assertSequencesClose(y, y_expected)
-
-  def test_einsum_dense_nonbroadcasting_equation(self):
-    with self.assertRaises(ValueError):
-      key = jax.random.PRNGKey(1234)
-      x = test_utils.random_sequence(2, 3, 4, 5, 6)
-      l = dense.EinsumDense.Config(
-          'btabc,bc->btad', output_shape=[None, 2]
-      ).make()
-      self.init_and_bind_layer(key, l, x)
-
-  def test_einsum_dense_inconsistent_input_shape(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5)
-    l = dense.EinsumDense.Config(
-        '...abc,bc->...ad', output_shape=[None, 2]
-    ).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-    # Show it works with the right input shape.
-    x = test_utils.random_sequence(2, 3, 5, 7, 11)
-    self.assertEqual(l.get_output_shape_for_sequence(x), (5, 2))
 
 
 if __name__ == '__main__':
