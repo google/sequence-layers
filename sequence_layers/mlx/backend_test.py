@@ -10,5 +10,9 @@ class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
   pass
 
 
+class BackendNNTest(test_utils.SequenceLayerTest, spec.BackendNNTest):
+  """Tests for MLX backend.nn operations."""
+
+
 if __name__ == '__main__':
   absltest.main()

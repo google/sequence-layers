@@ -13,10 +13,96 @@
 # limitations under the License.
 """Sequence layers in MLX."""
 
-# (re-export the names for typechecking)
-from . import backend as backend
-from . import types as types
-from . import test_utils as test_utils
-from .test_utils import SequenceLayerTest
+from . import backend
+from . import simple
+from . import types
+# CRITICAL: Do NOT use wildcard imports (e.g., `from .simple import *`) here.
+# Pyrefly (our static analysis tool) has a known limitation with cross-module
+# resolution of diamond inheritance chains. When wildcard imports are used to
+# re-export classes from `simple.py` (which combine `types` and `spec` bases),
+# Pyrefly fails to resolve the concrete method implementations in `mlx/types.py`
+# and flags all instances as abstract (`bad-instantiation` false positives).
+#
+# Explicit imports (e.g., `from .simple import Relu`) DO NOT trigger this issue.
+# If you need to expose specific layers at the package level, import them
+# explicitly instead of using a star import.
+from .simple import Abs
+from .simple import Add
+from .simple import Cast
+from .simple import CheckpointName
+from .simple import Downsample1D
+from .simple import Dropout
+from .simple import Elu
+from .simple import Embedding
+from .simple import Exp
+from .simple import ExpandDims
+from .simple import Flatten
+from .simple import GatedLinearUnit
+from .simple import GatedTanhUnit
+from .simple import GatedUnit
+from .simple import Gelu
+from .simple import Identity
+from .simple import Lambda
+from .simple import LeakyRelu
+from .simple import Log
+from .simple import Logging
+from .simple import MaskInvalid
+from .simple import OneHot
+from .simple import Relu
+from .simple import Reshape
+from .simple import Scale
+from .simple import Sigmoid
+from .simple import Softmax
+from .simple import Softplus
+from .simple import Squeeze
+from .simple import Swish
+from .simple import Tanh
+from .simple import Transpose
+from .simple import Upsample1D
+from .types import MaskedSequence
+from .types import Sequence
+from .types import SequenceLayer
+from .types import SequenceLayerConfig
 
-from sequence_layers.mlx.types import *
+__all__ = [
+    'backend',
+    'types',
+    'simple',
+    'Sequence',
+    'MaskedSequence',
+    'SequenceLayer',
+    'SequenceLayerConfig',
+    'Identity',
+    'Relu',
+    'Gelu',
+    'Abs',
+    'Exp',
+    'Log',
+    'Swish',
+    'Tanh',
+    'Sigmoid',
+    'LeakyRelu',
+    'Elu',
+    'Softmax',
+    'Softplus',
+    'Cast',
+    'Scale',
+    'Add',
+    'MaskInvalid',
+    'GatedUnit',
+    'GatedLinearUnit',
+    'GatedTanhUnit',
+    'Flatten',
+    'Reshape',
+    'ExpandDims',
+    'Squeeze',
+    'Transpose',
+    'OneHot',
+    'Embedding',
+    'Dropout',
+    'Downsample1D',
+    'Upsample1D',
+    'CheckpointName',
+    'Lambda',
+    'Logging',
+]

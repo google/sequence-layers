@@ -10,7 +10,6 @@ import numpy as np
 
 from sequence_layers import specs
 from sequence_layers.mlx import types
-import sequence_layers.mlx as sl
 from sequence_layers.specs import test_utils as spec
 
 Sequence = types.Sequence
@@ -84,7 +83,9 @@ def _mask_and_pad_to_max_length(
 class SequenceLayerTest(spec.SequenceLayerTest):
   """Base class for MLX SequenceLayer tests."""
 
-  sl = sl  # pyrefly: ignore[bad-assignment]  # module-as-protocol
+  import sequence_layers.mlx as sl_module  # pylint: disable=import-outside-toplevel
+
+  sl = sl_module  # pyrefly: ignore[bad-assignment]  # module-as-protocol
 
   @override
   def setUp(self):
@@ -92,6 +93,15 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     # To avoid flakes, fix random seeds.
     # MLX doesn't have a global seed, but we can set numpy seed.
     np.random.seed(123456789)
+
+  @override
+  def get_variables(self, layer: Any) -> dict[str, Any]:
+
+    return layer.parameters()
+
+  @override
+  def init_layer(self, layer, x, bind_only=False):
+    return layer
 
   @override
   def random_sequence(
@@ -111,15 +121,49 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     time = dims[1]
     shape = dims[2:]
 
-    values_np = np.random.normal(size=(batch_size, time) + shape).astype(
-        np.float32
-    )
+    if dtype is not None:
+      if dtype == np.float32:
+        dtype = mx.float32
+      elif dtype == np.float16:
+        dtype = mx.float16
+      elif dtype == np.int32:
+        dtype = mx.int32
+      elif dtype == np.bool_:
+        dtype = mx.bool_
+
+    if dtype is not None and dtype in (
+        mx.int32,
+        mx.int16,
+        mx.int8,
+        mx.uint32,
+        mx.uint16,
+        mx.uint8,
+    ):
+      values_np = np.random.randint(
+          low if low is not None else 0,
+          high if high is not None else 10,
+          size=(batch_size, time) + shape,
+      )
+    else:
+      values_np = np.random.normal(size=(batch_size, time) + shape).astype(
+          np.float32
+      )
     values = mx.array(values_np, dtype=dtype or mx.float32)
 
     mask_np = np.ones((batch_size, time), dtype=bool)
     mask = mx.array(mask_np, dtype=mx.bool_)
 
     return types.Sequence(values, mask)
+
+  @override
+  def assertEqual(self, first, second, msg=None):
+    """Override to handle MLX vs NumPy dtypes."""
+    if isinstance(first, mx.Dtype) and isinstance(second, (type, np.dtype)):
+      first_str = str(first).rsplit('.', maxsplit=1)[-1]
+      second_str = np.dtype(second).name
+      if first_str == second_str:
+        return
+    super().assertEqual(first, second, msg)
 
   @override
   def assertAllEqual(self, x, y):
@@ -164,7 +208,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     outputs_masks = []
 
     for t in range(0, time, block_size):
-      x_block = sl.Sequence(
+      x_block = types.Sequence(
           x.values[:, t : t + block_size],
           x.mask[:, t : t + block_size],
       )
@@ -184,7 +228,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     y_values = mx.concatenate(outputs_values, axis=1)
     y_mask = mx.concatenate(outputs_masks, axis=1)
 
-    return sl.Sequence(y_values, y_mask), state
+    return types.Sequence(y_values, y_mask), state
 
   @override
   # pyrefly: ignore[bad-override]
@@ -246,7 +290,9 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       np.testing.assert_array_equal(mask_x, mask_y)
 
 
-class ModuleSpecTest(SequenceLayerTest, spec.ModuleSpecTest):
+class ModuleSpecTest(
+    SequenceLayerTest, spec.ModuleSpecTest
+):  # pyrefly: ignore[invalid-inheritance]
 
   @override
   def module_spec_pairs(self, backend_sl: specs.ModuleSpec):
