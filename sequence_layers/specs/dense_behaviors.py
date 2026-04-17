@@ -17,7 +17,8 @@ class DenseTest(test_utils.SequenceLayerTest):
     l = self.sl.Dense.Config(features=3, name='dense').make()
     x = self.random_sequence(2, 13)
     with self.assertRaises(ValueError):
-      self.init_layer(l, x)
+      l = self.init_layer(l, x)
+      l.layer(x, training=False)
 
   @parameterized.parameters(((5,),), ((5, 7),))
   def test_dense(self, channels_shape):
@@ -96,6 +97,7 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
           equation='btabc,bc->btad', output_shape=[None, 2]
       ).make()
       l = self.init_layer(l, x)
+      l.layer(x, training=False)
 
   def test_einsum_dense_inconsistent_input_shape(self):
     x = self.random_sequence(2, 3, 5)
@@ -103,4 +105,5 @@ class EinsumDenseTest(test_utils.SequenceLayerTest):
         equation='...abc,bc->...ad', output_shape=[None, 2]
     ).make()
     with self.assertRaises(ValueError):
-      self.init_layer(l, x)
+      l = self.init_layer(l, x)
+      l.layer(x, training=False)
