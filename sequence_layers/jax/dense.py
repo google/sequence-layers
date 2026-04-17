@@ -15,15 +15,16 @@
 
 import dataclasses
 import typing
-from typing import Callable
+from typing import Callable, override
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+
 from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
+from sequence_layers.specs import dense as spec
 
 __all__ = (
     # go/keep-sorted start
@@ -34,11 +35,11 @@ __all__ = (
 )
 
 
-class Dense(types.Stateless, utils.EinsumCommon):
+class Dense(types.Stateless, utils.EinsumCommon, spec.Dense):
   """A basic dense layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Dense.Config):
     """Dense config."""
 
     # The number of output features for the dense layer.
@@ -72,6 +73,8 @@ class Dense(types.Stateless, utils.EinsumCommon):
 
     def make(self) -> 'Dense':
       return Dense(self, name=self.name)
+
+
 
   config: Config
 
@@ -269,7 +272,7 @@ class DenseShaped(types.Stateless, utils.EinsumCommon):
     )
 
 
-class EinsumDense(types.Stateless, utils.EinsumCommon):
+class EinsumDense(types.Stateless, utils.EinsumCommon, spec.EinsumDense):
   """A dense layer that transforms the channel shape with an einsum equation.
 
   Equation input and output specs must have leading ellipses to broadcast over
@@ -291,7 +294,7 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.EinsumDense.Config):
     """EinsumDense config."""
 
     # An equation describing the einsum to perform. This equation must be a
@@ -337,6 +340,8 @@ class EinsumDense(types.Stateless, utils.EinsumCommon):
 
     def make(self) -> 'EinsumDense':
       return EinsumDense(self, name=self.name)
+
+
 
   config: Config
 
