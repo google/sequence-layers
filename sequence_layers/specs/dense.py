@@ -26,7 +26,6 @@ class Dense(types_spec.Stateless, metaclass=abc.ABCMeta):
 
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
-      pass
 
 
 class EinsumDense(types_spec.Stateless, metaclass=abc.ABCMeta):
@@ -46,4 +45,3 @@ class EinsumDense(types_spec.Stateless, metaclass=abc.ABCMeta):
 
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
-      pass
