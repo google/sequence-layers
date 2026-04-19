@@ -814,6 +814,7 @@ class Steppable(spec.Steppable[Sequence, Sequence, ChannelSpec]):
 # ---------------------------------------------------------------------------
 
 
+# pylint: disable=abstract-method
 class SequenceLayer(
     nn.Module,
     Steppable,
@@ -841,6 +842,7 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
 # ---------------------------------------------------------------------------
 
 
+# pylint: disable=abstract-method
 class PreservesType(
     SequenceLayer,
     spec.PreservesType[Sequence, Sequence, ChannelSpec],
@@ -858,6 +860,7 @@ class PreservesType(
     return input_dtype
 
 
+# pylint: disable=abstract-method
 class PreservesShape(
     SequenceLayer,
     spec.PreservesShape[Sequence, Sequence, ChannelSpec],
@@ -947,6 +950,7 @@ class Stateless(SequenceLayer, spec.Stateless[Sequence, Sequence, ChannelSpec]):
     return self.layer(x, training=training, constants=constants), state
 
 
+# pylint: disable=abstract-method
 class StatelessPointwise(
     PreservesShape,
     Stateless,
