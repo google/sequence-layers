@@ -7,11 +7,10 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import (Any, Callable, Generic, Protocol, runtime_checkable,
+from typing import (Any, Callable, Protocol, runtime_checkable,
                     Sequence, TypeVar)
 
 from sequence_layers.specs import types as types_spec
-from sequence_layers.specs.types import HashableArray
 
 # ---------------------------------------------------------------------------
 # Activation Functions (StatelessPointwiseFunctor)
