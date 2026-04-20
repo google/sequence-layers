@@ -35,6 +35,13 @@ from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from typing_extensions import override
 
+try:
+  # JAX v0.10.0 or newer
+  from jax.extend.core import valid_jaxtype
+except ImportError:
+  # JAX v0.9.2 or older
+  from jax.core import valid_jaxtype
+
 # pylint: disable=logging-fstring-interpolation
 
 __all__ = (
@@ -2692,7 +2699,7 @@ class Logging(types.PreservesType, types.StatelessPointwise):
       # them out.
       nonjax_kwargs = {'prefix': self.config.prefix}
       for k, v in list(kwargs.items()):
-        if isinstance(v, jax.ShapeDtypeStruct) or not jax.core.valid_jaxtype(v):
+        if isinstance(v, jax.ShapeDtypeStruct) or not valid_jaxtype(v):
           nonjax_kwargs[k] = v
           del kwargs[k]
       # We then set up a callback for the remaining tensor values:
