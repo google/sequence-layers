@@ -1124,6 +1124,39 @@ class NamedEmitTest(test_utils.SequenceLayerTest):
     self.assertSequencesEqual(emits['test_emit'], x)
 
 
+class StopGradientTest(test_utils.SequenceLayerTest):
+
+  def test_stop_gradient(self):
+    key = jax.random.PRNGKey(1234)
+    l = simple.StopGradient.Config(name='stop_gradient').make()
+    x = test_utils.random_sequence(2, 3, 5)
+    l = self.init_and_bind_layer(key, l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.get_output_shape_for_sequence(x), (5,))
+    self.assertEqual(l.name, 'stop_gradient')
+    self.assertEmpty(l.variables)
+
+    y = l.layer(x, training=False)
+    self.assertSequencesEqual(y, x)
+
+  def test_gradients_are_stopped(self):
+    key = jax.random.PRNGKey(1234)
+    l = simple.StopGradient.Config(name='stop_gradient').make()
+    x = test_utils.random_sequence(2, 3, 5)
+    variables = l.init(key, x, training=False)
+
+    def loss_fn(x_values):
+      seq = types.Sequence(x_values, x.mask)
+      out = l.apply(variables, seq, training=False)
+      return jnp.sum(out.values)
+
+    grad = jax.grad(loss_fn)(x.values)
+    # Gradients should be zero because of stop_gradient.
+    chex.assert_trees_all_close(grad, jnp.zeros_like(x.values))
+
+
 class OneHotTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(((1, 2, 3),), ((2, 3, 5, 9),), ((2, 3, 5, 9, 2),))

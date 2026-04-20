@@ -98,6 +98,7 @@ __all__ = (
     'Softmax',
     'Softplus',
     'Squeeze',
+    'StopGradient',
     'Sum',
     'SwapAxes',
     'Swish',
@@ -799,6 +800,43 @@ class GradientClipping(types.PreservesType, types.StatelessPointwise):
       return values, _custom_gradient
 
     return x.apply_values_masked(_clip_gradient)
+
+
+class StopGradient(types.PreservesType, types.StatelessPointwiseFunctor):
+  """An identity layer that stops gradient flow.
+
+  The forward pass is an identity function, but ``jax.lax.stop_gradient`` is
+  applied to the values, preventing gradients from flowing through this layer
+  during backpropagation. This can be inserted at any point in a ``Serial``
+  config to block gradient flow between upstream and downstream layers.
+
+  Example usage::
+
+    sl.Serial.Config(layers=[
+        encoder,
+        sl.StopGradient.Config(),  # Gradients from decoder won't reach encoder.
+        decoder,
+    ])
+  """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig):
+    name: str | None = 'stop_gradient'
+
+    def make(self) -> 'StopGradient':
+      return StopGradient(name=self.name)
+
+  @property
+  def mask_required(self):
+    return False
+
+  @nn.nowrap
+  def fn(
+      self,
+      values: types.ValuesT,
+      mask: types.MaskT,
+  ) -> tuple[types.ValuesT, types.MaskT]:
+    return jax.lax.stop_gradient(values), mask
 
 
 class Identity(types.PreservesType, types.StatelessPointwise):
