@@ -192,7 +192,7 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
             name='pool_1d',
             **kwargs,
         ).make()
-        pad_value = np.inf
+        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size,),
@@ -208,7 +208,7 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
             name='pool_1d',
             **kwargs,
         ).make()
-        pad_value = -np.inf
+        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size,),
@@ -549,7 +549,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             name='pool_2d',
             **kwargs,
         ).make()
-        pad_value = np.inf
+        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size, pool_size),
@@ -566,7 +566,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             name='pool_2d',
             **kwargs,
         ).make()
-        pad_value = -np.inf
+        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size, pool_size),
@@ -928,7 +928,7 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             name='pool_3d',
             **kwargs,
         ).make()
-        pad_value = np.inf
+        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size, pool_size, pool_size),
@@ -949,7 +949,7 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             name='pool_3d',
             **kwargs,
         ).make()
-        pad_value = -np.inf
+        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size, pool_size, pool_size),

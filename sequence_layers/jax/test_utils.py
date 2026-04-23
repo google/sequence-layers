@@ -1046,9 +1046,10 @@ class SequenceLayerTest(parameterized.TestCase):
 
     def _pad(x: types.Sequence, pad_back: int) -> types.Sequence:
       """Pad pad_back steps and masks with padding_invariance_pad_value."""
-      return x.pad_time(0, pad_back, valid=False).mask_invalid(
-          padding_invariance_pad_value
-      )
+      pad_val = padding_invariance_pad_value
+      if jnp.issubdtype(x.dtype, jnp.integer) and jnp.isnan(pad_val):
+        pad_val = 0
+      return x.pad_time(0, pad_back, valid=False).mask_invalid(pad_val)
 
     x_padded, constants_padded, stream_constants_padded_list = (
         x,
