@@ -161,6 +161,7 @@ class DotProductSelfAttention(types.Emitting):
       raise ValueError(
           f'max_future_horizon must be >= -1, got {max_future_horizon}.'
       )
+    
 
     self.in_features = in_features
     self.num_heads = num_heads
@@ -407,6 +408,11 @@ class DotProductSelfAttention(types.Emitting):
     return self._param_dtype
 
   def get_initial_state(self, batch_size, input_spec, *, constants=None):
+    if self.max_future_horizon > 0:
+      raise NotImplementedError(
+          'max_future_horizon > 0 step() is not yet supported in the MLX'
+          ' backend (query delay buffer not implemented).'
+      )
     compute_dtype = self.get_output_dtype(input_spec.dtype)
     max_past = max(0, self.max_past_horizon)
     max_future = max(0, self.max_future_horizon)
@@ -553,11 +559,59 @@ class DotProductSelfAttention(types.Emitting):
     kv_buffer_size = kv_buf_k.shape[1]
 
     if kv_buffer_size > 0:
-      # Ring buffer write: insert new K/V at rotating positions.
+      t0 = time_step[0]  # MLX scalar, no eval.
+
+      # Concatenate old buffer with new elements for attention computation.
+      # This avoids overwriting history needed by current queries.
+      combined_k = mx.concatenate([kv_buf_k, keys.values], axis=1)
+      combined_v = mx.concatenate([kv_buf_v, values.values], axis=1)
+      combined_mask = mx.concatenate([kv_buf_mask, x.mask], axis=1)
+
+      # Build visibility mask: [b, 1, 1, kv_buffer_size + x_time].
+      kv_valid = combined_mask[:, None, None, :]
+
+      # Map physical indices in old buffer to temporal indices.
+      # The newest time in the old buffer was t0 - 1.
+      newest_time_old = t0 - 1
+      newest_pos_old = newest_time_old % kv_buffer_size
+      phys_old = mx.arange(kv_buffer_size)
+      dist_old = (newest_pos_old - phys_old + kv_buffer_size) % kv_buffer_size
+      temporal_old = newest_time_old - dist_old
+
+      # Temporal indices for new elements.
+      temporal_new = t0 + mx.arange(x_time)
+      
+      # Combine temporal indices.
+      temporal = mx.concatenate([temporal_old, temporal_new], axis=0)
+
+      # Banded visibility matrix: query_time x (kv_buffer_size + x_time).
+      # Maps physical ring buffer positions to semantic temporal indices.
+      # Example: max_past=5, block_size=3, current time t0=6:
+      # Queries are at times [6,7,8]:
+      # query 6: sees keys in [1, 6]
+      # query 7: sees keys in [2, 7]
+      # query 8: sees keys in [3, 8]
+      # Add causal mask for multi-step queries.
+      q_times = t0 + mx.arange(x_time)
+      causal = temporal[None, :] <= q_times[:, None]
+
+      # Add finite horizon mask.
+      past = self.max_past_horizon
+      finite_horizon = temporal[None, :] >= (q_times[:, None] - past)
+
+      causal_and_finite = causal & finite_horizon
+      kv_valid = kv_valid & causal_and_finite.reshape(
+          1, 1, x_time, kv_buffer_size + x_time
+      )
+
+      context = self._compute_attention(
+          queries.values, combined_k, combined_v, kv_valid
+      )
+
+      # Ring buffer write AFTER read: insert new K/V at rotating positions.
       # Uses put_along_axis to scatter into pre-allocated buffers,
       # compatible with mx.compile / mx.export_function (no Python
       # int conversion needed).
-      t0 = time_step[0]  # MLX scalar, no eval.
       positions = (t0 + mx.arange(x_time)) % kv_buffer_size  # [x_time]
 
       # Scatter K/V into buffer at ring positions.
@@ -570,24 +624,6 @@ class DotProductSelfAttention(types.Emitting):
       # Scatter mask into buffer.
       idx_2d = mx.broadcast_to(positions.reshape(1, x_time), x.mask.shape)
       kv_buf_mask = mx.put_along_axis(kv_buf_mask, idx_2d, x.mask, axis=1)
-
-      # Build visibility mask: [b, 1, 1, kv_buffer_size].
-      kv_valid = kv_buf_mask[:, None, None, :]
-
-      # Add causal mask for multi-step queries (respects ring buffer order).
-      if x_time > 1:
-        newest_time = t0 + x_time - 1
-        newest_pos = newest_time % kv_buffer_size
-        phys = mx.arange(kv_buffer_size)
-        dist = (newest_pos - phys + kv_buffer_size) % kv_buffer_size
-        temporal = newest_time - dist
-        q_times = t0 + mx.arange(x_time)
-        causal = temporal[None, :] <= q_times[:, None]
-        kv_valid = kv_valid & causal.reshape(1, 1, x_time, kv_buffer_size)
-
-      context = self._compute_attention(
-          queries.values, kv_buf_k, kv_buf_v, kv_valid
-      )
     else:
       # Degenerate: no history buffer, attend only to current step.
       kv_valid = x.mask[:, None, None, :]
