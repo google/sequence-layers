@@ -71,6 +71,39 @@ class DotProductSelfAttentionTest(parameterized.TestCase):
     # Check KV cache has been populated.
     kv_keys = state[0]
     self.assertEqual(kv_keys.shape[1], 10)  # buffer size
+    kv_mask = state[2]
+    self.assertEqual(mx.sum(kv_mask).item(), 5)  # 5 of 10 slots filled
+
+  @parameterized.parameters(
+      (2, 4, 4, 0),
+  )
+  def test_use_kv_cache_ringbuffer(
+      self, num_heads, units_per_head, max_past_horizon, max_future_horizon
+  ):
+    """Test ring buffer wrap-around: layer() vs step() parity.
+
+    With block_size=1 (default), once the ring buffer wraps, the current
+    write-before-read implementation overwrites the oldest key in the
+    attention window before the query can attend to it. This causes
+    step() to see max_past keys while layer() sees max_past + 1 keys
+    for the same query position, breaking bitwise parity.
+
+    Sweep time shorter, equal, and longer than max_past_horizon to
+    exercise the wrap-around.
+    """
+    config = attention.DotProductSelfAttention.Config(
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+    )
+    layer = config.make(backend='mlx')
+
+    for time in [1, max_past_horizon, max_past_horizon + 2]:
+      with self.subTest(f'time_{time}'):
+        test_utils.verify_contract(
+            self, layer, (8,), time=time, atol=1e-4, rtol=1e-4
+        )
 
   def test_with_query_key_networks(self):
     """Test with RoPE on Q/K."""
@@ -490,6 +523,8 @@ class LocalDotProductSelfAttentionTest(parameterized.TestCase):
         block_size_config=2,
     )
     test_utils.verify_contract(self, layer, (16,), atol=1e-4, rtol=1e-4)
+    # Also test with time > max_past_horizon to exercise ring buffer wrap.
+    test_utils.verify_contract(self, layer, (16,), time=10, atol=1e-4, rtol=1e-4)
 
   def test_block_size(self):
     layer = attention.LocalDotProductSelfAttention(
