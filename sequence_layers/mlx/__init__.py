@@ -14,6 +14,7 @@
 """Sequence layers in MLX."""
 
 from . import backend
+from . import dense
 from . import simple
 from . import types
 # CRITICAL: Do NOT use wildcard imports (e.g., `from .simple import *`) here.
@@ -26,6 +27,8 @@ from . import types
 # Explicit imports (e.g., `from .simple import Relu`) DO NOT trigger this issue.
 # If you need to expose specific layers at the package level, import them
 # explicitly instead of using a star import.
+from .dense import Dense
+from .dense import EinsumDense
 from .simple import Abs
 from .simple import Add
 from .simple import Cast
@@ -65,6 +68,7 @@ from .types import SequenceLayer
 from .types import SequenceLayerConfig
 
 __all__ = [
+    'dense',
     'backend',
     'types',
     'simple',
@@ -72,6 +76,8 @@ __all__ = [
     'MaskedSequence',
     'SequenceLayer',
     'SequenceLayerConfig',
+    'Dense',
+    'EinsumDense',
     'Identity',
     'Relu',
     'Gelu',

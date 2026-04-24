@@ -5,6 +5,7 @@
 from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
+from . import dense as _dense
 from . import simple as _simple
 from . import types as _types
 
@@ -115,4 +116,12 @@ class ModuleSpec(Protocol):
 
   @property
   def Softmax(self) -> type[_simple.Softmax]:
+    ...
+
+  @property
+  def Dense(self) -> type[_dense.Dense]:
+    ...
+
+  @property
+  def EinsumDense(self) -> type[_dense.EinsumDense]:
     ...
