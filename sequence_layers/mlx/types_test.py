@@ -52,5 +52,9 @@ class StatelessPointwiseFunctorTest(
   pass
 
 
+class HashableArrayTest(test_utils.SequenceLayerTest, spec.HashableArrayTest):
+  pass
+
+
 if __name__ == '__main__':
   absltest.main()

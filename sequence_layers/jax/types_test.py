@@ -195,7 +195,9 @@ class SequenceTest(test_utils.SequenceLayerTest, spec.SequenceTest):
     self.assertSequencesEqual(y, x)
 
 
-class SequenceLayerConfigTest(test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest):
+class SequenceLayerConfigTest(
+    test_utils.SequenceLayerTest, spec.SequenceLayerConfigTest
+):
 
   def test_copy_raises_on_mutable_attribute(self):
 
@@ -256,11 +258,19 @@ class EmittingTest(test_utils.SequenceLayerTest, spec.EmittingTest):
   pass
 
 
-class StatelessEmittingTest(test_utils.SequenceLayerTest, spec.StatelessEmittingTest):
+class StatelessEmittingTest(
+    test_utils.SequenceLayerTest, spec.StatelessEmittingTest
+):
   pass
 
 
-class StatelessPointwiseFunctorTest(test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest):
+class StatelessPointwiseFunctorTest(
+    test_utils.SequenceLayerTest, spec.StatelessPointwiseFunctorTest
+):
+  pass
+
+
+class HashableArrayTest(test_utils.SequenceLayerTest, spec.HashableArrayTest):
   pass
 
 
