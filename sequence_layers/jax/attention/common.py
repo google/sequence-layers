@@ -176,6 +176,7 @@ class QueryKeyValueProjectionConfig:
       compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
+      name: str | None = None,
   ) -> 'InputProjectionModule':
     """Creates the input projection module."""
     raise NotImplementedError
@@ -323,6 +324,7 @@ class CombinedQueryKeyValueProjection(QueryKeyValueProjectionConfig):
       compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
+      name: str | None = None,
   ) -> InputProjectionModule:
     return CombinedQueryKeyValueProjectionModule(
         config=self,
@@ -334,6 +336,7 @@ class CombinedQueryKeyValueProjection(QueryKeyValueProjectionConfig):
         compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         allow_combined_qkv=allow_combined_qkv,
+        name=name,
     )
 
 
@@ -469,6 +472,7 @@ class SeparateQueryKeyValueProjection(QueryKeyValueProjectionConfig):
       compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
+      name: str | None = None,
   ) -> InputProjectionModule:
     return SeparateQueryKeyValueProjectionModule(
         config=self,
@@ -480,6 +484,7 @@ class SeparateQueryKeyValueProjection(QueryKeyValueProjectionConfig):
         compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         allow_combined_qkv=allow_combined_qkv,
+        name=name,
     )
 
 
@@ -600,6 +605,7 @@ class QueryAndKeyValueProjection(QueryKeyValueProjectionConfig):
       compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
+      name: str | None = None,
   ) -> InputProjectionModule:
     return QueryAndKeyValueProjectionModule(
         config=self,
@@ -611,6 +617,7 @@ class QueryAndKeyValueProjection(QueryKeyValueProjectionConfig):
         compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         allow_combined_qkv=allow_combined_qkv,
+        name=name,
     )
 
 
@@ -728,6 +735,7 @@ class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
       compute_dtype: types.DType,
       param_dtype: types.DType,
       allow_combined_qkv: bool = True,
+      name: str | None = None,
   ) -> InputProjectionModule:
     return QueryAndSharedKeyValueProjectionModule(
         config=self,
@@ -739,6 +747,7 @@ class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
         compute_dtype=compute_dtype,
         param_dtype=param_dtype,
         allow_combined_qkv=allow_combined_qkv,
+        name=name,
     )
 
 

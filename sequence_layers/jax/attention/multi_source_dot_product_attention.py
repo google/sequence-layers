@@ -105,6 +105,10 @@ class MultiSourceDotProductAttention(types.Emitting):
     # accumulate the logits in float32 instead of simply upcasting the output of
     # the logits einsum to float32.
     experimental_accumulate_logits_in_float32: bool = False
+
+    # Whether to use separate KV projections.
+    use_separate_kv_projections: bool = False
+
     # An optional name for the layer.
     name: str | None = None
 
@@ -150,6 +154,24 @@ class MultiSourceDotProductAttention(types.Emitting):
       )
 
     num_kv_heads = self.config.num_kv_heads or self.config.num_heads
+
+    if self.config.use_separate_kv_projections:
+      self.input_projections = {
+          k: self.config.input_projection.make(
+              num_query_heads=self.config.num_heads,
+              num_kv_heads=num_kv_heads,
+              units_per_head=self.config.units_per_head,
+              use_bias=self.config.use_bias,
+              precision=self.config.precision,
+              compute_dtype=self.config.compute_dtype,
+              param_dtype=self.config.param_dtype,
+              # Not possible for cross attention.
+              allow_combined_qkv=False,
+              name=f'{k}_projection',
+          )
+          for k in self._source_names
+      }
+
     self.input_projection = self.config.input_projection.make(
         num_query_heads=self.config.num_heads,
         num_kv_heads=num_kv_heads,
@@ -280,16 +302,17 @@ class MultiSourceDotProductAttention(types.Emitting):
           'source_segment_ids_names must be the same length as source_names.'
       )
 
-    source_channel_shapes = {
-        common.get_source(self, source_name, constants).channel_shape
-        for source_name in self._source_names
-    }
+    if not self.config.use_separate_kv_projections:
+      source_channel_shapes = {
+          common.get_source(self, source_name, constants).channel_shape
+          for source_name in self._source_names
+      }
 
-    if len(source_channel_shapes) != 1:
-      raise ValueError(
-          'All sources must have the same channel shape, got:'
-          f' {source_channel_shapes=} for {self._source_names=}'
-      )
+      if len(source_channel_shapes) != 1:
+        raise ValueError(
+            'All sources must have the same channel shape, got:'
+            f' {source_channel_shapes=} for {self._source_names=}'
+        )
 
     for source_name, position_name, segment_ids_name in zip(
         self._source_names,
@@ -299,7 +322,10 @@ class MultiSourceDotProductAttention(types.Emitting):
     ):
       # Pre-process sources with key/value projections and networks.
       source = common.get_source(self, source_name, constants)
-      keys, values = self.input_projection.get_kv(source)
+      if self.config.use_separate_kv_projections:
+        keys, values = self.input_projections[source_name].get_kv(source)
+      else:
+        keys, values = self.input_projection.get_kv(source)
       if self.key_network:
         keys = self.key_network.layer(
             keys, training=training, constants=constants
