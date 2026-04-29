@@ -30,6 +30,7 @@ def assert_param_dtypes_inits_shapes(
     constants: types.Constants | None = None,
     num_sink_embeddings: int = 0,
     use_sink_scalars: bool = False,
+    kv_projection_source_names: tuple[str, ...] = (),
 ) -> None:
   """Asserts that the parameter dtypes, inits, and shapes are correct."""
   config = layer.config
@@ -96,6 +97,7 @@ def assert_param_dtypes_inits_shapes(
               dtype=config.param_dtype,
           ),
       }
+      assert not kv_projection_source_names
     case common.SeparateQueryKeyValueProjection():
       params['query_projection'] = {
           'kernel': jnp.zeros(
@@ -103,18 +105,26 @@ def assert_param_dtypes_inits_shapes(
               dtype=config.param_dtype,
           ),
       }
-      params['key_projection'] = {
-          'kernel': jnp.zeros(
-              (kv_in_channels, num_kv_heads, config.units_per_head),
-              dtype=config.param_dtype,
-          ),
+      expected_kv_params = {
+          'key_projection': {
+              'kernel': jnp.zeros(
+                  (kv_in_channels, num_kv_heads, config.units_per_head),
+                  dtype=config.param_dtype,
+              )
+          },
+          'value_projection': {
+              'kernel': jnp.zeros(
+                  (kv_in_channels, num_kv_heads, config.units_per_head),
+                  dtype=config.param_dtype,
+              ),
+          },
       }
-      params['value_projection'] = {
-          'kernel': jnp.zeros(
-              (kv_in_channels, num_kv_heads, config.units_per_head),
-              dtype=config.param_dtype,
-          ),
-      }
+      if kv_projection_source_names:
+        for source_name in kv_projection_source_names:
+          params[f'{source_name}_projection'] = expected_kv_params
+      else:
+        params.update(expected_kv_params)
+
     case common.QueryAndKeyValueProjection():
       params['query_projection'] = {
           'kernel': jnp.zeros(
@@ -122,12 +132,20 @@ def assert_param_dtypes_inits_shapes(
               dtype=config.param_dtype,
           ),
       }
-      params['key_value_projection'] = {
-          'kernel': jnp.zeros(
-              (kv_in_channels, 2, num_kv_heads, config.units_per_head),
-              dtype=config.param_dtype,
-          ),
+      expected_kv_params = {
+          'key_value_projection': {
+              'kernel': jnp.zeros(
+                  (kv_in_channels, 2, num_kv_heads, config.units_per_head),
+                  dtype=config.param_dtype,
+              ),
+          }
       }
+      if kv_projection_source_names:
+        for source_name in kv_projection_source_names:
+          params[f'{source_name}_projection'] = expected_kv_params
+      else:
+        params.update(expected_kv_params)
+
     case common.QueryAndSharedKeyValueProjection():
       params['query_projection'] = {
           'kernel': jnp.zeros(
@@ -135,12 +153,19 @@ def assert_param_dtypes_inits_shapes(
               dtype=config.param_dtype,
           ),
       }
-      params['shared_key_value_projection'] = {
-          'kernel': jnp.zeros(
-              (kv_in_channels, num_kv_heads, config.units_per_head),
-              dtype=config.param_dtype,
-          ),
+      expected_kv_params = {
+          'shared_key_value_projection': {
+              'kernel': jnp.zeros(
+                  (kv_in_channels, num_kv_heads, config.units_per_head),
+                  dtype=config.param_dtype,
+              ),
+          }
       }
+      if kv_projection_source_names:
+        for source_name in kv_projection_source_names:
+          params[f'{source_name}_projection'] = expected_kv_params
+      else:
+        params.update(expected_kv_params)
 
   # Position embeddings:
   if pos_config := getattr(config, 'relative_position_embedding', None):

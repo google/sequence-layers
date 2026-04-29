@@ -24,10 +24,28 @@ from sequence_layers.jax.attention import test_utils as attention_test_utils
 class MultiSourceDotProductAttentionTest(test_utils.SequenceLayerTest):
 
   @parameterized.parameters(
-      (1, 2),
-      (3, 5),
+      {
+          'num_heads': 1,
+          'units_per_head': 2,
+          'use_separate_kv_projections': False,
+      },
+      {
+          'num_heads': 3,
+          'units_per_head': 5,
+          'use_separate_kv_projections': False,
+      },
+      {
+          'num_heads': 3,
+          'units_per_head': 5,
+          'use_separate_kv_projections': True,
+      },
   )
-  def test_multi_source_dot_product_attention(self, num_heads, units_per_head):
+  def test_multi_source_dot_product_attention(
+      self,
+      num_heads: int,
+      units_per_head: int,
+      use_separate_kv_projections: bool,
+  ):
     key = jax.random.PRNGKey(1234)
     time, channels = 11, 3
     batch_size, source_time, source_channels = 2, 11, 2
@@ -39,6 +57,7 @@ class MultiSourceDotProductAttentionTest(test_utils.SequenceLayerTest):
         num_heads=num_heads,
         units_per_head=units_per_head,
         per_dim_scale=True,
+        use_separate_kv_projections=use_separate_kv_projections,
         name='multi_source_dot_product_attention',
     ).make()
 
@@ -62,6 +81,9 @@ class MultiSourceDotProductAttentionTest(test_utils.SequenceLayerTest):
         x,
         constants=constants,
         input_projection=l.config.input_projection,
+        kv_projection_source_names=(source1_name, source2_name)
+        if use_separate_kv_projections
+        else (),
     )
 
     self.assertEqual(
