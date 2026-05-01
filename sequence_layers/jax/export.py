@@ -252,9 +252,13 @@ def export_to_tf_saved_model(
         unknown_batch=signature.unknown_batch,
         unknown_time=signature.unknown_time,
     )
-    input_polymorphic_shape = _tf_spec_to_polymorphic_shape(input_signature)
+    input_signature_flat = _tree_to_flat_dict(input_signature)
+    input_polymorphic_shape = _tf_spec_to_polymorphic_shape(
+        input_signature_flat
+    )
 
-    def fn_wrapper(params, args, fn=signature.fn):
+    def fn_wrapper(params, args, fn=signature.fn, input_kwargs=input_kwargs):
+      args = _result_dict_to_tree(args, input_kwargs)
       args = _tree_from_tf_sequence(args)
       result = fn(params, **args)
       result = _tree_to_tf_sequence(result)
@@ -266,7 +270,7 @@ def export_to_tf_saved_model(
     serving_configs.append(
         orbax.export.ServingConfig(
             key,
-            input_signature=[input_signature],
+            input_signature=[input_signature_flat],
             tf_preprocessor=signature.tf_preprocessor,
             tf_postprocessor=signature.tf_postprocessor,
             method_key=key,
