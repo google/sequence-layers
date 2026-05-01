@@ -200,6 +200,14 @@ class ExportTest(test_utils.SequenceLayerTest):
               max_future_horizon=0,
           ),
       ],
+      [
+          sl.DotProductSelfAttentionV2.Config(
+              num_heads=8,
+              units_per_head=3,
+              max_past_horizon=7,
+              max_future_horizon=0,
+          ),
+      ],
       [sl.EinopsRearrange.Config('(c d) -> c d', {'c': 2})],
       [sl.EinsumDense.Config('...a,abc->...bc', [8, 3], bias_axes='c')],
       [sl.Elu.Config()],
