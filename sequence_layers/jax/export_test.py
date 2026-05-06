@@ -137,6 +137,15 @@ class ExportTest(test_utils.SequenceLayerTest):
           sl.ShapeDType((1, 16, 7, 11), jnp.float32),
       ],
       [sl.BatchNormalization.Config()],
+      [
+          sl.BlockwiseDotProductSelfAttention.Config(
+              num_heads=8,
+              units_per_head=3,
+              block_size=4,
+              max_past_horizon_blocks=2,
+              max_future_horizon_blocks=0,
+          ),
+      ],
       [sl.Cast.Config(jnp.int32)],
       [sl.CheckpointName.Config('test')],
       [sl.Conv1D.Config(8, kernel_size=3, strides=2, padding='causal')],
