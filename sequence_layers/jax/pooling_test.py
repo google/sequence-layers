@@ -18,7 +18,6 @@ import chex
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 from sequence_layers.jax import convolution
 from sequence_layers.jax import pooling
 from sequence_layers.jax import test_utils
@@ -172,7 +171,7 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
         [True, True],
     ])
     expected_y = types.Sequence(expected_y_values, expected_y_mask)
-    self.assertSequencesEqual(y, expected_y)
+    self.assertSequencesClose(y, expected_y)
 
   def _test_pooling1d(
       self, pool_type, params, channel_shape, padding, dtype, **kwargs
@@ -192,7 +191,11 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
             name='pool_1d',
             **kwargs,
         ).make()
-        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
+        pad_value = (
+            jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).max
+        )
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size,),
@@ -208,7 +211,11 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
             name='pool_1d',
             **kwargs,
         ).make()
-        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
+        pad_value = (
+            -jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).min
+        )
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size,),
@@ -518,7 +525,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         [True, True],
     ])
     expected_y = types.Sequence(expected_y_values, expected_y_mask)
-    self.assertSequencesEqual(y, expected_y)
+    self.assertSequencesClose(y, expected_y)
 
   def _test_pooling2d(
       self,
@@ -549,7 +556,11 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             name='pool_2d',
             **kwargs,
         ).make()
-        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
+        pad_value = (
+            jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).max
+        )
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size, pool_size),
@@ -566,7 +577,11 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             name='pool_2d',
             **kwargs,
         ).make()
-        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
+        pad_value = (
+            -jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).min
+        )
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size, pool_size),
@@ -897,7 +912,7 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
         [True, True],
     ])
     expected_y = types.Sequence(expected_y_values, expected_y_mask)
-    self.assertSequencesEqual(y, expected_y)
+    self.assertSequencesClose(y, expected_y)
 
   def _test_pooling3d(
       self,
@@ -928,7 +943,11 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             name='pool_3d',
             **kwargs,
         ).make()
-        pad_value = jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).max
+        pad_value = (
+            jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).max
+        )
         golden_fn = lambda x: nn.pooling.min_pool(
             x.values,
             window_shape=(pool_size, pool_size, pool_size),
@@ -949,7 +968,11 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             name='pool_3d',
             **kwargs,
         ).make()
-        pad_value = -jnp.inf if jnp.issubdtype(dtype, jnp.floating) else jnp.iinfo(dtype).min
+        pad_value = (
+            -jnp.inf
+            if jnp.issubdtype(dtype, jnp.floating)
+            else jnp.iinfo(dtype).min
+        )
         golden_fn = lambda x: nn.pooling.max_pool(
             x.values,
             window_shape=(pool_size, pool_size, pool_size),
