@@ -448,6 +448,18 @@ class Parallel(types.Emitting):
   All children must have equal output_ratio and block_size.
   """
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(_SequenceLayerConfig):
+    layers: tuple[_SequenceLayerConfig, ...] = ()
+    combination: CombinationMode = CombinationMode.STACK
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'layers', tuple(self.layers))
+
+    def make(self, backend='mlx') -> 'Parallel':
+      return Parallel.from_config(self, backend=backend)
+
   def __init__(
       self,
       layers: list[types.SequenceLayer],

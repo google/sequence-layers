@@ -417,6 +417,7 @@ def _register_backends():
   reg('mlx', mlx_dsp.Delay.Config, mlx_dsp.Delay.from_config)
   reg('mlx', mlx_comb.Serial.Config, mlx_comb.Serial.from_config)
   reg('mlx', mlx_comb.Residual.Config, mlx_comb.Residual.from_config)
+  reg('mlx', mlx_comb.Parallel.Config, mlx_comb.Parallel.from_config)
   reg('mlx', mlx_cond.Conditioning.Config, mlx_cond.Conditioning.from_config)
   reg('mlx', mlx_attn.DotProductSelfAttention.Config, mlx_attn.DotProductSelfAttention.from_config)
   reg('mlx', mlx_attn.DotProductAttention.Config, mlx_attn.DotProductAttention.from_config)
