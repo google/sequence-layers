@@ -27,3 +27,7 @@ from sequence_layers.jax.recurrent import *
 from sequence_layers.jax.simple import *
 from sequence_layers.jax.time_varying import *
 from sequence_layers.jax.types import *
+
+# (re-export the names for typechecking)
+from . import backend as backend
+from . import types as types
