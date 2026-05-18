@@ -887,8 +887,9 @@ class Lambda(types.Stateless):
         out_values = self._fn(dummy_values)
         out_shape = out_values.shape[2:]
         out_dtype = out_values.dtype
-      self._cached_output_spec = bt.ShapeDType(out_shape, out_dtype)
-      return self._cached_output_spec
+      # Don't cache here; shape and dtype probes use different dummy dtypes,
+      # so a single cache would return stale dtype info.
+      return bt.ShapeDType(out_shape, out_dtype)
     except Exception:
       return None
 
