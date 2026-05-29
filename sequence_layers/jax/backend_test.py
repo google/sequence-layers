@@ -11,7 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Abstract specifications (interfaces and behaviors) for SequenceLayers."""
+"""Tests for JAX backend utilities."""
 
-from sequence_layers.abstract import types
-from sequence_layers.abstract import types_test_base
+from absl.testing import absltest
+from sequence_layers.jax import test_utils
+from sequence_layers.specs import backend_behaviors as spec
+
+
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
+  pass
+
+
+if __name__ == '__main__':
+  absltest.main()

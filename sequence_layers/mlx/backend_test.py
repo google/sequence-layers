@@ -1,4 +1,3 @@
-# pylint: disable=cyclic-import
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,13 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Sequence layers in MLX."""
+"""Tests for MLX backend utilities."""
 
-from sequence_layers.mlx.types import *
+from absl.testing import absltest
+from sequence_layers.mlx import test_utils  # pylint: disable=cyclic-import
+from sequence_layers.specs import backend_behaviors as spec
 
-# pylint: disable=useless-import-alias
-# (re-export the names for typechecking)
-from . import backend as backend
-from . import test_utils as test_utils
-from . import types as types
-from .test_utils import SequenceLayerTest
+
+class ModuleSpecTest(test_utils.SequenceLayerTest, spec.ModuleSpecTest):
+  pass
+
+
+if __name__ == '__main__':
+  absltest.main()

@@ -32,6 +32,21 @@ from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
+# These are the ones which also get exposed in __init__.py. Import other members
+# via sequence_layers.jax.attention.common.
+__all__ = [
+    # go/keep-sorted start
+    'CombinedQueryKeyValueProjection',
+    'CrossAttentionEmits',
+    'InputProjectionModule',
+    'QueryAndKeyValueProjection',
+    'QueryAndSharedKeyValueProjection',
+    'RelativePositionEmbedding',
+    'SelfAttentionEmits',
+    'SeparateQueryKeyValueProjection',
+    # go/keep-sorted end
+]
+
 
 # A negative enough value such that it underflows to a hard zero in softmax.
 _INVALID_LOGIT_VALUE = -1e9

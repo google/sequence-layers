@@ -164,3 +164,75 @@ combinators:
     automatically implementing `layer` in terms of `step` to reduce peak memory.
 
 --------------------------------------------------------------------------------
+
+## 7. Multi-Backend Architecture
+
+### Why Multi-Backend?
+
+A core feature of SequenceLayers is **direct inspectability**: configs and model
+logic live beside each other, so clicking through to `sl.Dense` shows the full
+implementation in your framework. However, supporting multiple backends (JAX,
+MLX, and potentially PyTorch) means each backend must have its own native
+implementation — direct inspectability requires code duplication.
+
+Without safeguards, separate implementations inevitably **diverge** in
+interfaces (different names, configs, method signatures), behaviors (different
+numerical results for the same model), and implementations (different efficiency
+characteristics). While implementation equivalence is
+[undecidable in general](https://en.wikipedia.org/wiki/Rice's_theorem), we *can*
+enforce equivalence in interfaces and behaviors.
+
+### How: Three Enforcement Mechanisms
+
+1.  **Interface equivalence via protocols.** Shared abstract classes and
+    [protocols](https://typing.python.org/en/latest/spec/glossary.html#term-structural)
+    in `specs/*.py` define standardized layer names, configs, methods, and
+    signatures. All backends inherit from these.
+2.  **Behavior equivalence via shared tests.** Backend-agnostic test cases in
+    `specs/*_behaviors.py` verify that implementations produce equivalent
+    results (e.g., step-layer equivalence, expected outputs). Backend test files
+    inherit these and only add backend-specific extensions.
+3.  **Implementation sharing via pure functions.** Where frameworks share a
+    NumPy-compatible API, backend-generic pure functions (e.g.,
+    `compute_flash_attention`) can be shared, as long as direct inspectability
+    of high-level layer semantics is preserved.
+
+**Model conversion** across backends is a future goal: given interface,
+behavior, and parameter equivalence, cross-platform weight transfer should be
+possible.
+
+### Package Structure
+
+SequenceLayers supports multiple frameworks (JAX, MLX) via a three-tier package
+structure:
+
+```
+specs/          ← Backend-agnostic protocols, contracts, and shared behaviors
+  types.py           Protocols for Sequence, SequenceLayer, Config, etc.
+  types_behaviors.py Behavioral tests (step-layer equiv, etc.)
+  backend.py         Protocol for backend-specific ops (xp, nn)
+  test_utils.py      Shared test infrastructure
+
+jax/            ← JAX-native implementations (the production backend)
+  types.py           Inherits from specs, implements via Flax
+  backend.py         JAX backend: xp=jnp, nn=jax.nn
+  test_utils.py      JAX-specific test setup
+
+mlx/            ← MLX-native implementations
+  types.py           Inherits from specs, implements via mlx.nn
+  backend.py         MLX backend: xp=mx, nn=mlx.nn
+  test_utils.py      MLX-specific test setup
+```
+
+**Key principles:**
+
+*   **`specs/` is purely declarative.** It defines *what* backends must do
+    (protocols, type constraints), not *how*. Default implementations belong in
+    the backend-specific files.
+*   **Tests are shared via inheritance.** `specs/*_behaviors.py` defines
+    backend-agnostic test cases. Backend test files inherit these and only add
+    backend-specific extensions.
+*   **Direct inspectability is preserved.** Users of `jax/types.py` see full
+    implementations and docstrings without needing to read `specs/`.
+
+See `AGENTS.md` for detailed development conventions.

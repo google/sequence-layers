@@ -18,22 +18,23 @@ import jax.numpy as jnp
 from jaxtyping import AbstractDtype, Bool, config as jaxtyping_config, Float, Int, PyTree, Shaped, jaxtyped, TypeCheckError
 import numpy as np
 import typeguard
-from typing import Callable, TypeVar, Union
+from typing import Callable, TypeVar, TYPE_CHECKING, Union
 
+if TYPE_CHECKING:
+  ArrayT = jax.Array | np.ndarray
+else:
 
-class _MetaArrayT(type):
-  types = ()
+  class _MetaArrayT(type):
+    types = ()
 
-  def __instancecheck__(cls, obj):
-    return isinstance(obj, cls.types)
+    def __instancecheck__(cls, obj):
+      return isinstance(obj, cls.types)
 
+  class JaxArrayT(metaclass=_MetaArrayT):
+    types = (jax.Array, jax.ShapeDtypeStruct)
 
-class JaxArrayT(metaclass=_MetaArrayT):
-  types = (jax.Array, jax.ShapeDtypeStruct)
-
-
-class ArrayT(metaclass=_MetaArrayT):
-  types = (JaxArrayT, np.ndarray)
+  class ArrayT(metaclass=_MetaArrayT):
+    types = (JaxArrayT, np.ndarray)
 
 
 Scalar = Shaped[ArrayT, ''] | Shaped[np.generic, ''] | Shaped[jnp.generic, '']

@@ -27,3 +27,9 @@ from sequence_layers.jax.recurrent import *
 from sequence_layers.jax.simple import *
 from sequence_layers.jax.time_varying import *
 from sequence_layers.jax.types import *
+
+# (re-export the names for typechecking)
+# pylint: disable=useless-import-alias
+from . import test_utils as test_utils
+from . import types as types
+from .test_utils import SequenceLayerTest

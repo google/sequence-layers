@@ -1423,7 +1423,7 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
       input_shape: types.ShapeLike,
       *,
       constants: types.Constants | None = None,
-  ) -> types.ShapeLike:
+  ) -> types.Shape:
     if not input_shape:
       raise ValueError(
           f'{self} requires input with at least rank 1, got: {input_shape}'
