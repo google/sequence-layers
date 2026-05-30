@@ -30,6 +30,39 @@ from sequence_layers.specs import test_utils
 class Pooling1DTest(test_utils.SequenceLayerTest):
   """Test behavior of 1D pooling layers."""
 
+  def test_defaults(self):
+    self.assertConfigDefaults(
+        self.sl.MaxPooling1D.Config,
+        {
+            'strides': 1,
+            'dilation_rate': 1,
+            'padding': 'valid',
+            'name': None,
+        },
+        pool_size=3,
+    )
+    self.assertConfigDefaults(
+        self.sl.MinPooling1D.Config,
+        {
+            'strides': 1,
+            'dilation_rate': 1,
+            'padding': 'valid',
+            'name': None,
+        },
+        pool_size=3,
+    )
+    self.assertConfigDefaults(
+        self.sl.AveragePooling1D.Config,
+        {
+            'strides': 1,
+            'dilation_rate': 1,
+            'padding': 'valid',
+            'masked_average': False,
+            'name': None,
+        },
+        pool_size=3,
+    )
+
   @parameterized.product(
       pool_type_kwargs=(
           ('min', {}),

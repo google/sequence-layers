@@ -13,6 +13,7 @@
 # limitations under the License.
 """Pooling layers for MLX."""
 
+import dataclasses
 import fractions
 
 import mlx.core as mx
@@ -200,7 +201,14 @@ class _Pooling1D(
     return tuple(input_shape)
 
   @override
-  def get_initial_state(self, batch_size, input_spec, *, constants=None):
+  def get_initial_state(
+      self,
+      batch_size: int,
+      input_spec: types.ShapeDType,
+      *,
+      training: bool,
+      constants=None,
+  ):
     bw = _buffer_width(
         self._padding,
         self._pool_size,
@@ -301,6 +309,53 @@ class _Pooling1D(
 class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDType]):
   """1D max pooling layer."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.MaxPooling1D.Config):
+    """Configuration for MaxPooling1D."""
+
+    pool_size: int
+    strides: int = 1
+    dilation_rate: int = 1
+    padding: types.PaddingModeString = types.PaddingMode.VALID.value
+    name: str | None = None
+
+    @override
+    def make(self) -> 'MaxPooling1D':
+      return MaxPooling1D(self)
+
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      pool_size: int | None = None,
+      strides: int = 1,
+      dilation_rate: int = 1,
+      padding: str = 'valid',
+  ):
+    if config is not None:
+      super().__init__(
+          pool_size=config.pool_size,
+          strides=config.strides,
+          dilation_rate=config.dilation_rate,
+          padding=config.padding,
+      )
+      self.config = config
+    else:
+      if pool_size is None:
+        raise ValueError("Must provide either config or pool_size")
+      super().__init__(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+      )
+      self.config = self.Config(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+      )
+
   def _pad_value(self, dtype):
     return float('-inf')
 
@@ -309,16 +364,58 @@ class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDTyp
 
   @classmethod
   def from_config(cls, config):
-    return cls(
-        pool_size=config.pool_size,
-        strides=config.strides,
-        dilation_rate=config.dilation_rate,
-        padding=config.padding,
-    )
+    return cls(config)
 
 
 class MinPooling1D(_Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDType]):
   """1D min pooling layer."""
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.MinPooling1D.Config):
+    """Configuration for MinPooling1D."""
+
+    pool_size: int
+    strides: int = 1
+    dilation_rate: int = 1
+    padding: types.PaddingModeString = types.PaddingMode.VALID.value
+    name: str | None = None
+
+    @override
+    def make(self) -> 'MinPooling1D':
+      return MinPooling1D(self)
+
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      pool_size: int | None = None,
+      strides: int = 1,
+      dilation_rate: int = 1,
+      padding: str = 'valid',
+  ):
+    if config is not None:
+      super().__init__(
+          pool_size=config.pool_size,
+          strides=config.strides,
+          dilation_rate=config.dilation_rate,
+          padding=config.padding,
+      )
+      self.config = config
+    else:
+      if pool_size is None:
+        raise ValueError("Must provide either config or pool_size")
+      super().__init__(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+      )
+      self.config = self.Config(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+      )
 
   def _pad_value(self, dtype):
     return float('inf')
@@ -328,12 +425,7 @@ class MinPooling1D(_Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDTyp
 
   @classmethod
   def from_config(cls, config):
-    return cls(
-        pool_size=config.pool_size,
-        strides=config.strides,
-        dilation_rate=config.dilation_rate,
-        padding=config.padding,
-    )
+    return cls(config)
 
 
 class AveragePooling1D(
@@ -342,16 +434,57 @@ class AveragePooling1D(
 ):
   """1D average pooling layer."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.AveragePooling1D.Config):
+    """Configuration for AveragePooling1D."""
+
+    pool_size: int
+    strides: int = 1
+    dilation_rate: int = 1
+    padding: types.PaddingModeString = types.PaddingMode.VALID.value
+    masked_average: bool = False
+    name: str | None = None
+
+    @override
+    def make(self) -> 'AveragePooling1D':
+      return AveragePooling1D(self)
+
   def __init__(
       self,
-      pool_size,
-      strides=1,
-      dilation_rate=1,
-      padding='valid',
-      masked_average=False,
+      config: Config | None = None,
+      *,
+      pool_size: int | None = None,
+      strides: int = 1,
+      dilation_rate: int = 1,
+      padding: str = 'valid',
+      masked_average: bool = False,
   ):
-    super().__init__(pool_size, strides, dilation_rate, padding)
-    self._masked_average = masked_average
+    if config is not None:
+      super().__init__(
+          pool_size=config.pool_size,
+          strides=config.strides,
+          dilation_rate=config.dilation_rate,
+          padding=config.padding,
+      )
+      self._masked_average = config.masked_average
+      self.config = config
+    else:
+      if pool_size is None:
+        raise ValueError("Must provide either config or pool_size")
+      super().__init__(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+      )
+      self._masked_average = masked_average
+      self.config = self.Config(
+          pool_size=pool_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          padding=padding,
+          masked_average=masked_average,
+      )
 
   def _pad_value(self, dtype):
     return 0.0
@@ -455,10 +588,4 @@ class AveragePooling1D(
 
   @classmethod
   def from_config(cls, config):
-    return cls(
-        pool_size=config.pool_size,
-        strides=config.strides,
-        dilation_rate=config.dilation_rate,
-        padding=config.padding,
-        masked_average=config.masked_average,
-    )
+    return cls(config)
