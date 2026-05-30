@@ -34,7 +34,7 @@ class Conv1DTest(
     mlx_layer = config.make()
     self.assertIsInstance(
         mlx_layer,
-        convolution.DeferredConv1D,
+        convolution.Conv1D,
     )
     x = self.random_sequence(1, 8, 4)
     y = mlx_layer.layer(x, training=False)
@@ -55,7 +55,7 @@ class DepthwiseConv1DTest(
     mlx_layer = config.make()
     self.assertIsInstance(
         mlx_layer,
-        convolution.DeferredDepthwiseConv1D,
+        convolution.DepthwiseConv1D,
     )
     x = self.random_sequence(1, 8, 4)
     y = mlx_layer.layer(x, training=False)
@@ -78,7 +78,7 @@ class Conv1DTransposeTest(
     mlx_layer = config.make()
     self.assertIsInstance(
         mlx_layer,
-        convolution.DeferredConv1DTranspose,
+        convolution.Conv1DTranspose,
     )
     x = self.random_sequence(1, 4, 4)
     y = mlx_layer.layer(x, training=False)

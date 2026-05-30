@@ -3,6 +3,7 @@
 import dataclasses
 import fractions
 import math
+from typing import Any, Callable, override, Sequence as TypingSequence
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -54,36 +55,90 @@ def _explicit_padding_2d(padding, kernel_size, stride, dilation_rate):
 class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
   """2D convolution layer with separate time and spatial padding."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Conv2D.Config):
+    """Configuration for Conv2D."""
+
+    filters: int
+    kernel_size: int | TypingSequence[int]
+    strides: int | TypingSequence[int] = 1
+    dilation_rate: int | TypingSequence[int] = 1
+    time_padding: bt.PaddingModeString = PaddingMode.VALID.value
+    spatial_padding: bt.PaddingModeString | tuple[int, int] = PaddingMode.SAME.value
+    groups: int = 1
+    use_bias: bool = True
+    activation: Callable | None = None
+    compute_dtype: Any = None
+    param_dtype: Any = mx.float32
+    name: str | None = None
+
+    @override
+    def make(self) -> 'Conv2D':
+      return Conv2D(self)
+
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      in_features,
-      filters,
-      kernel_size,
-      strides=(1, 1),
-      dilation_rate=(1, 1),
-      time_padding='valid',
-      spatial_padding='same',
-      groups=1,
-      use_bias=True,
+      in_features: int | None = None,
+      filters: int | None = None,
+      kernel_size: int | TypingSequence[int] | None = None,
+      strides: int | TypingSequence[int] = (1, 1),
+      dilation_rate: int | TypingSequence[int] = (1, 1),
+      time_padding: str = 'valid',
+      spatial_padding: str | tuple[int, int] = 'same',
+      groups: int = 1,
+      use_bias: bool = True,
       activation=None,
       compute_dtype=None,
       param_dtype=mx.float32,
   ):
     super().__init__()
-    self.in_features = in_features
-    self.filters = filters
-    self.kernel_size = _normalize_2tuple(kernel_size)
-    self.strides = _normalize_2tuple(strides)
-    self.dilation_rate = _normalize_2tuple(dilation_rate)
-    self.time_padding = time_padding
-    self.spatial_padding = spatial_padding
-    self.groups = groups
-    self.use_bias = use_bias
-    self.activation = activation
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
+    if config is not None:
+      self.config = config
+    else:
+      if filters is None or kernel_size is None:
+        raise ValueError('Must provide either config or filters and kernel_size')
+      self.config = self.Config(
+          filters=filters,
+          kernel_size=kernel_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          time_padding=time_padding,
+          spatial_padding=spatial_padding,
+          groups=groups,
+          use_bias=use_bias,
+          activation=activation,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
 
+    self.in_features = in_features
+    self.filters = self.config.filters
+    self.kernel_size = _normalize_2tuple(self.config.kernel_size)
+    self.strides = _normalize_2tuple(self.config.strides)
+    self.dilation_rate = _normalize_2tuple(self.config.dilation_rate)
+    self.time_padding = self.config.time_padding
+    self.spatial_padding = self.config.spatial_padding
+    self.groups = self.config.groups
+    self.use_bias = self.config.use_bias
+    self.activation = init_mapping.map_activation(self.config.activation)
+    self.compute_dtype = (
+        init_mapping._to_mx_dtype(self.config.compute_dtype)
+        if self.config.compute_dtype is not None
+        else None
+    )
+    self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
+
+    self.kernel = None
+    self.bias = None
+    if in_features is not None:
+      self._ensure_initialized(in_features)
+
+  def _ensure_initialized(self, in_features: int):
+    if self.kernel is not None:
+      return
+    self.in_features = in_features
     # Create kernel: [out_channels, kH, kW, in_channels // groups]
     key = mx.random.key(0)
     init_fn = init_mapping._make_variance_scaling_init(
@@ -92,15 +147,15 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     self.kernel = init_fn(
         key,
         (
-            filters,
+            self.filters,
             self.kernel_size[0],
             self.kernel_size[1],
-            in_features // groups,
+            in_features // self.groups,
         ),
-        param_dtype,
+        self._param_dtype,
     )
-    if use_bias:
-      self.bias = mx.zeros((filters,), dtype=param_dtype)
+    if self.use_bias:
+      self.bias = mx.zeros((self.filters,), dtype=self._param_dtype)
 
   @property
   def supports_step(self):
@@ -194,6 +249,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
+    self._ensure_initialized(input_spec.shape[-1])
     bw = conv_utils._buffer_width(
         self.time_padding,
         self.kernel_size[0],
@@ -220,6 +276,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
+    self._ensure_initialized(x.channel_shape[-1])
     ek_time = conv_utils._effective_kernel_size(
         self.kernel_size[0], self.dilation_rate[0]
     )
@@ -268,6 +325,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+    self._ensure_initialized(x.channel_shape[-1])
     if self.kernel_size[0] > 1:
       x = x.mask_invalid()
 
@@ -300,123 +358,10 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @classmethod
   def from_config(cls, config):
-    compute_dtype = getattr(config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    activation = init_mapping.map_activation(
-        getattr(config, 'activation', None)
-    )
-    spatial_padding = config.spatial_padding
-    if isinstance(spatial_padding, str):
-      pass
-    else:
-      spatial_padding = tuple(spatial_padding)
-    return DeferredConv2D(config)
+    return cls(config)
 
 
-class DeferredConv2D(
-    types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]
-):
-  """Deferred Conv2D: delays kernel creation until first use."""
 
-  def __init__(self, config):
-    super().__init__()
-    self.config = config
-    self.inner = None
-
-  def _ensure_built(self, input_shape):
-    if self.inner is not None:
-      return
-    in_features = input_shape[-1]
-    compute_dtype = getattr(self.config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    activation = init_mapping.map_activation(
-        getattr(self.config, 'activation', None)
-    )
-    spatial_padding = self.config.spatial_padding
-    if isinstance(spatial_padding, str):
-      pass
-    else:
-      spatial_padding = tuple(spatial_padding)
-
-    self.inner = Conv2D(
-        in_features=in_features,
-        filters=self.config.filters,
-        kernel_size=_normalize_2tuple(self.config.kernel_size),
-        strides=_normalize_2tuple(self.config.strides),
-        dilation_rate=_normalize_2tuple(
-            getattr(self.config, 'dilation_rate', (1, 1))
-        ),
-        time_padding=getattr(self.config, 'time_padding', 'valid'),
-        spatial_padding=spatial_padding,
-        groups=getattr(self.config, 'groups', 1),
-        use_bias=getattr(self.config, 'use_bias', True),
-        activation=activation,
-        compute_dtype=compute_dtype,
-        param_dtype=init_mapping._to_mx_dtype(self.config.param_dtype),
-    )
-
-  @property
-  def supports_step(self):
-    return conv_utils._supports_step(
-        getattr(self.config, 'time_padding', 'valid')
-    )
-
-  @property
-  def block_size(self):
-    return _normalize_2tuple(self.config.strides)[0]
-
-  @property
-  def output_ratio(self):
-    return fractions.Fraction(1, _normalize_2tuple(self.config.strides)[0])
-
-  @property
-  def input_latency(self):
-    ks = _normalize_2tuple(self.config.kernel_size)
-    dr = _normalize_2tuple(getattr(self.config, 'dilation_rate', (1, 1)))
-    tp = getattr(self.config, 'time_padding', 'valid')
-    ek = conv_utils._effective_kernel_size(ks[0], dr[0])
-    if tp in (
-        PaddingMode.CAUSAL_VALID.value,
-        PaddingMode.CAUSAL.value,
-        PaddingMode.SEMICAUSAL.value,
-    ):
-      return 0
-    elif tp in (
-        PaddingMode.REVERSE_CAUSAL_VALID.value,
-        PaddingMode.REVERSE_CAUSAL.value,
-    ):
-      return ek - 1
-    return 0
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    self._ensure_built(input_shape)
-    return self.inner.get_output_shape(input_shape, constants=constants)
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    compute_dtype = getattr(self.config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      return init_mapping._to_mx_dtype(compute_dtype)
-    return init_mapping._to_mx_dtype(self.config.param_dtype)
-
-  def get_initial_state(
-      self, batch_size, input_spec, *, training: bool, constants=None
-  ):
-    self._ensure_built(input_spec.shape)
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
-    )
-
-  @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
-    self._ensure_built(x.channel_shape)
-    return self.inner.step(x, state, training=training, constants=constants)
-
-  @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
-    self._ensure_built(x.channel_shape)
-    return self.inner.layer(x, training=training, constants=constants)
 
 
 # ---------------------------------------------------------------------------
@@ -429,36 +374,90 @@ class Conv2DTranspose(
 ):
   """2D transposed convolution layer."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Conv2DTranspose.Config):
+    """Configuration for Conv2DTranspose."""
+
+    filters: int
+    kernel_size: int | TypingSequence[int]
+    strides: int | TypingSequence[int] = 1
+    dilation_rate: int | TypingSequence[int] = 1
+    time_padding: bt.PaddingModeString = PaddingMode.VALID.value
+    spatial_padding: bt.PaddingModeString | tuple[int, int] = PaddingMode.SAME.value
+    groups: int = 1
+    use_bias: bool = True
+    activation: Callable | None = None
+    compute_dtype: Any = None
+    param_dtype: Any = mx.float32
+    name: str | None = None
+
+    @override
+    def make(self) -> 'Conv2DTranspose':
+      return Conv2DTranspose(self)
+
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      in_features,
-      filters,
-      kernel_size,
-      strides=(1, 1),
-      dilation_rate=(1, 1),
-      time_padding='valid',
-      spatial_padding='same',
-      groups=1,
-      use_bias=True,
+      in_features: int | None = None,
+      filters: int | None = None,
+      kernel_size: int | TypingSequence[int] | None = None,
+      strides: int | TypingSequence[int] = (1, 1),
+      dilation_rate: int | TypingSequence[int] = (1, 1),
+      time_padding: str = 'valid',
+      spatial_padding: str | tuple[int, int] = 'same',
+      groups: int = 1,
+      use_bias: bool = True,
       activation=None,
       compute_dtype=None,
       param_dtype=mx.float32,
   ):
     super().__init__()
-    self.in_features = in_features
-    self.filters = filters
-    self.kernel_size = _normalize_2tuple(kernel_size)
-    self.strides = _normalize_2tuple(strides)
-    self.dilation_rate = _normalize_2tuple(dilation_rate)
-    self.time_padding = time_padding
-    self.spatial_padding = spatial_padding
-    self.groups = groups
-    self.use_bias = use_bias
-    self.activation = activation
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
+    if config is not None:
+      self.config = config
+    else:
+      if filters is None or kernel_size is None:
+        raise ValueError('Must provide either config or filters and kernel_size')
+      self.config = self.Config(
+          filters=filters,
+          kernel_size=kernel_size,
+          strides=strides,
+          dilation_rate=dilation_rate,
+          time_padding=time_padding,
+          spatial_padding=spatial_padding,
+          groups=groups,
+          use_bias=use_bias,
+          activation=activation,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
 
+    self.in_features = in_features
+    self.filters = self.config.filters
+    self.kernel_size = _normalize_2tuple(self.config.kernel_size)
+    self.strides = _normalize_2tuple(self.config.strides)
+    self.dilation_rate = _normalize_2tuple(self.config.dilation_rate)
+    self.time_padding = self.config.time_padding
+    self.spatial_padding = self.config.spatial_padding
+    self.groups = self.config.groups
+    self.use_bias = self.config.use_bias
+    self.activation = init_mapping.map_activation(self.config.activation)
+    self.compute_dtype = (
+        init_mapping._to_mx_dtype(self.config.compute_dtype)
+        if self.config.compute_dtype is not None
+        else None
+    )
+    self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
+
+    self.kernel = None
+    self.bias = None
+    if in_features is not None:
+      self._ensure_initialized(in_features)
+
+  def _ensure_initialized(self, in_features: int):
+    if self.kernel is not None:
+      return
+    self.in_features = in_features
     # Kernel: [out_channels, kH, kW, in_channels // groups]
     key = mx.random.key(0)
     init_fn = init_mapping._make_variance_scaling_init(
@@ -467,15 +466,15 @@ class Conv2DTranspose(
     self.kernel = init_fn(
         key,
         (
-            filters,
+            self.filters,
             self.kernel_size[0],
             self.kernel_size[1],
-            in_features // groups,
+            in_features // self.groups,
         ),
-        param_dtype,
+        self._param_dtype,
     )
-    if use_bias:
-      self.bias = mx.zeros((filters,), dtype=param_dtype)
+    if self.use_bias:
+      self.bias = mx.zeros((self.filters,), dtype=self._param_dtype)
 
   @property
   def supports_step(self):
@@ -584,6 +583,7 @@ class Conv2DTranspose(
 
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+    self._ensure_initialized(x.channel_shape[-1])
     values = self._forward(x.values)
     mask = conv_utils._compute_conv_transpose_mask(
         x.mask,
@@ -597,6 +597,7 @@ class Conv2DTranspose(
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
+    self._ensure_initialized(input_spec.shape[-1])
     if not self.supports_step:
       raise ValueError(
           'Conv2DTranspose step only supported with causal padding.'
@@ -620,6 +621,7 @@ class Conv2DTranspose(
 
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
+    self._ensure_initialized(x.channel_shape[-1])
     x = x.mask_invalid()
     # Conv WITHOUT time trimming — keep full temporal output for overlap-add.
     # Bias is also deferred until after overlap-add (matching JAX behavior).
@@ -670,93 +672,10 @@ class Conv2DTranspose(
 
   @classmethod
   def from_config(cls, config):
-    return DeferredConv2DTranspose(config)
+    return cls(config)
 
 
-class DeferredConv2DTranspose(
-    types.SequenceLayer, spec.Conv2DTranspose[bt.Sequence, bt.ChannelSpec]
-):
-  """Deferred Conv2DTranspose."""
 
-  def __init__(self, config):
-    super().__init__()
-    self.config = config
-    self.inner = None
-
-  def _ensure_built(self, input_shape):
-    if self.inner is not None:
-      return
-    in_features = input_shape[-1]
-    compute_dtype = getattr(self.config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    activation = init_mapping.map_activation(
-        getattr(self.config, 'activation', None)
-    )
-    spatial_padding = getattr(self.config, 'spatial_padding', 'same')
-    self.inner = Conv2DTranspose(
-        in_features=in_features,
-        filters=self.config.filters,
-        kernel_size=_normalize_2tuple(self.config.kernel_size),
-        strides=_normalize_2tuple(self.config.strides),
-        dilation_rate=_normalize_2tuple(
-            getattr(self.config, 'dilation_rate', (1, 1))
-        ),
-        time_padding=getattr(self.config, 'time_padding', 'valid'),
-        spatial_padding=spatial_padding,
-        groups=getattr(self.config, 'groups', 1),
-        use_bias=getattr(self.config, 'use_bias', True),
-        activation=activation,
-        compute_dtype=compute_dtype,
-        param_dtype=init_mapping._to_mx_dtype(self.config.param_dtype),
-    )
-
-  @property
-  def supports_step(self):
-    return (
-        getattr(self.config, 'time_padding', 'valid')
-        == PaddingMode.CAUSAL.value
-    )
-
-  @property
-  def block_size(self):
-    return 1
-
-  @property
-  def output_ratio(self):
-    return fractions.Fraction(_normalize_2tuple(self.config.strides)[0])
-
-  @property
-  def input_latency(self):
-    return 0
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    self._ensure_built(input_shape)
-    return self.inner.get_output_shape(input_shape, constants=constants)
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    compute_dtype = getattr(self.config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      return init_mapping._to_mx_dtype(compute_dtype)
-    return init_mapping._to_mx_dtype(self.config.param_dtype)
-
-  def get_initial_state(
-      self, batch_size, input_spec, *, training: bool, constants=None
-  ):
-    self._ensure_built(input_spec.shape)
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
-    )
-
-  @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
-    self._ensure_built(x.channel_shape)
-    return self.inner.step(x, state, training=training, constants=constants)
-
-  @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
-    self._ensure_built(x.channel_shape)
-    return self.inner.layer(x, training=training, constants=constants)
 
 
 # ---------------------------------------------------------------------------
