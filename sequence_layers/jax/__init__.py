@@ -14,6 +14,7 @@
 """Sequence layers in JAX."""
 
 # (re-export the names for typechecking)
+from . import attention as attention
 from . import backend as backend
 from . import types as types
 from . import test_utils as test_utils

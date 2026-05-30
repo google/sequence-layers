@@ -8,48 +8,10 @@ from sequence_layers.mlx import attention
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import position
 from sequence_layers.mlx import test_utils
+from sequence_layers.specs import attention_behaviors as spec
 
 
-class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
-
-  def test_layer(self):
-    layer = attention.DotProductSelfAttention(
-        in_features=16,
-        num_heads=4,
-        units_per_head=8,
-        max_past_horizon=32,
-    )
-    self.verify_contract(layer, (16,), atol=1e-4, rtol=1e-4)
-
-  def test_causal(self):
-    layer = attention.DotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=64,
-        max_future_horizon=0,
-    )
-    self.verify_contract(layer, (8,), atol=1e-4, rtol=1e-4)
-
-  def test_gqa(self):
-    """Test Grouped Query Attention (fewer KV heads)."""
-    layer = attention.DotProductSelfAttention(
-        in_features=16,
-        num_heads=8,
-        units_per_head=4,
-        max_past_horizon=32,
-        num_kv_heads=2,
-    )
-    self.verify_contract(layer, (16,), atol=1e-4, rtol=1e-4)
-
-  def test_output_shape(self):
-    layer = attention.DotProductSelfAttention(
-        in_features=16,
-        num_heads=4,
-        units_per_head=8,
-        max_past_horizon=32,
-    )
-    self.assertEqual(layer.get_output_shape((16,)), (4, 8))
+class DotProductSelfAttentionTest(test_utils.SequenceLayerTest, spec.DotProductSelfAttentionTest):
 
   def test_step_builds_kv_cache(self):
     layer = attention.DotProductSelfAttention(
@@ -133,19 +95,10 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         )
     )
 
-  def test_per_dim_scale_step(self):
-    """Test per_dim_scale works in step mode."""
-    layer = attention.DotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=10,
-        per_dim_scale=True,
-    )
-    self.verify_contract(layer, (8,), atol=1e-4, rtol=1e-4)
 
 
-class DeferredDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
+
+class DotProductSelfAttentionFromConfigTest(test_utils.SequenceLayerTest):
 
   def test_from_config(self):
     import sequence_layers.mlx
@@ -161,7 +114,7 @@ class DeferredDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     mlx_layer = attention.DotProductSelfAttention.from_config(config)
     self.assertIsInstance(
         mlx_layer,
-        attention.DeferredDotProductSelfAttention,
+        attention.DotProductSelfAttention,
     )
 
     x = test_utils.random_sequence(1, 5, 16)
@@ -169,76 +122,11 @@ class DeferredDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     self.assertEqual(y.channel_shape, (4, 8))
 
 
-class DotProductAttentionTest(test_utils.SequenceLayerTest):
+class DotProductAttentionTest(
+    test_utils.SequenceLayerTest,
+    spec.DotProductAttentionTest,
+):
   """Tests for cross-attention."""
-
-  def _make_constants(self, batch, time, features, name='source'):
-    source = test_utils.random_sequence(batch, time, features)
-    return {name: source}
-
-  def test_layer(self):
-    layer = attention.DotProductAttention(
-        in_features=8,
-        source_features=12,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-    )
-    constants = self._make_constants(2, 6, 12)
-    self.verify_contract(
-        layer,
-        (8,),
-        constants=constants,
-        atol=1e-4,
-        rtol=1e-4,
-    )
-
-  def test_output_shape(self):
-    layer = attention.DotProductAttention(
-        in_features=16,
-        source_features=16,
-        source_name='enc',
-        num_heads=4,
-        units_per_head=8,
-    )
-    self.assertEqual(layer.get_output_shape((16,)), (4, 8))
-
-  def test_step_reuses_precomputed_kv(self):
-    layer = attention.DotProductAttention(
-        in_features=8,
-        source_features=12,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-    )
-    constants = self._make_constants(1, 6, 12)
-    spec = bt.ShapeDType((8,), mx.float32)
-    state = layer.get_initial_state(
-        1, spec, training=False, constants=constants
-    )
-    # KV should be pre-computed.
-    keys_v = state[0]
-    self.assertEqual(keys_v.shape, (1, 6, 2, 4))
-
-    for _ in range(3):
-      x = bt.MaskedSequence(
-          mx.random.normal(shape=(1, 1, 8)),
-          mx.ones((1, 1), dtype=mx.bool_),
-      )
-      y, state = layer.step(x, state, training=False, constants=constants)
-      self.assertEqual(y.channel_shape, (2, 4))
-
-  def test_missing_source_raises(self):
-    layer = attention.DotProductAttention(
-        in_features=8,
-        source_features=8,
-        source_name='missing',
-        num_heads=2,
-        units_per_head=4,
-    )
-    x = test_utils.random_sequence(1, 3, 8)
-    with self.assertRaises(ValueError):
-      layer.layer(x, constants={}, training=False)
 
   def test_from_config(self):
     import sequence_layers.mlx
@@ -254,7 +142,7 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     mlx_layer = attention.DotProductAttention.from_config(config)
     self.assertIsInstance(
         mlx_layer,
-        attention.DeferredDotProductAttention,
+        attention.DotProductAttention,
     )
     source = test_utils.random_sequence(1, 6, 16)
     constants = {'enc': source}
@@ -465,7 +353,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     mlx_layer = attention.StreamingDotProductAttention.from_config(config)
     self.assertIsInstance(
         mlx_layer,
-        attention.DeferredStreamingDotProductAttention,
+        attention.StreamingDotProductAttention,
     )
 
     source = test_utils.random_sequence(1, 6, 8)
@@ -486,7 +374,7 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     mlx_local = attention.StreamingDotProductAttention.from_config(local_config)
     self.assertIsInstance(
         mlx_local,
-        attention.DeferredStreamingDotProductAttention,
+        attention.StreamingDotProductAttention,
     )
 
 
@@ -579,7 +467,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     mlx_layer = attention.LocalDotProductSelfAttention.from_config(config)
     self.assertIsInstance(
         mlx_layer,
-        attention.DeferredLocalDotProductSelfAttention,
+        attention.LocalDotProductSelfAttention,
     )
     self.assertEqual(mlx_layer.block_size, 2)
 

@@ -25,9 +25,13 @@ from sequence_layers.jax.attention import dot_product_self_attention
 from sequence_layers.jax.attention import shaw_relative_position_embedding
 from sequence_layers.jax.attention import t5_relative_position_embedding
 from sequence_layers.jax.attention import test_utils as attention_test_utils
+from sequence_layers.specs import attention_behaviors as attention_spec_behaviors
 
 
-class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
+class DotProductSelfAttentionTest(
+    test_utils.SequenceLayerTest,
+    attention_spec_behaviors.DotProductSelfAttentionTest,
+):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0. Steppable.

@@ -10,6 +10,7 @@ from . import conditioning as _conditioning
 from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
+from . import attention as _attention
 from . import pooling as _pooling
 from . import position as _position
 from . import simple as _simple
@@ -53,6 +54,10 @@ class ModuleSpec(Protocol):
 
   @property
   def position(self) -> _position.ModuleSpec:
+    ...
+
+  @property
+  def attention(self) -> _attention.ModuleSpec:
     ...
 
   @property
@@ -146,6 +151,32 @@ class ModuleSpec(Protocol):
 
   @property
   def EinsumDense(self) -> type[_dense.EinsumDense]:
+    ...
+
+  @property
+  def DotProductSelfAttention(self) -> type[_attention.DotProductSelfAttention]:
+    ...
+
+  @property
+  def DotProductAttention(self) -> type[_attention.DotProductAttention]:
+    ...
+
+  @property
+  def StreamingDotProductAttention(
+      self,
+  ) -> type[_attention.StreamingDotProductAttention]:
+    ...
+
+  @property
+  def StreamingLocalDotProductAttention(
+      self,
+  ) -> type[_attention.StreamingDotProductAttention]:
+    ...
+
+  @property
+  def LocalDotProductSelfAttention(
+      self,
+  ) -> type[_attention.LocalDotProductSelfAttention]:
     ...
 
   @property

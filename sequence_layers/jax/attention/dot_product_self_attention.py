@@ -14,6 +14,7 @@
 """Dot product self attention layer."""
 
 import dataclasses
+from collections.abc import Sequence as TypingSequence
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -22,15 +23,21 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
+from sequence_layers.specs import attention as attention_spec
 
 
 class DotProductSelfAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
+    types.Emitting,
+    common.AttentionInputProjectionHelper,
+    attention_spec.DotProductSelfAttention[types.Sequence, types.ChannelSpec],
 ):
   """A multi-headed dot-product self attention layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.DotProductSelfAttention.Config,
+  ):
     """Configuration for DotProductSelfAttention."""
 
     # The number of attention heads. If num_kv_heads is set, num_heads must be

@@ -34,6 +34,7 @@ from .attention import DotProductAttention
 from .attention import DotProductSelfAttention
 from .attention import LocalDotProductSelfAttention
 from .attention import StreamingDotProductAttention
+from .attention import StreamingLocalDotProductAttention
 from .combinators import CombinationMode
 from .combinators import Parallel
 from .combinators import Repeat
@@ -173,6 +174,7 @@ __all__ = [
     'DotProductSelfAttention',
     'DotProductAttention',
     'StreamingDotProductAttention',
+    'StreamingLocalDotProductAttention',
     'LocalDotProductSelfAttention',
     'CombinedQueryKeyValueProjection',
     'QueryAndKeyValueProjection',

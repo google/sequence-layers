@@ -21,10 +21,13 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
+from sequence_layers.specs import attention as attention_spec
 
 
 class StreamingDotProductAttention(
-    types.Emitting, common.AttentionInputProjectionHelper
+    types.Emitting,
+    common.AttentionInputProjectionHelper,
+    attention_spec.StreamingDotProductAttention[types.Sequence, types.ChannelSpec],
 ):
   """A multi-headed streaming dot-product attention layer.
 
@@ -36,7 +39,10 @@ class StreamingDotProductAttention(
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.StreamingDotProductAttention.Config,
+  ):
     """Configuration for StreamingDotProductAttention."""
 
     # The key to lookup source sequence from constants dictionary.

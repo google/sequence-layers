@@ -1,19 +1,20 @@
 """Dot-product attention layers for MLX."""
 
 import dataclasses
+from typing import Any, override
 import math
 
 import mlx.core as mx
 import numpy as np
 
-from . import basic_types as bt
-from . import init_mapping
-from . import projection_configs
-from . import types
-from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
+from collections.abc import Sequence as TypingSequence
+from sequence_layers.mlx import init_mapping
+from sequence_layers.mlx import projection_configs
+from sequence_layers.mlx import types
+from sequence_layers.specs import attention as attention_spec
 
-Sequence = bt.Sequence
-MaskedSequence = bt.MaskedSequence
+Sequence = types.Sequence
+MaskedSequence = types.MaskedSequence
 
 def _quantized_matmul_proj(x, q_weight, q_scales, q_biases, group_size, bits):
     return mx.quantized_matmul(
@@ -75,7 +76,10 @@ def _causal_mask(q_len, kv_len):
   return mask.reshape(1, 1, q_len, kv_len)
 
 
-class DotProductSelfAttention(types.Emitting):
+class DotProductSelfAttention(
+    types.Emitting,
+    attention_spec.DotProductSelfAttention[types.Sequence, types.ChannelSpec],
+):
   """Multi-headed dot-product self attention for MLX.
 
   Supports:
@@ -92,7 +96,10 @@ class DotProductSelfAttention(types.Emitting):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.DotProductSelfAttention.Config,
+  ):
     """MLX-native configuration for DotProductSelfAttention."""
 
     num_heads: int
@@ -108,9 +115,9 @@ class DotProductSelfAttention(types.Emitting):
             default_factory=projection_configs.CombinedQueryKeyValueProjection
         )
     )
-    query_network: _SequenceLayerConfig | None = None
-    key_network: _SequenceLayerConfig | None = None
-    value_network: _SequenceLayerConfig | None = None
+    query_network: types.SequenceLayerConfig | None = None
+    key_network: types.SequenceLayerConfig | None = None
+    value_network: types.SequenceLayerConfig | None = None
     attention_logits_soft_cap: float | None = None
     per_dim_scale: bool = False
     query_scale: float | None = None
@@ -122,16 +129,18 @@ class DotProductSelfAttention(types.Emitting):
     use_kv_cache_ringbuffer: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> 'DotProductSelfAttention':
-      return DotProductSelfAttention.from_config(self)
+      return DotProductSelfAttention(self)
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      in_features: int,
-      num_heads: int,
-      units_per_head: int,
-      max_past_horizon: int,
+      in_features: int | None = None,
+      num_heads: int | None = None,
+      units_per_head: int | None = None,
+      max_past_horizon: int | None = None,
       max_future_horizon: int = 0,
       num_kv_heads: int | None = None,
       use_bias: bool = False,
@@ -149,56 +158,127 @@ class DotProductSelfAttention(types.Emitting):
       input_projection=None,
   ):
     super().__init__()
-    if num_kv_heads is None:
-      num_kv_heads = num_heads
-    if num_heads % num_kv_heads != 0:
-      raise ValueError(f'{num_heads=} must be divisible by {num_kv_heads=}.')
-    if max_past_horizon < -1:
-      raise ValueError(
-          f'max_past_horizon must be >= -1, got {max_past_horizon}.'
-      )
-    if max_future_horizon < -1:
-      raise ValueError(
-          f'max_future_horizon must be >= -1, got {max_future_horizon}.'
+    if config is not None:
+      self.config = config
+    else:
+      if num_heads is None or units_per_head is None or max_past_horizon is None:
+        raise ValueError(
+            'Must provide either config or num_heads, units_per_head, and'
+            ' max_past_horizon'
+        )
+      self.config = self.Config(
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          max_past_horizon=max_past_horizon,
+          max_future_horizon=max_future_horizon,
+          num_kv_heads=num_kv_heads,
+          use_bias=use_bias,
+          query_scale=query_scale,
+          per_dim_scale=per_dim_scale,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+          query_network=query_network,
+          key_network=key_network,
+          value_network=value_network,
+          attention_logits_soft_cap=attention_logits_soft_cap,
+          num_sink_embeddings=num_sink_embeddings,
+          input_projection=input_projection,
       )
 
+    self.compute_dtype = init_mapping._to_mx_dtype(self.config.compute_dtype) if self.config.compute_dtype else None
+    self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype) or mx.float32
+
+    self.in_features = None
+    self.num_heads = self.config.num_heads
+    self.units_per_head = self.config.units_per_head
+    self.max_past_horizon = self.config.max_past_horizon
+    self.max_future_horizon = self.config.max_future_horizon
+    self.num_kv_heads = self.config.num_kv_heads or self.num_heads
+    self.use_bias = self.config.use_bias
+    self._query_scale = self.config.query_scale
+    self._attention_logits_soft_cap = self.config.attention_logits_soft_cap
+
+    self._kernel_init = kernel_init
+    self._bias_init = bias_init
+    self._per_dim_scale = None
+
+    self.query_network = query_network
+    self.key_network = key_network
+    self.value_network = value_network
+
+    self._initialized = False
+
+    if in_features is not None:
+      self._ensure_initialized(in_features)
+
+  def _ensure_initialized(self, in_features: int):
+    if self._initialized:
+      return
+    self._initialized = True
     self.in_features = in_features
-    self.num_heads = num_heads
-    self.units_per_head = units_per_head
-    self.max_past_horizon = max_past_horizon
-    self.max_future_horizon = max_future_horizon
-    self.num_kv_heads = num_kv_heads
-    self.use_bias = use_bias
-    self._query_scale = query_scale
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
-    self._attention_logits_soft_cap = attention_logits_soft_cap
+
+    from sequence_layers.mlx import utils as mlx_utils
+    if isinstance(self.query_network, types.SequenceLayerConfig):
+      self.query_network = mlx_utils.make_layer(self.query_network)
+    if isinstance(self.key_network, types.SequenceLayerConfig):
+      self.key_network = mlx_utils.make_layer(self.key_network)
+    if isinstance(self.value_network, types.SequenceLayerConfig):
+      self.value_network = mlx_utils.make_layer(self.value_network)
+
+    param_dtype = self._param_dtype
+    per_dim_scale = self.config.per_dim_scale
+    units_per_head = self.units_per_head
+    num_heads = self.num_heads
+    num_kv_heads = self.num_kv_heads
+    use_bias = self.use_bias
+    input_projection = self.config.input_projection
+    num_sink_embeddings = self.config.num_sink_embeddings
+
     self._per_dim_scale = (
         mx.zeros((units_per_head,), dtype=param_dtype)
         if per_dim_scale
         else None
     )
 
+    kernel_init = self._kernel_init
+    bias_init = self._bias_init
+
     if kernel_init is None:
-      kernel_init = init_mapping._make_variance_scaling_init(
-          'fan_in', 'truncated_normal'
+      qkv_init = (
+          getattr(input_projection, 'qkv_kernel_init', None)
+          or getattr(input_projection, 'q_kernel_init', None)
+          or getattr(input_projection, 'kv_kernel_init', None)
       )
+      if qkv_init is not None:
+        kernel_init = init_mapping.map_initializer(qkv_init)
+      else:
+        kernel_init = init_mapping._make_variance_scaling_init(
+            'fan_in', 'truncated_normal'
+        )
+
     if bias_init is None:
-      bias_init = init_mapping._zeros_init
+      qkv_bias_init = (
+          getattr(input_projection, 'bias_init', None)
+          or getattr(input_projection, 'q_bias_init', None)
+          or getattr(input_projection, 'kv_bias_init', None)
+      )
+      if qkv_bias_init is not None:
+        bias_init = init_mapping.map_initializer(qkv_bias_init)
+      else:
+        bias_init = init_mapping._zeros_init
 
     key = mx.random.key(0)
     q_dim = num_heads * units_per_head
     kv_dim = num_kv_heads * units_per_head
 
     self.input_projection = input_projection
-    if isinstance(input_projection, projection_configs.CombinedQueryKeyValueProjection) and self.num_kv_heads == self.num_heads:
+    if isinstance(input_projection, projection_configs.CombinedQueryKeyValueProjection) and num_kv_heads == num_heads:
       out_dim = q_dim + 2 * kv_dim
       self.qkv_proj = kernel_init(key, (in_features, out_dim), param_dtype)
       if use_bias:
         self.qkv_bias = bias_init(key, (out_dim,), param_dtype)
     else:
       self.q_proj = kernel_init(key, (in_features, q_dim), param_dtype)
-      # Combined K+V projection: single matmul + split is faster than two.
       self.kv_proj = mx.concatenate([
           kernel_init(key, (in_features, kv_dim), param_dtype),
           kernel_init(key, (in_features, kv_dim), param_dtype),
@@ -210,7 +290,6 @@ class DotProductSelfAttention(types.Emitting):
             bias_init(key, (kv_dim,), param_dtype),
         ], axis=-1)
 
-    # Attention sink embeddings.
     self.num_sink_embeddings = num_sink_embeddings
     if num_sink_embeddings > 0:
       self.sink_key_embeddings = mx.zeros(
@@ -223,10 +302,6 @@ class DotProductSelfAttention(types.Emitting):
       self.sink_key_embeddings = None
       self.sink_value_embeddings = None
 
-    self.query_network = query_network
-    self.key_network = key_network
-    self.value_network = value_network
-
   @property
   def supports_step(self):
     return self.max_past_horizon >= 0 and self.max_future_horizon >= 0
@@ -237,6 +312,7 @@ class DotProductSelfAttention(types.Emitting):
 
   def _project_qkv(self, x):
     """Project input to Q, K, V sequences."""
+    self._ensure_initialized(x.shape[-1])
     b, t = x.shape[0], x.shape[1]
     dtype = self.compute_dtype or x.dtype
 
@@ -407,6 +483,7 @@ class DotProductSelfAttention(types.Emitting):
     return self._param_dtype
 
   def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
+    self._ensure_initialized(input_spec.shape[-1])
     compute_dtype = self.get_output_dtype(input_spec.dtype)
     max_past = max(0, self.max_past_horizon)
     max_future = max(0, self.max_future_horizon)
@@ -427,7 +504,7 @@ class DotProductSelfAttention(types.Emitting):
     q_net_state = (
         self.query_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -440,7 +517,7 @@ class DotProductSelfAttention(types.Emitting):
     k_net_state = (
         self.key_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_kv_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -453,7 +530,7 @@ class DotProductSelfAttention(types.Emitting):
     v_net_state = (
         self.value_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_kv_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -667,116 +744,80 @@ class DotProductSelfAttention(types.Emitting):
     return self
 
   @classmethod
-  def from_config(cls, config):
-    """Create from a Linen DotProductSelfAttention.Config.
-
-    Since in_features is not in the config (it's inferred), we
-    return a _DeferredDotProductSelfAttention that creates
-    projections on first use.
-    """
-    return DeferredDotProductSelfAttention(config)
-
-
-class DeferredDotProductSelfAttention(types.Emitting):
-  """Wrapper that defers projection creation until first input.
-
-  Linen DotProductSelfAttention.Config doesn't specify in_features;
-  it is inferred from the first input.
-  """
-
-  def __init__(self, config):
-    super().__init__()
-    self._config = config
-    self.inner = None
-
-  def _ensure_initialized(self, in_features, backend='mlx'):
-    if self.inner is not None:
-      return
-
-    from sequence_layers.mlx import utils as mlx_utils
-    # Build optional Q/K/V networks.
-    query_network = None
-    key_network = None
-    value_network = None
-    if self._config.query_network:
-      query_network = mlx_utils.make_layer(self._config.query_network, backend=backend)
-    if self._config.key_network:
-      key_network = mlx_utils.make_layer(self._config.key_network, backend=backend)
-    if self._config.value_network:
-      value_network = mlx_utils.make_layer(self._config.value_network, backend=backend)
-
-    compute_dtype = getattr(self._config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    param_dtype = init_mapping._to_mx_dtype(self._config.param_dtype)
-    self.inner = DotProductSelfAttention(
-        in_features=in_features,
-        num_heads=self._config.num_heads,
-        units_per_head=self._config.units_per_head,
-        max_past_horizon=self._config.max_past_horizon,
-        max_future_horizon=self._config.max_future_horizon,
-        num_kv_heads=self._config.num_kv_heads,
-        use_bias=self._config.use_bias,
-        query_scale=getattr(self._config, 'query_scale', None),
-        per_dim_scale=getattr(self._config, 'per_dim_scale', False),
-        compute_dtype=compute_dtype,
-        param_dtype=param_dtype,
-        kernel_init=init_mapping.map_initializer(
-            getattr(self._config, 'input_projection', None)
-            and getattr(
-                self._config.input_projection,
-                'qkv_kernel_init',
-                None,
-            )
-        ),
-        query_network=query_network,
-        key_network=key_network,
-        value_network=value_network,
-        num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
-        input_projection=getattr(self._config, 'input_projection', None),
+  def from_config(cls, config: attention_spec.DotProductSelfAttention.Config) -> 'DotProductSelfAttention':
+    """Create from a Linen DotProductSelfAttention.Config."""
+    mlx_config = cls.Config(
+        num_heads=config.num_heads,
+        units_per_head=config.units_per_head,
+        max_past_horizon=config.max_past_horizon,
+        max_future_horizon=config.max_future_horizon,
+        num_kv_heads=config.num_kv_heads,
+        attention_probabilities_dropout_rate=config.attention_probabilities_dropout_rate,
+        broadcast_dropout_across_queries=config.broadcast_dropout_across_queries,
+        use_bias=config.use_bias,
+        input_projection=_map_projection_config(config.input_projection),
+        query_network=config.query_network,
+        key_network=config.key_network,
+        value_network=config.value_network,
+        attention_logits_soft_cap=config.attention_logits_soft_cap,
+        per_dim_scale=config.per_dim_scale,
+        query_scale=config.query_scale,
+        zero_fully_masked=config.zero_fully_masked,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        num_sink_embeddings=config.num_sink_embeddings,
+        use_sink_scalars=config.use_sink_scalars,
+        use_kv_cache_ringbuffer=config.use_kv_cache_ringbuffer,
+        name=config.name,
     )
+    return cls(mlx_config)
 
-  @property
-  def supports_step(self):
-    mph = self._config.max_past_horizon
-    mfh = self._config.max_future_horizon
-    return mph >= 0 and mfh >= 0
 
-  @property
-  def input_latency(self):
-    return max(0, self._config.max_future_horizon)
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    return (
-        self._config.num_heads,
-        self._config.units_per_head,
+def _map_projection_config(
+    config: attention_spec.QueryKeyValueProjectionConfig,
+) -> projection_configs.QueryKeyValueProjectionConfig:
+  """Maps a spec-level projection config (which may be JAX) to MLX."""
+  if isinstance(config, attention_spec.CombinedQueryKeyValueProjection):
+    return projection_configs.CombinedQueryKeyValueProjection(
+        share_kv_projection=config.share_kv_projection,
+        qkv_kernel_init=getattr(config, 'qkv_kernel_init', None),
+        bias_init=getattr(config, 'bias_init', None),
     )
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    if getattr(self._config, 'compute_dtype', None):
-      return init_mapping._to_mx_dtype(self._config.compute_dtype)
-    return init_mapping._to_mx_dtype(self._config.param_dtype)
-
-  def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
-    self._ensure_initialized(input_spec.shape[-1])
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
+  elif isinstance(config, attention_spec.SeparateQueryKeyValueProjection):
+    return projection_configs.SeparateQueryKeyValueProjection(
+        q_kernel_init=getattr(config, 'q_kernel_init', None),
+        k_kernel_init=getattr(config, 'k_kernel_init', None),
+        v_kernel_init=getattr(config, 'v_kernel_init', None),
+        bias_init=getattr(config, 'bias_init', None),
     )
+  elif isinstance(config, attention_spec.QueryAndKeyValueProjection):
+    return projection_configs.QueryAndKeyValueProjection(
+        q_kernel_init=getattr(config, 'q_kernel_init', None),
+        q_bias_init=getattr(config, 'q_bias_init', None),
+        kv_kernel_init=getattr(config, 'kv_kernel_init', None),
+        kv_bias_init=getattr(config, 'kv_bias_init', None),
+    )
+  elif isinstance(config, attention_spec.QueryAndSharedKeyValueProjection):
+    return projection_configs.QueryAndSharedKeyValueProjection(
+        q_kernel_init=getattr(config, 'q_kernel_init', None),
+        q_bias_init=getattr(config, 'q_bias_init', None),
+        kv_kernel_init=getattr(config, 'kv_kernel_init', None),
+        kv_bias_init=getattr(config, 'kv_bias_init', None),
+    )
+  return config
 
-  def layer_with_emits(self, x, *, training: bool, constants=None):
-    self._ensure_initialized(x.shape[-1])
-    return self.inner.layer_with_emits(x, training=training, constants=constants)
 
-  def step_with_emits(self, x, state, *, training: bool, constants=None):
-    self._ensure_initialized(x.shape[-1])
-    return self.inner.step_with_emits(x, state, training=training, constants=constants)
-
-
-class DotProductAttention(types.Emitting):
+class DotProductAttention(
+    types.Emitting,
+    attention_spec.DotProductAttention[types.Sequence, types.ChannelSpec],
+):
   """Multi-headed dot-product cross attention for MLX."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.DotProductAttention.Config,
+  ):
     """MLX-native configuration for DotProductAttention."""
 
     source_name: str
@@ -792,9 +833,9 @@ class DotProductAttention(types.Emitting):
     ) = dataclasses.field(
         default_factory=projection_configs.QueryAndKeyValueProjection
     )
-    query_network: _SequenceLayerConfig | None = None
-    key_network: _SequenceLayerConfig | None = None
-    value_network: _SequenceLayerConfig | None = None
+    query_network: types.SequenceLayerConfig | None = None
+    key_network: types.SequenceLayerConfig | None = None
+    value_network: types.SequenceLayerConfig | None = None
     attention_logits_soft_cap: float | None = None
     per_dim_scale: bool = False
     query_scale: float | None = None
@@ -803,19 +844,21 @@ class DotProductAttention(types.Emitting):
     param_dtype: types.DType = mx.float32
     name: str | None = None
 
+    @override
     def make(self) -> 'DotProductAttention':
-      return DotProductAttention.from_config(self)
+      return DotProductAttention(self)
 
 
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      in_features: int,
-      source_features: int,
-      source_name: str,
-      num_heads: int,
-      units_per_head: int,
+      in_features: int | None = None,
+      source_features: int | None = None,
+      source_name: str | None = None,
+      num_heads: int | None = None,
+      units_per_head: int | None = None,
       use_bias: bool = False,
       query_scale: float | None = None,
       per_dim_scale: bool = False,
@@ -828,33 +871,110 @@ class DotProductAttention(types.Emitting):
       value_network: types.SequenceLayer | None = None,
   ):
     super().__init__()
+    if config is None:
+      # Reconstruct config to store unified properties
+      config = DotProductAttention.Config(
+          source_name=source_name,
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          use_bias=use_bias,
+          query_scale=query_scale,
+          per_dim_scale=per_dim_scale,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+          query_network=query_network,
+          key_network=key_network,
+          value_network=value_network,
+      )
+    self.config = config
+
+    self.compute_dtype = (
+        init_mapping._to_mx_dtype(self.config.compute_dtype)
+        if self.config.compute_dtype is not None
+        else None
+    )
+    self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype) or mx.float32
+
+    self.in_features = None
+    self.source_features = None
+    self.source_name = self.config.source_name
+    self.num_heads = self.config.num_heads
+    self.units_per_head = self.config.units_per_head
+    self.use_bias = self.config.use_bias
+    self._query_scale = self.config.query_scale
+
+    self._kernel_init = kernel_init
+    self._bias_init = bias_init
+    self._per_dim_scale = None
+
+    self.query_network = query_network or self.config.query_network
+    self.key_network = key_network or self.config.key_network
+    self.value_network = value_network or self.config.value_network
+
+    self._initialized = False
+
+    if in_features is not None and source_features is not None:
+      self._ensure_initialized(in_features, source_features)
+
+  def _ensure_initialized(self, in_features: int, source_features: int):
+    if self._initialized:
+      return
+    self._initialized = True
     self.in_features = in_features
     self.source_features = source_features
-    self.source_name = source_name
-    self.num_heads = num_heads
-    self.units_per_head = units_per_head
-    self.use_bias = use_bias
-    self._query_scale = query_scale
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
+
+    from sequence_layers.mlx import utils as mlx_utils
+    if isinstance(self.query_network, types.SequenceLayerConfig):
+      self.query_network = mlx_utils.make_layer(self.query_network)
+    if isinstance(self.key_network, types.SequenceLayerConfig):
+      self.key_network = mlx_utils.make_layer(self.key_network)
+    if isinstance(self.value_network, types.SequenceLayerConfig):
+      self.value_network = mlx_utils.make_layer(self.value_network)
+
+    param_dtype = self._param_dtype
+    per_dim_scale = self.config.per_dim_scale
+    units_per_head = self.units_per_head
+    num_heads = self.num_heads
+    use_bias = self.use_bias
+    input_projection = self.config.input_projection
+
     self._per_dim_scale = (
         mx.zeros((units_per_head,), dtype=param_dtype)
         if per_dim_scale
         else None
     )
 
+    kernel_init = self._kernel_init
+    bias_init = self._bias_init
+
     if kernel_init is None:
-      kernel_init = init_mapping._make_variance_scaling_init(
-          'fan_in', 'truncated_normal'
+      qkv_init = (
+          getattr(input_projection, 'qkv_kernel_init', None)
+          or getattr(input_projection, 'q_kernel_init', None)
+          or getattr(input_projection, 'kv_kernel_init', None)
       )
+      if qkv_init is not None:
+        kernel_init = init_mapping.map_initializer(qkv_init)
+      else:
+        kernel_init = init_mapping._make_variance_scaling_init(
+            'fan_in', 'truncated_normal'
+        )
+
     if bias_init is None:
-      bias_init = init_mapping._zeros_init
+      qkv_bias_init = (
+          getattr(input_projection, 'bias_init', None)
+          or getattr(input_projection, 'q_bias_init', None)
+          or getattr(input_projection, 'kv_bias_init', None)
+      )
+      if qkv_bias_init is not None:
+        bias_init = init_mapping.map_initializer(qkv_bias_init)
+      else:
+        bias_init = init_mapping._zeros_init
 
     key = mx.random.key(0)
     qkv_dim = num_heads * units_per_head
 
     self.q_proj = kernel_init(key, (in_features, qkv_dim), param_dtype)
-    # Combined K+V projection: single matmul + split is faster than two.
     self.kv_proj = mx.concatenate([
         kernel_init(key, (source_features, qkv_dim), param_dtype),
         kernel_init(key, (source_features, qkv_dim), param_dtype),
@@ -865,10 +985,6 @@ class DotProductAttention(types.Emitting):
           bias_init(key, (qkv_dim,), param_dtype),
           bias_init(key, (qkv_dim,), param_dtype),
       ], axis=-1)
-
-    self.query_network = query_network
-    self.key_network = key_network
-    self.value_network = value_network
 
   @property
   def supports_step(self):
@@ -937,8 +1053,9 @@ class DotProductAttention(types.Emitting):
     return self._param_dtype
 
   def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
-    # Pre-project source keys and values.
     source = self._get_source(constants)
+    self._ensure_initialized(input_spec.shape[-1], source.shape[-1])
+    
     keys, values = self._project_kv(source)
 
     if self.key_network is not None:
@@ -952,7 +1069,7 @@ class DotProductAttention(types.Emitting):
     q_net_state = (
         self.query_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_heads, self.units_per_head),
                 self.get_output_dtype(input_spec.dtype),
             ),
@@ -974,6 +1091,8 @@ class DotProductAttention(types.Emitting):
 
   def layer_with_emits(self, x, *, training: bool, constants=None):
     source = self._get_source(constants)
+    self._ensure_initialized(x.shape[-1], source.shape[-1])
+    
     keys, values = self._project_kv(source)
 
     if self.key_network is not None:
@@ -999,6 +1118,8 @@ class DotProductAttention(types.Emitting):
 
   def step_with_emits(self, x, state, *, training: bool, constants=None):
     keys_v, values_v, kv_mask, q_net_state, time_step = state
+    source = self._get_source(constants)
+    self._ensure_initialized(x.shape[-1], source.shape[-1])
 
     queries = self._project_q(x)
     if self.query_network is not None:
@@ -1021,107 +1142,29 @@ class DotProductAttention(types.Emitting):
     return Sequence(context, x.mask), new_state, ()
 
   @classmethod
-  def from_config(cls, config):
-    return DeferredDotProductAttention(config)
-
-
-class DeferredDotProductAttention(types.Emitting):
-  """Deferred DotProductAttention that creates projections on first use."""
-
-  def __init__(self, config):
-    super().__init__()
-    self._config = config
-    self.inner = None
-
-  def _ensure_initialized(self, in_features, source_features, backend='mlx'):
-    if self.inner is not None:
-      return
-
-    from sequence_layers.mlx import utils as mlx_utils
-    query_network = None
-    key_network = None
-    value_network = None
-    if self._config.query_network:
-      query_network = mlx_utils.make_layer(self._config.query_network, backend=backend)
-    if self._config.key_network:
-      key_network = mlx_utils.make_layer(self._config.key_network, backend=backend)
-    if self._config.value_network:
-      value_network = mlx_utils.make_layer(self._config.value_network, backend=backend)
-
-    compute_dtype = getattr(self._config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    param_dtype = init_mapping._to_mx_dtype(self._config.param_dtype)
-
-    self.inner = DotProductAttention(
-        in_features=in_features,
-        source_features=source_features,
-        source_name=self._config.source_name,
-        num_heads=self._config.num_heads,
-        units_per_head=self._config.units_per_head,
-        use_bias=self._config.use_bias,
-        query_scale=getattr(self._config, 'query_scale', None),
-        per_dim_scale=getattr(self._config, 'per_dim_scale', False),
-        compute_dtype=compute_dtype,
-        param_dtype=param_dtype,
-        kernel_init=init_mapping.map_initializer(
-            getattr(self._config, 'input_projection', None)
-            and getattr(
-                self._config.input_projection,
-                'qkv_kernel_init',
-                None,
-            )
-        ),
-        query_network=query_network,
-        key_network=key_network,
-        value_network=value_network,
+  def from_config(cls, config: attention_spec.DotProductAttention.Config) -> 'DotProductAttention':
+    """Create from a Linen DotProductAttention.Config."""
+    mlx_config = cls.Config(
+        source_name=config.source_name,
+        num_heads=config.num_heads,
+        units_per_head=config.units_per_head,
+        attention_probabilities_dropout_rate=config.attention_probabilities_dropout_rate,
+        broadcast_dropout_across_queries=config.broadcast_dropout_across_queries,
+        use_bias=config.use_bias,
+        input_projection=_map_projection_config(config.input_projection),
+        query_network=config.query_network,
+        key_network=config.key_network,
+        value_network=config.value_network,
+        attention_logits_soft_cap=config.attention_logits_soft_cap,
+        per_dim_scale=config.per_dim_scale,
+        query_scale=config.query_scale,
+        zero_fully_masked=config.zero_fully_masked,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        name=config.name,
     )
+    return cls(mlx_config)
 
-  def _get_source(self, constants):
-    if constants is None:
-      raise ValueError('Constants required for cross-attention.')
-    if self._config.source_name not in constants:
-      raise ValueError(f'Source "{self._config.source_name}" not found.')
-    return constants[self._config.source_name]
-
-  @property
-  def supports_step(self):
-    if self._config.query_network is not None:
-      # Can't easily check without building; assume True.
-      return True
-    return True
-
-  @property
-  def input_latency(self):
-    return 0
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    return (
-        self._config.num_heads,
-        self._config.units_per_head,
-    )
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    if getattr(self._config, 'compute_dtype', None):
-      return init_mapping._to_mx_dtype(self._config.compute_dtype)
-    return init_mapping._to_mx_dtype(self._config.param_dtype)
-
-  def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(input_spec.shape[-1], source.shape[-1])
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
-    )
-
-  def layer_with_emits(self, x, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(x.shape[-1], source.shape[-1])
-    return self.inner.layer_with_emits(x, training=training, constants=constants)
-
-  def step_with_emits(self, x, state, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(x.shape[-1], source.shape[-1])
-    return self.inner.step_with_emits(x, state, training=training, constants=constants)
 
 
 def _banded_mask(q_len, kv_len, num_lower, num_upper):
@@ -1156,7 +1199,10 @@ def _step_visibility_mask(
   )
 
 
-class StreamingDotProductAttention(types.Emitting):
+class StreamingDotProductAttention(
+    types.Emitting,
+    attention_spec.StreamingDotProductAttention[types.Sequence, types.ChannelSpec],
+):
   """Multi-headed streaming cross-attention for MLX.
 
   Also covers StreamingLocalDotProductAttention from the JAX backend.
@@ -1179,7 +1225,10 @@ class StreamingDotProductAttention(types.Emitting):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.StreamingDotProductAttention.Config,
+  ):
     """MLX-native configuration for StreamingDotProductAttention.
 
     This Config also serves as the MLX-native equivalent of the JAX
@@ -1203,9 +1252,9 @@ class StreamingDotProductAttention(types.Emitting):
     ) = dataclasses.field(
         default_factory=projection_configs.QueryAndKeyValueProjection
     )
-    query_network: _SequenceLayerConfig | None = None
-    key_network: _SequenceLayerConfig | None = None
-    value_network: _SequenceLayerConfig | None = None
+    query_network: types.SequenceLayerConfig | None = None
+    key_network: types.SequenceLayerConfig | None = None
+    value_network: types.SequenceLayerConfig | None = None
     attention_logits_soft_cap: float | None = None
     per_dim_scale: bool = False
     query_scale: float | None = None
@@ -1217,18 +1266,20 @@ class StreamingDotProductAttention(types.Emitting):
     use_kv_cache_ringbuffer: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> 'StreamingDotProductAttention':
-      return StreamingDotProductAttention.from_config(self)
+      return StreamingDotProductAttention(self)
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      in_features: int,
-      source_features: int,
-      source_name: str,
-      num_heads: int,
-      units_per_head: int,
-      max_past_horizon: int,
+      in_features: int | None = None,
+      source_features: int | None = None,
+      source_name: str | None = None,
+      num_heads: int | None = None,
+      units_per_head: int | None = None,
+      max_past_horizon: int | None = None,
       max_future_horizon: int = 0,
       use_bias: bool = False,
       use_query_delay_buffer: bool = True,
@@ -1245,46 +1296,131 @@ class StreamingDotProductAttention(types.Emitting):
       input_projection=None,
   ):
     super().__init__()
-    if max_past_horizon < 1:
-      raise ValueError(
-          f'max_past_horizon must be >= 1, got {max_past_horizon}.'
+    if config is None:
+      config = StreamingDotProductAttention.Config(
+          source_name=source_name,
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          max_past_horizon=max_past_horizon,
+          max_future_horizon=max_future_horizon,
+          use_bias=use_bias,
+          use_query_delay_buffer=use_query_delay_buffer,
+          query_scale=query_scale,
+          per_dim_scale=per_dim_scale,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+          query_network=query_network,
+          key_network=key_network,
+          value_network=value_network,
+          num_sink_embeddings=num_sink_embeddings,
+          input_projection=input_projection,
       )
-    if max_future_horizon < 0:
+    self.config = config
+
+    if self.config.max_past_horizon < 1:
       raise ValueError(
-          f'max_future_horizon must be >= 0, got {max_future_horizon}.'
+          f'max_past_horizon must be >= 1, got {self.config.max_past_horizon}.'
+      )
+    if self.config.max_future_horizon < 0:
+      raise ValueError(
+          f'max_future_horizon must be >= 0, got {self.config.max_future_horizon}.'
       )
 
+    self.compute_dtype = (
+        init_mapping._to_mx_dtype(self.config.compute_dtype)
+        if self.config.compute_dtype is not None
+        else None
+    )
+    self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype) or mx.float32
+
+    self.in_features = None
+    self.source_features = None
+    self.source_name = self.config.source_name
+    self.num_heads = self.config.num_heads
+    self.units_per_head = self.config.units_per_head
+    self.max_past_horizon = self.config.max_past_horizon
+    self.max_future_horizon = self.config.max_future_horizon
+    self.use_bias = self.config.use_bias
+    self.use_query_delay_buffer = self.config.use_query_delay_buffer
+    self._query_scale = self.config.query_scale
+
+    self._kernel_init = kernel_init
+    self._bias_init = bias_init
+    self._per_dim_scale = None
+
+    self.query_network = query_network or self.config.query_network
+    self.key_network = key_network or self.config.key_network
+    self.value_network = value_network or self.config.value_network
+
+    self.num_sink_embeddings = self.config.num_sink_embeddings
+    self.sink_key_embeddings = None
+    self.sink_value_embeddings = None
+
+    self._initialized = False
+
+    if in_features is not None and source_features is not None:
+      self._ensure_initialized(in_features, source_features)
+
+  def _ensure_initialized(self, in_features: int, source_features: int):
+    if self._initialized:
+      return
+    self._initialized = True
     self.in_features = in_features
     self.source_features = source_features
-    self.source_name = source_name
-    self.num_heads = num_heads
-    self.units_per_head = units_per_head
-    self.max_past_horizon = max_past_horizon
-    self.max_future_horizon = max_future_horizon
-    self.use_bias = use_bias
-    self.use_query_delay_buffer = use_query_delay_buffer
-    self._query_scale = query_scale
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
+
+    from sequence_layers.mlx import utils as mlx_utils
+    if isinstance(self.query_network, types.SequenceLayerConfig):
+      self.query_network = mlx_utils.make_layer(self.query_network)
+    if isinstance(self.key_network, types.SequenceLayerConfig):
+      self.key_network = mlx_utils.make_layer(self.key_network)
+    if isinstance(self.value_network, types.SequenceLayerConfig):
+      self.value_network = mlx_utils.make_layer(self.value_network)
+
+    param_dtype = self._param_dtype
+    per_dim_scale = self.config.per_dim_scale
+    units_per_head = self.units_per_head
+    num_heads = self.num_heads
+    use_bias = self.use_bias
+    input_projection = self.config.input_projection
+    num_sink_embeddings = self.num_sink_embeddings
+
     self._per_dim_scale = (
         mx.zeros((units_per_head,), dtype=param_dtype)
         if per_dim_scale
         else None
     )
 
+    kernel_init = self._kernel_init
+    bias_init = self._bias_init
+
     if kernel_init is None:
-      kernel_init = init_mapping._make_variance_scaling_init(
-          'fan_in', 'truncated_normal'
+      qkv_init = (
+          getattr(input_projection, 'qkv_kernel_init', None)
+          or getattr(input_projection, 'q_kernel_init', None)
+          or getattr(input_projection, 'kv_kernel_init', None)
       )
+      if qkv_init is not None:
+        kernel_init = init_mapping.map_initializer(qkv_init)
+      else:
+        kernel_init = init_mapping._make_variance_scaling_init(
+            'fan_in', 'truncated_normal'
+        )
+
     if bias_init is None:
-      bias_init = init_mapping._zeros_init
+      qkv_bias_init = (
+          getattr(input_projection, 'bias_init', None)
+          or getattr(input_projection, 'q_bias_init', None)
+          or getattr(input_projection, 'kv_bias_init', None)
+      )
+      if qkv_bias_init is not None:
+        bias_init = init_mapping.map_initializer(qkv_bias_init)
+      else:
+        bias_init = init_mapping._zeros_init
 
     key = mx.random.key(0)
     qkv_dim = num_heads * units_per_head
 
-    # Q projection from input.
     self.q_proj = kernel_init(key, (in_features, qkv_dim), param_dtype)
-    # Combined K+V projection from source: single matmul + split.
     self.kv_proj = mx.concatenate([
         kernel_init(key, (source_features, qkv_dim), param_dtype),
         kernel_init(key, (source_features, qkv_dim), param_dtype),
@@ -1295,8 +1431,7 @@ class StreamingDotProductAttention(types.Emitting):
           bias_init(key, (qkv_dim,), param_dtype),
           bias_init(key, (qkv_dim,), param_dtype),
       ], axis=-1)
-    # Attention sink embeddings.
-    self.num_sink_embeddings = num_sink_embeddings
+
     if num_sink_embeddings > 0:
       self.sink_key_embeddings = mx.zeros(
           (num_sink_embeddings, num_heads, units_per_head), dtype=param_dtype
@@ -1304,13 +1439,6 @@ class StreamingDotProductAttention(types.Emitting):
       self.sink_value_embeddings = mx.zeros(
           (num_sink_embeddings, num_heads, units_per_head), dtype=param_dtype
       )
-    else:
-      self.sink_key_embeddings = None
-      self.sink_value_embeddings = None
-
-    self.query_network = query_network
-    self.key_network = key_network
-    self.value_network = value_network
 
   @property
   def supports_step(self):
@@ -1414,6 +1542,9 @@ class StreamingDotProductAttention(types.Emitting):
     return self._param_dtype
 
   def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
+    source = self._get_source(constants)
+    self._ensure_initialized(input_spec.shape[-1], source.shape[-1])
+
     compute_dtype = self.get_output_dtype(input_spec.dtype)
     max_past = max(0, self.max_past_horizon)
     max_future = max(0, self.max_future_horizon)
@@ -1434,7 +1565,7 @@ class StreamingDotProductAttention(types.Emitting):
     q_net_state = (
         self.query_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -1447,7 +1578,7 @@ class StreamingDotProductAttention(types.Emitting):
     k_net_state = (
         self.key_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -1460,7 +1591,7 @@ class StreamingDotProductAttention(types.Emitting):
     v_net_state = (
         self.value_network.get_initial_state(
             batch_size,
-            bt.ShapeDType(
+            types.ShapeDType(
                 (self.num_heads, self.units_per_head),
                 compute_dtype,
             ),
@@ -1501,6 +1632,7 @@ class StreamingDotProductAttention(types.Emitting):
 
   def layer_with_emits(self, x, *, training: bool, constants=None):
     source = self._get_source(constants)
+    self._ensure_initialized(x.shape[-1], source.shape[-1])
 
     queries = self._project_q(x)
     keys, values = self._project_kv(source)
@@ -1550,6 +1682,7 @@ class StreamingDotProductAttention(types.Emitting):
 
   def step_with_emits(self, x, state, *, training: bool, constants=None):
     source = self._get_source(constants)
+    self._ensure_initialized(x.shape[-1], source.shape[-1])
 
     if x.shape[1] != source.shape[1]:
       raise ValueError(
@@ -1691,267 +1824,153 @@ class StreamingDotProductAttention(types.Emitting):
     return self
 
   @classmethod
-  def from_config(cls, config):
-    return DeferredStreamingDotProductAttention(config)
-
-
-class DeferredStreamingDotProductAttention(types.Emitting):
-  """Deferred StreamingDotProductAttention.
-
-  Creates the inner attention on first use when in_features and
-  source_features are known.
-  """
-
-  def __init__(self, config):
-    super().__init__()
-    self._config = config
-    self.inner = None
-
-  def _ensure_initialized(self, in_features, source_features, backend='mlx'):
-    if self.inner is not None:
-      return
-
-    from sequence_layers.mlx import utils as mlx_utils
-    query_network = None
-    key_network = None
-    value_network = None
-    if self._config.query_network:
-      query_network = mlx_utils.make_layer(self._config.query_network, backend=backend)
-    if self._config.key_network:
-      key_network = mlx_utils.make_layer(self._config.key_network, backend=backend)
-    if self._config.value_network:
-      value_network = mlx_utils.make_layer(self._config.value_network, backend=backend)
-
-    compute_dtype = getattr(self._config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    param_dtype = init_mapping._to_mx_dtype(self._config.param_dtype)
-
-    self.inner = StreamingDotProductAttention(
-        in_features=in_features,
-        source_features=source_features,
-        source_name=self._config.source_name,
-        num_heads=self._config.num_heads,
-        units_per_head=self._config.units_per_head,
-        max_past_horizon=self._config.max_past_horizon,
-        max_future_horizon=self._config.max_future_horizon,
-        use_bias=self._config.use_bias,
-        use_query_delay_buffer=getattr(
-            self._config, 'use_query_delay_buffer', True
-        ),
-        query_scale=getattr(self._config, 'query_scale', None),
-        per_dim_scale=getattr(self._config, 'per_dim_scale', False),
-        compute_dtype=compute_dtype,
-        param_dtype=param_dtype,
-        kernel_init=init_mapping.map_initializer(
-            getattr(self._config, 'input_projection', None)
-            and getattr(
-                self._config.input_projection,
-                'q_kernel_init',
-                None,
-            )
-        ),
-        query_network=query_network,
-        key_network=key_network,
-        value_network=value_network,
-        num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
-        input_projection=getattr(self._config, 'input_projection', None),
+  def from_config(cls, config: attention_spec.StreamingDotProductAttention.Config) -> 'StreamingDotProductAttention':
+    """Create from a Linen StreamingDotProductAttention.Config."""
+    mlx_config = cls.Config(
+        source_name=config.source_name,
+        num_heads=config.num_heads,
+        units_per_head=config.units_per_head,
+        block_size=getattr(config, 'block_size', 1),
+        max_past_horizon=config.max_past_horizon,
+        max_future_horizon=config.max_future_horizon,
+        attention_probabilities_dropout_rate=config.attention_probabilities_dropout_rate,
+        broadcast_dropout_across_queries=config.broadcast_dropout_across_queries,
+        use_bias=config.use_bias,
+        use_query_delay_buffer=getattr(config, 'use_query_delay_buffer', True),
+        input_projection=_map_projection_config(config.input_projection),
+        query_network=config.query_network,
+        key_network=config.key_network,
+        value_network=config.value_network,
+        attention_logits_soft_cap=config.attention_logits_soft_cap,
+        per_dim_scale=config.per_dim_scale,
+        query_scale=config.query_scale,
+        zero_fully_masked=config.zero_fully_masked,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        num_sink_embeddings=getattr(config, 'num_sink_embeddings', 0),
+        use_sink_scalars=getattr(config, 'use_sink_scalars', False),
+        use_kv_cache_ringbuffer=getattr(config, 'use_kv_cache_ringbuffer', False),
+        name=config.name,
     )
-
-  def _get_source(self, constants):
-    if constants is None:
-      raise ValueError('Constants required for streaming attention.')
-    if self._config.source_name not in constants:
-      raise ValueError(f'Source "{self._config.source_name}" not found.')
-    return constants[self._config.source_name]
-
-  @property
-  def supports_step(self):
-    return True
-
-  @property
-  def input_latency(self):
-    mfh = self._config.max_future_horizon
-    uqdb = getattr(self._config, 'use_query_delay_buffer', True)
-    if mfh > 0 and uqdb:
-      return mfh
-    return 0
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    return (
-        self._config.num_heads,
-        self._config.units_per_head,
-    )
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    if getattr(self._config, 'compute_dtype', None):
-      return init_mapping._to_mx_dtype(self._config.compute_dtype)
-    return init_mapping._to_mx_dtype(self._config.param_dtype)
-
-  def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(input_spec.shape[-1], source.shape[-1])
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
-    )
-
-  def layer_with_emits(self, x, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(x.shape[-1], source.shape[-1])
-    return self.inner.layer_with_emits(x, training=training, constants=constants)
-
-  def step_with_emits(self, x, state, *, training: bool, constants=None):
-    source = self._get_source(constants)
-    self._ensure_initialized(x.shape[-1], source.shape[-1])
-    return self.inner.step_with_emits(x, state, training=training, constants=constants)
+    return cls(mlx_config)
 
 
-class LocalDotProductSelfAttention(DotProductSelfAttention):
+class LocalDotProductSelfAttention(
+    DotProductSelfAttention,
+    attention_spec.LocalDotProductSelfAttention[types.Sequence, types.ChannelSpec],
+):
   """Local dot-product self attention with configurable block_size."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(_SequenceLayerConfig):
+  class Config(
+      DotProductSelfAttention.Config,
+      attention_spec.LocalDotProductSelfAttention.Config,
+  ):
     """MLX-native configuration for LocalDotProductSelfAttention."""
 
-    num_heads: int
-    units_per_head: int
-    block_size: int
-    max_past_horizon: int
-    max_future_horizon: int = 0
-    attention_probabilities_dropout_rate: float = 0.0
-    broadcast_dropout_across_queries: bool = False
-    use_bias: bool = False
-    input_projection: projection_configs.QueryKeyValueProjectionConfig = (
-        dataclasses.field(
-            default_factory=projection_configs.CombinedQueryKeyValueProjection
-        )
-    )
-    query_network: _SequenceLayerConfig | None = None
-    key_network: _SequenceLayerConfig | None = None
-    value_network: _SequenceLayerConfig | None = None
-    attention_logits_soft_cap: float | None = None
-    per_dim_scale: bool = False
-    query_scale: float | None = None
-    zero_fully_masked: bool = False
-    compute_dtype: types.DType | None = None
-    param_dtype: types.DType = mx.float32
-    num_sink_embeddings: int = 0
-    use_sink_scalars: bool = False
-    use_kv_cache_ringbuffer: bool = False
-    name: str | None = None
+    block_size: int = 1
 
+    @override
     def make(self) -> 'LocalDotProductSelfAttention':
-      return LocalDotProductSelfAttention.from_config(self)
+      return LocalDotProductSelfAttention(self)
 
-  def __init__(self, *, block_size_config: int = 1, **kwargs):
-    super().__init__(**kwargs)
-    self._block_size_config = block_size_config
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      in_features: int | None = None,
+      num_heads: int | None = None,
+      units_per_head: int | None = None,
+      max_past_horizon: int | None = None,
+      max_future_horizon: int = 0,
+      num_kv_heads: int | None = None,
+      use_bias: bool = False,
+      query_scale: float | None = None,
+      per_dim_scale: bool = False,
+      compute_dtype=None,
+      param_dtype=mx.float32,
+      kernel_init=None,
+      bias_init=None,
+      query_network: types.SequenceLayer | None = None,
+      key_network: types.SequenceLayer | None = None,
+      value_network: types.SequenceLayer | None = None,
+      attention_logits_soft_cap: float | None = None,
+      num_sink_embeddings: int = 0,
+      input_projection=None,
+      block_size: int | None = None,
+      block_size_config: int | None = None,
+  ):
+    if block_size is None:
+      block_size = block_size_config if block_size_config is not None else 1
+
+    if config is None:
+      if num_heads is None or units_per_head is None or max_past_horizon is None:
+        raise ValueError(
+            'Must provide either config or num_heads, units_per_head, and'
+            ' max_past_horizon'
+        )
+      config = self.Config(
+          num_heads=num_heads,
+          units_per_head=units_per_head,
+          max_past_horizon=max_past_horizon,
+          max_future_horizon=max_future_horizon,
+          num_kv_heads=num_kv_heads,
+          use_bias=use_bias,
+          query_scale=query_scale,
+          per_dim_scale=per_dim_scale,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+          query_network=query_network,
+          key_network=key_network,
+          value_network=value_network,
+          attention_logits_soft_cap=attention_logits_soft_cap,
+          num_sink_embeddings=num_sink_embeddings,
+          input_projection=input_projection,
+          block_size=block_size,
+      )
+    super().__init__(
+        config,
+        in_features=in_features,
+        kernel_init=kernel_init,
+        bias_init=bias_init,
+    )
+    self._block_size_config = config.block_size
 
   @property
   def block_size(self):
     return self._block_size_config
 
   @classmethod
-  def from_config(cls, config):
-    return DeferredLocalDotProductSelfAttention(config)
-
-
-class DeferredLocalDotProductSelfAttention(types.Emitting):
-  """Deferred LocalDotProductSelfAttention.
-
-  Creates the inner attention on first use when in_features is known.
-  """
-
-  def __init__(self, config):
-    super().__init__()
-    self._config = config
-    self.inner = None
-
-  def _ensure_initialized(self, in_features, backend='mlx'):
-    if self.inner is not None:
-      return
-
-    from sequence_layers.mlx import utils as mlx_utils
-    query_network = None
-    key_network = None
-    value_network = None
-    if self._config.query_network:
-      query_network = mlx_utils.make_layer(self._config.query_network, backend=backend)
-    if self._config.key_network:
-      key_network = mlx_utils.make_layer(self._config.key_network, backend=backend)
-    if self._config.value_network:
-      value_network = mlx_utils.make_layer(self._config.value_network, backend=backend)
-
-    compute_dtype = getattr(self._config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = init_mapping._to_mx_dtype(compute_dtype)
-    param_dtype = init_mapping._to_mx_dtype(self._config.param_dtype)
-
-    self.inner = LocalDotProductSelfAttention(
-        in_features=in_features,
-        num_heads=self._config.num_heads,
-        units_per_head=self._config.units_per_head,
-        max_past_horizon=self._config.max_past_horizon,
-        max_future_horizon=self._config.max_future_horizon,
-        use_bias=self._config.use_bias,
-        block_size_config=self._config.block_size,
-        query_scale=getattr(self._config, 'query_scale', None),
-        per_dim_scale=getattr(self._config, 'per_dim_scale', False),
-        compute_dtype=compute_dtype,
-        param_dtype=param_dtype,
-        attention_logits_soft_cap=getattr(
-            self._config, 'attention_logits_soft_cap', None
-        ),
-        kernel_init=init_mapping.map_initializer(
-            getattr(self._config, 'input_projection', None)
-            and getattr(
-                self._config.input_projection,
-                'qkv_kernel_init',
-                None,
-            )
-        ),
-        query_network=query_network,
-        key_network=key_network,
-        value_network=value_network,
-        num_sink_embeddings=getattr(self._config, 'num_sink_embeddings', 0),
-        input_projection=getattr(self._config, 'input_projection', None),
+  def from_config(
+      cls, config: attention_spec.LocalDotProductSelfAttention.Config
+  ) -> 'LocalDotProductSelfAttention':
+    mlx_config = cls.Config(
+        num_heads=config.num_heads,
+        units_per_head=config.units_per_head,
+        max_past_horizon=config.max_past_horizon,
+        max_future_horizon=config.max_future_horizon,
+        num_kv_heads=getattr(config, 'num_kv_heads', None),
+        attention_probabilities_dropout_rate=config.attention_probabilities_dropout_rate,
+        broadcast_dropout_across_queries=config.broadcast_dropout_across_queries,
+        use_bias=config.use_bias,
+        input_projection=_map_projection_config(config.input_projection),
+        query_network=config.query_network,
+        key_network=config.key_network,
+        value_network=config.value_network,
+        attention_logits_soft_cap=config.attention_logits_soft_cap,
+        per_dim_scale=config.per_dim_scale,
+        query_scale=config.query_scale,
+        zero_fully_masked=config.zero_fully_masked,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        num_sink_embeddings=config.num_sink_embeddings,
+        use_sink_scalars=config.use_sink_scalars,
+        use_kv_cache_ringbuffer=config.use_kv_cache_ringbuffer,
+        block_size=config.block_size,
+        name=config.name,
     )
+    return cls(mlx_config)
 
-  @property
-  def supports_step(self):
-    mph = self._config.max_past_horizon
-    mfh = self._config.max_future_horizon
-    return mph >= 0 and mfh >= 0
 
-  @property
-  def block_size(self):
-    return self._config.block_size
+StreamingLocalDotProductAttention = StreamingDotProductAttention
 
-  @property
-  def input_latency(self):
-    return max(0, self._config.max_future_horizon)
-
-  def get_output_shape(self, input_shape, *, constants=None):
-    return (
-        self._config.num_heads,
-        self._config.units_per_head,
-    )
-
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    if getattr(self._config, 'compute_dtype', None):
-      return init_mapping._to_mx_dtype(self._config.compute_dtype)
-    return init_mapping._to_mx_dtype(self._config.param_dtype)
-
-  def get_initial_state(self, batch_size, input_spec, *, training: bool, constants=None):
-    self._ensure_initialized(input_spec.shape[-1])
-    return self.inner.get_initial_state(
-        batch_size, input_spec, training=training, constants=constants
-    )
-
-  def layer_with_emits(self, x, *, training: bool, constants=None):
-    self._ensure_initialized(x.shape[-1])
-    return self.inner.layer_with_emits(x, training=training, constants=constants)
-
-  def step_with_emits(self, x, state, *, training: bool, constants=None):
-    self._ensure_initialized(x.shape[-1])
-    return self.inner.step_with_emits(x, state, training=training, constants=constants)
