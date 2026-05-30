@@ -14,68 +14,23 @@
 """Normalization tests."""
 
 import itertools
+
 from absl.testing import parameterized
 import chex
 import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import combinators
 from sequence_layers.jax import dense
 from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
+from sequence_layers.specs import normalization_behaviors as spec
 
 
-class L2NormalizeTest(test_utils.SequenceLayerTest):
-
-  def test_invalid_axis(self):
-    """Normalizing over the batch or time dimension is not allowed."""
-    key = jax.random.PRNGKey(1234)
-    l = normalization.L2Normalize.Config(axis=[-1, -2]).make()
-    x = test_utils.random_sequence(2, 3, 5)
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-  @parameterized.parameters(
-      itertools.product(
-          (False, True),
-          [
-              ((2, 10, 3), [-1]),
-              ((2, 3, 5, 9), [-1]),
-              ((2, 3, 5, 9), [-2]),
-              ((2, 3, 5, 9), [-1, -2]),
-          ],
-      )
-  )
-  def test_l2_normalization(self, training, shape_axes):
-    key = jax.random.PRNGKey(1234)
-    shape, axes = shape_axes
-    epsilon = 1e-12
-    l = normalization.L2Normalize.Config(
-        axis=axes, epsilon=epsilon, name='l2_normalization'
-    ).make()
-    x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.name, 'l2_normalization')
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-
-    y = self.verify_contract(l, x, training=training)
-    self.assertEmpty(flax.core.meta.unbox(l.variables))
-
-    # Verify the train batch is normalized correctly.
-    reduce_axes = tuple(
-        a for a in range(len(shape)) if a in axes or a - len(shape) in axes
-    )
-    x_ss = np.sum(np.square(x.values), axis=reduce_axes, keepdims=True)
-
-    y_expected = types.Sequence(
-        x.values / np.sqrt(x_ss + epsilon), x.mask
-    ).mask_invalid()
-    self.assertSequencesClose(y, y_expected)
+class L2NormalizeTest(spec.L2NormalizeTest, test_utils.SequenceLayerTest):
 
   @parameterized.product(
       test_utils.standard_dtype_configs(input=True),
@@ -103,68 +58,9 @@ class L2NormalizeTest(test_utils.SequenceLayerTest):
     )
 
 
-class LayerNormalizationTest(test_utils.SequenceLayerTest):
-
-  def test_invalid_axis(self):
-    """Normalizing over the batch or time dimension is not allowed."""
-    key = jax.random.PRNGKey(1234)
-    l = normalization.LayerNormalization.Config(axis=[-1, -2]).make()
-    x = test_utils.random_sequence(2, 3, 5)
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-  @parameterized.parameters(
-      itertools.product(
-          (False, True),
-          [
-              ((2, 10, 4), [-1], [4]),
-              ((2, 3, 5, 4), [-1], [4]),
-              ((2, 3, 4, 9), [-2], [4]),
-              ((2, 3, 4, 8), [-1, -2], [4, 8]),
-          ],
-      )
-  )
-  def test_layer_normalization(self, training, shape_axes):
-    key = jax.random.PRNGKey(1234)
-    shape, axes, expected_param_shape = shape_axes
-    l = normalization.LayerNormalization.Config(
-        axis=axes, name='layer_normalization'
-    ).make()
-    x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.name, 'layer_normalization')
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-
-    y = self.verify_contract(l, x, training=training)
-    chex.assert_trees_all_equal_shapes_and_dtypes(
-        flax.core.meta.unbox(l.variables),
-        {
-            'params': {
-                'scale': jnp.zeros(expected_param_shape),
-                'bias': jnp.zeros(expected_param_shape),
-            }
-        },
-    )
-
-    # Verify the train batch is normalized correctly.
-    reduce_axes = tuple(
-        a for a in range(len(shape)) if a in axes or a - len(shape) in axes
-    )
-    mean = np.mean(y.values, axis=reduce_axes)
-    var = np.var(y.values, axis=reduce_axes)
-
-    # Invalid timesteps will have a mean and variance of zero.
-    chex.assert_trees_all_close(mean, np.zeros_like(mean), rtol=1e-6, atol=1e-6)
-    mask = y.mask.astype(jnp.float32)
-    mask = np.reshape(
-        mask, mask.shape + (1,) * (len(mean.shape) - len(mask.shape))
-    )
-    chex.assert_trees_all_close(
-        var, np.broadcast_to(mask, mean.shape), rtol=1e-4, atol=1e-4
-    )
+class LayerNormalizationTest(
+    spec.LayerNormalizationTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       test_utils.standard_dtype_configs(param=True, input=True),
@@ -214,64 +110,9 @@ class LayerNormalizationTest(test_utils.SequenceLayerTest):
     )
 
 
-class RMSNormalizationTest(test_utils.SequenceLayerTest):
-
-  def test_invalid_axis(self):
-    """Normalizing over the batch or time dimension is not allowed."""
-    key = jax.random.PRNGKey(1234)
-    l = normalization.RMSNormalization.Config(
-        axis=[-1, -2],
-    ).make()
-    x = test_utils.random_sequence(2, 3, 5)
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-  @parameterized.parameters(
-      itertools.product(
-          (False, True),
-          [
-              ((2, 10, 3), [-1], [3]),
-              ((2, 3, 5, 9), [-1], [9]),
-              ((2, 3, 5, 9), [-2], [5]),
-              ((2, 3, 5, 9), [-1, -2], [5, 9]),
-          ],
-      )
-  )
-  def test_rms_normalization(self, training, shape_axes):
-    key = jax.random.PRNGKey(1234)
-    shape, axes, expected_param_shape = shape_axes
-    epsilon = 1e-1
-    l = normalization.RMSNormalization.Config(
-        axes, epsilon=epsilon, name='rms_normalization'
-    ).make()
-    x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x)
-
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.name, 'rms_normalization')
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-
-    y = self.verify_contract(l, x, training=training)
-    chex.assert_trees_all_equal_shapes_and_dtypes(
-        flax.core.meta.unbox(l.variables),
-        {
-            'params': {
-                'scale': jnp.zeros(expected_param_shape),
-            }
-        },
-    )
-
-    # Verify the train batch is normalized correctly.
-    reduce_axes = tuple(
-        a for a in range(len(shape)) if a in axes or a - len(shape) in axes
-    )
-    x_ss = np.mean(np.square(x.values), axis=reduce_axes, keepdims=True)
-
-    y_expected = types.Sequence(
-        x.values / np.sqrt(x_ss + epsilon), x.mask
-    ).mask_invalid()
-    self.assertSequencesClose(y, y_expected)
+class RMSNormalizationTest(
+    spec.RMSNormalizationTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       test_utils.standard_dtype_configs(param=True, input=True),
@@ -314,22 +155,9 @@ class RMSNormalizationTest(test_utils.SequenceLayerTest):
     )
 
 
-class BatchNormalizationTest(test_utils.SequenceLayerTest):
-
-  def test_batch_normalization_invalid_axis(self):
-    """Normalizing over the batch or time dimension is not allowed."""
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5)
-    l = normalization.BatchNormalization.Config(axis=0).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-    l = normalization.BatchNormalization.Config(axis=1).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-    l = normalization.BatchNormalization.Config(axis=2).make()
-    self.init_and_bind_layer(key, l, x)
+class BatchNormalizationTest(
+    spec.BatchNormalizationTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.parameters(
       ((4, 10, 3), -1, [3]),
@@ -488,124 +316,9 @@ class BatchNormalizationTest(test_utils.SequenceLayerTest):
     )
 
 
-class GroupNormalizationTest(test_utils.SequenceLayerTest):
-
-  def test_invalid_axis(self):
-    """Normalizing over the batch or time dimension is not allowed."""
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5)
-    l = normalization.GroupNormalization.Config(num_groups=1, axis=0).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-    l = normalization.GroupNormalization.Config(num_groups=1, axis=1).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-    l = normalization.GroupNormalization.Config(num_groups=1, axis=2).make()
-    self.init_and_bind_layer(key, l, x)
-
-  def test_invalid_groups(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 3, 5)
-    l = normalization.GroupNormalization.Config(num_groups=2).make()
-    with self.assertRaises(ValueError):
-      self.init_and_bind_layer(key, l, x)
-
-  @parameterized.parameters(
-      itertools.product(
-          [
-              ((8, 6, 6), -1, 3, [6]),
-              ((8, 6, 5, 6), -2, 5, [5]),
-              ((8, 6, 5, 6), -2, 1, [5]),
-          ],
-          (False, True),
-      )
-  )
-  def test_group_normalization(self, shape_axes, cumulative):
-    key = jax.random.PRNGKey(1234)
-    shape, axis, num_groups, expected_param_shape = shape_axes
-    l = normalization.GroupNormalization.Config(
-        num_groups=num_groups,
-        cumulative=cumulative,
-        axis=axis,
-        name='group_normalization',
-    ).make()
-    self.assertEqual(l.block_size, 1)
-    self.assertEqual(l.output_ratio, 1)
-    self.assertEqual(l.name, 'group_normalization')
-
-    x = test_utils.random_sequence(*shape)
-    l = self.init_and_bind_layer(key, l, x, randomize_weights=False)
-    self.assertEqual(l.get_output_shape_for_sequence(x), shape[2:])
-
-    y = self.verify_contract(
-        l,
-        x,
-        training=True,
-        grad_rtol=1e-5,
-        grad_atol=1e-4,
-    )
-    y_test = self.verify_contract(
-        l,
-        x,
-        training=False,
-        grad_rtol=1e-5,
-        grad_atol=1e-4,
-    )
-
-    # Training mode doesn't affect behavior.
-    self.assertSequencesEqual(y, y_test)
-
-    unboxed_variables = flax.core.meta.unbox(l.variables)
-    chex.assert_trees_all_equal_shapes_and_dtypes(
-        unboxed_variables,
-        {
-            'params': {
-                'scale': jnp.zeros(expected_param_shape),
-                'bias': jnp.zeros(expected_param_shape),
-            }
-        },
-    )
-
-    axis = axis + x.ndim if axis < 0 else axis
-    axis_dim = y.values.shape[axis]
-    group_size = axis_dim // num_groups
-    outer_dims, _, inner_dims = np.split(y.values.shape, [axis, axis + 1])
-
-    expanded_param_shape = [1] * y.values.ndim
-    expanded_param_shape[axis] = axis_dim
-    scale = unboxed_variables['params']['scale'].reshape(expanded_param_shape)
-    bias = unboxed_variables['params']['bias'].reshape(expanded_param_shape)
-
-    y_grouped = np.reshape(
-        (y.values - bias) / scale,
-        outer_dims.tolist() + [num_groups, group_size] + inner_dims.tolist(),
-    )
-
-    if cumulative:
-      # TODO(rryan): Test cumulative mode numerically.
-      return
-
-    reduction_dims = [a for a in range(y_grouped.ndim) if a not in (0, axis)]
-
-    expanded_mask = types.Sequence(y_grouped, x.mask).expanded_mask()
-
-    # Check each group is mean zero and unit variance.
-    mean = np.mean(
-        y_grouped, axis=reduction_dims, keepdims=True, where=expanded_mask
-    )
-    var = np.var(
-        y_grouped, axis=reduction_dims, keepdims=True, where=expanded_mask
-    )
-
-    # Handle zero length sequences. The moment calculation avoids NaNs by
-    # capping divisors at 1.
-    mean = np.where(np.isnan(mean), np.zeros_like(mean), mean)
-    var = np.where(np.isnan(var), np.ones_like(var), var)
-
-    chex.assert_trees_all_close(mean, jnp.zeros_like(mean), atol=1e-6)
-    chex.assert_trees_all_close(var, jnp.ones_like(var), atol=1e-4)
+class GroupNormalizationTest(
+    spec.GroupNormalizationTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       test_utils.standard_dtype_configs(param=True, input=True),
