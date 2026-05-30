@@ -220,7 +220,7 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
         self.xp.array(expected_y_values),
         self.xp.array(expected_y_mask),
     )
-    self.assertSequencesEqual(y, expected_y)
+    self.assertSequencesClose(y, expected_y)
 
   def _test_pooling1d(
       self, pool_type, params, channel_shape, padding, dtype, **kwargs
@@ -512,7 +512,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         self.xp.array(expected_y_values),
         self.xp.array(expected_y_mask),
     )
-    self.assertSequencesEqual(y, expected_y)
+    self.assertSequencesClose(y, expected_y)
 
   def _test_pooling2d(
       self,

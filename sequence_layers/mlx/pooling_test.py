@@ -36,7 +36,7 @@ class MaxPooling1DTest(test_utils.SequenceLayerTest):
     mask = mx.ones((1, 5), dtype=mx.bool_)
     x = type(self.random_sequence(1, 5, 1))(values, mask)
     layer = pooling.MaxPooling1D(pool_size=3, padding='valid')
-    y = layer.layer(x)
+    y = layer.layer(x, training=False)
     expected = np.array([[[3.0], [5.0], [5.0]]])
     np.testing.assert_allclose(y.values, expected)
 
@@ -58,7 +58,7 @@ class MinPooling1DTest(test_utils.SequenceLayerTest):
     mask = mx.ones((1, 5), dtype=mx.bool_)
     x = type(self.random_sequence(1, 5, 1))(values, mask)
     layer = pooling.MinPooling1D(pool_size=3, padding='valid')
-    y = layer.layer(x)
+    y = layer.layer(x, training=False)
     expected = np.array([[[3.0], [1.0], [1.0]]])
     np.testing.assert_allclose(y.values, expected)
 
@@ -80,7 +80,7 @@ class AveragePooling1DTest(test_utils.SequenceLayerTest):
     mask = mx.ones((1, 5), dtype=mx.bool_)
     x = type(self.random_sequence(1, 5, 1))(values, mask)
     layer = pooling.AveragePooling1D(pool_size=3, padding='valid')
-    y = layer.layer(x)
+    y = layer.layer(x, training=False)
     expected = np.array([[[6.0], [9.0], [12.0]]])
     np.testing.assert_allclose(y.values, expected)
 
@@ -93,7 +93,7 @@ class AveragePooling1DTest(test_utils.SequenceLayerTest):
         padding='valid',
         masked_average=True,
     )
-    y = layer.layer(x)
+    y = layer.layer(x, training=False)
     expected = np.array([[[4.5]]])
     np.testing.assert_allclose(y.values, expected, atol=1e-5)
 

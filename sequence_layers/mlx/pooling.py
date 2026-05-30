@@ -15,13 +15,47 @@
 
 import dataclasses
 import fractions
+from typing import Any, override
 
 import mlx.core as mx
+import numpy as np
 
-from typing import override
 from sequence_layers.mlx import convolution as conv_utils
 from sequence_layers.mlx import types
 from sequence_layers.specs import pooling as spec
+
+
+def _is_floating(dtype):
+  return np.issubdtype(np.dtype(str(dtype).split('.')[-1]), np.floating)
+
+
+def _is_integer(dtype):
+  return np.issubdtype(np.dtype(str(dtype).split('.')[-1]), np.integer)
+
+
+def _max_pool_init_value(dtype) -> Any:
+  if _is_floating(dtype):
+    return float('-inf')
+  elif _is_integer(dtype):
+    np_dt = np.dtype(str(dtype).split('.')[-1])
+    return int(np.iinfo(np_dt).min)
+  elif str(dtype) == 'mlx.core.bool':
+    return False
+  else:
+    raise ValueError(f'Unsupported dtype for max pool: {dtype}')
+
+
+def _min_pool_init_value(dtype) -> Any:
+  if _is_floating(dtype):
+    return float('inf')
+  elif _is_integer(dtype):
+    np_dt = np.dtype(str(dtype).split('.')[-1])
+    return int(np.iinfo(np_dt).max)
+  elif str(dtype) == 'mlx.core.bool':
+    return True
+  else:
+    raise ValueError(f'Unsupported dtype for min pool: {dtype}')
+
 
 bt = types
 
@@ -43,6 +77,28 @@ _STEP_PADDINGS = frozenset({
     PaddingMode.REVERSE_CAUSAL.value,
     PaddingMode.SEMICAUSAL.value,
 })
+
+
+def _max_pool_init_value(dtype):
+  if mx.issubdtype(dtype, mx.floating):
+    return float('-inf')
+  elif mx.issubdtype(dtype, mx.integer):
+    return mx.iinfo(dtype).min
+  elif dtype == mx.bool_:
+    return False
+  else:
+    raise ValueError(f'Unsupported dtype: {dtype}')
+
+
+def _min_pool_init_value(dtype):
+  if mx.issubdtype(dtype, mx.floating):
+    return float('inf')
+  elif mx.issubdtype(dtype, mx.integer):
+    return mx.iinfo(dtype).max
+  elif dtype == mx.bool_:
+    return True
+  else:
+    raise ValueError(f'Unsupported dtype: {dtype}')
 
 
 def _reduce_window_1d(values, pool_size, stride, dilation_rate, reduce_fn):
@@ -106,14 +162,22 @@ def _reduce_window_masked_avg_1d(
   gathered = values[:, indices]
   v_sum = mx.sum(gathered, axis=2)
 
-  gathered_mask = mask[:, indices].astype(mx.float32)
-  count = mx.sum(gathered_mask, axis=2)  # [b, n]
-  count = mx.maximum(count, 1.0)
-  # Expand to broadcast over channel dims.
-  for _ in range(values.ndim - 2):
-    count = mx.expand_dims(count, axis=-1)
-
-  return v_sum / count
+  if mx.issubdtype(values.dtype, mx.integer):
+    gathered_mask = mask[:, indices].astype(mx.int32)
+    count = mx.sum(gathered_mask, axis=2)  # [b, n]
+    count = mx.maximum(count, 1)
+    # Expand to broadcast over channel dims.
+    for _ in range(values.ndim - 2):
+      count = mx.expand_dims(count, axis=-1)
+    return v_sum // count
+  else:
+    gathered_mask = mask[:, indices].astype(mx.float32)
+    count = mx.sum(gathered_mask, axis=2)  # [b, n]
+    count = mx.maximum(count, 1.0)
+    # Expand to broadcast over channel dims.
+    for _ in range(values.ndim - 2):
+      count = mx.expand_dims(count, axis=-1)
+    return v_sum / count
 
 
 def _compute_initial_state_pooling(
@@ -229,6 +293,20 @@ class _Pooling1D(
   @types.check_layer
   def layer(self, x, *, training: bool = False, constants=None):
     pad_value = self._pad_value(x.dtype)
+    L_out = conv_utils._compute_output_length(
+        x.shape[1],
+        self._pool_size,
+        self._strides,
+        self._dilation_rate,
+        self._padding,
+    )
+    if L_out == 0:
+      empty_values = mx.zeros(
+          (x.shape[0], 0, x.shape[-1]), dtype=x.values.dtype
+      )
+      empty_mask = mx.zeros((x.shape[0], 0), dtype=mx.bool_)
+      return Sequence(empty_values, empty_mask)
+
     if self._pool_size > 1:
       x = x.mask_invalid(pad_value)
 
@@ -306,7 +384,9 @@ class _Pooling1D(
     return Sequence(values, mask), state
 
 
-class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDType]):
+class MaxPooling1D(
+    _Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDType]
+):
   """1D max pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
@@ -342,7 +422,7 @@ class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDTyp
       self.config = config
     else:
       if pool_size is None:
-        raise ValueError("Must provide either config or pool_size")
+        raise ValueError('Must provide either config or pool_size')
       super().__init__(
           pool_size=pool_size,
           strides=strides,
@@ -357,7 +437,7 @@ class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDTyp
       )
 
   def _pad_value(self, dtype):
-    return float('-inf')
+    return _max_pool_init_value(dtype)
 
   def _reduce(self, gathered, axis):
     return mx.max(gathered, axis=axis)
@@ -367,7 +447,9 @@ class MaxPooling1D(_Pooling1D, spec.MaxPooling1D[types.Sequence, types.ShapeDTyp
     return cls(config)
 
 
-class MinPooling1D(_Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDType]):
+class MinPooling1D(
+    _Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDType]
+):
   """1D min pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
@@ -403,7 +485,7 @@ class MinPooling1D(_Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDTyp
       self.config = config
     else:
       if pool_size is None:
-        raise ValueError("Must provide either config or pool_size")
+        raise ValueError('Must provide either config or pool_size')
       super().__init__(
           pool_size=pool_size,
           strides=strides,
@@ -418,7 +500,7 @@ class MinPooling1D(_Pooling1D, spec.MinPooling1D[types.Sequence, types.ShapeDTyp
       )
 
   def _pad_value(self, dtype):
-    return float('inf')
+    return _min_pool_init_value(dtype)
 
   def _reduce(self, gathered, axis):
     return mx.min(gathered, axis=axis)
@@ -470,7 +552,7 @@ class AveragePooling1D(
       self.config = config
     else:
       if pool_size is None:
-        raise ValueError("Must provide either config or pool_size")
+        raise ValueError('Must provide either config or pool_size')
       super().__init__(
           pool_size=pool_size,
           strides=strides,
@@ -487,10 +569,18 @@ class AveragePooling1D(
       )
 
   def _pad_value(self, dtype):
-    return 0.0
+    if mx.issubdtype(dtype, mx.integer):
+      return 0
+    elif dtype == mx.bool_:
+      return False
+    else:
+      return 0.0
 
   def _reduce(self, gathered, axis):
-    return mx.mean(gathered, axis=axis)
+    if mx.issubdtype(gathered.dtype, mx.integer):
+      return mx.sum(gathered, axis=axis) // gathered.shape[axis]
+    else:
+      return mx.mean(gathered, axis=axis)
 
   @override
   @types.check_layer
@@ -500,8 +590,10 @@ class AveragePooling1D(
           self, x, training=training, constants=constants
       )
 
+    pad_value = self._pad_value(x.dtype)
     # Masked average: divide by count of valid elements.
-    x = x.mask_invalid(0.0)
+
+    x = x.mask_invalid(pad_value)
     pad_left, pad_right = _explicit_padding(
         self._padding,
         self._pool_size,
@@ -514,7 +606,7 @@ class AveragePooling1D(
       pad_widths = [(0, 0), (pad_left, pad_right)] + [(0, 0)] * (
           values.ndim - 2
       )
-      values = mx.pad(values, pad_widths, constant_values=0.0)
+      values = mx.pad(values, pad_widths, constant_values=pad_value)
       input_mask = mx.pad(
           input_mask,
           [(0, 0), (pad_left, pad_right)],
@@ -547,9 +639,10 @@ class AveragePooling1D(
       )
 
     # Masked average step.
+    pad_value = self._pad_value(x.dtype)
     ek = _effective_kernel_size(self._pool_size, self._dilation_rate)
     if ek > 1:
-      x = x.mask_invalid(0.0)
+      x = x.mask_invalid(pad_value)
 
     bw = _buffer_width(
         self._padding,
