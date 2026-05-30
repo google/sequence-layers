@@ -19,7 +19,14 @@ class Dense(types.Stateless, spec.Dense):
 
   @dataclasses.dataclass(frozen=True)
   class Config(spec.Dense.Config):
+    """Dense config."""
+
+    features: int
+    use_bias: bool = True
+    activation: Callable | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = mx.float32
+    name: str | None = None
 
     @override
     def make(self) -> 'Dense':
@@ -94,7 +101,15 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
 
   @dataclasses.dataclass(frozen=True)
   class Config(spec.EinsumDense.Config):
+    """MLX-native configuration for EinsumDense."""
+
+    equation: str = ''
+    output_shape: tuple[int | None, ...] = ()
+    bias_axes: str = ''
+    activation: Callable | None = None
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = mx.float32
+    name: str | None = None
 
     def __post_init__(self):
       object.__setattr__(self, 'output_shape', tuple(self.output_shape))
