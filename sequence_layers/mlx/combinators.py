@@ -3,10 +3,11 @@
 import dataclasses
 from functools import reduce
 from math import lcm
+from typing import Callable, Sequence as _Sequence, override
 
 import mlx.core as mx
 
-from sequence_layers.mlx import basic_types as bt
+from . import types as bt
 from sequence_layers.mlx import simple as simple_lib
 from sequence_layers.mlx import types
 from sequence_layers.specs import combinators as spec
@@ -181,15 +182,43 @@ class Serial(
 ):
   """Processes SequenceLayers serially."""
 
-  def __init__(self, layers: list[types.SequenceLayer]):
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Serial.Config):
+    """Configuration for Serial."""
+
+    layers: _Sequence[types.SequenceLayerConfig] = ()
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'layers', tuple(self.layers))
+
+    @override
+    def make(self) -> 'Serial':
+      return Serial.from_config(self)
+
+  def __init__(
+      self,
+      layers: list[types.SequenceLayer],
+      names: list[str | None] | None = None,
+  ):
     super().__init__()
-    self.layers = list(layers)
+    self._layer_names = []
+    for i, l in enumerate(layers):
+      name = names[i] if names and names[i] else f'layers_{i}'
+      self._layer_names.append(name)
+      setattr(self, name, l)
+      setattr(self, f'layers_{i}', l)
+
+  @property
+  def layers(self):
+    return [getattr(self, name) for name in self._layer_names]
 
   @classmethod
   def from_config(cls, config, backend='mlx'):
     from sequence_layers.mlx import utils as mlx_utils
     layers = [mlx_utils.make_layer(c, backend=backend) for c in config.layers]
-    instance = cls(layers)
+    names = [getattr(c, 'name', None) for c in config.layers]
+    instance = cls(layers, names=names)
     instance.config = config
     return instance
 
@@ -197,14 +226,32 @@ class Serial(
 class Residual(types.Emitting, spec.Residual[types.Sequence, types.ShapeDType]):
   """Residual wrapper: y = body(x) + shortcut(x)."""
 
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Residual.Config):
+    """Configuration for Residual."""
+
+    layers: _Sequence[types.SequenceLayerConfig] = ()
+    shortcut_layers: _Sequence[types.SequenceLayerConfig] | None = None
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'layers', tuple(self.layers))
+      if self.shortcut_layers is not None:
+        object.__setattr__(self, 'shortcut_layers', tuple(self.shortcut_layers))
+
+    @override
+    def make(self) -> 'Residual':
+      return Residual.from_config(self)
+
   def __init__(
       self,
       layers: list[types.SequenceLayer],
       *,
+      names: list[str | None] | None = None,
       shortcut: types.SequenceLayer | None = None,
   ):
     super().__init__()
-    self.body = Serial(layers)
+    self.body = Serial(layers, names=names)
     self.shortcut = shortcut if shortcut is not None else simple_lib.Identity(simple_lib.Identity.Config())
 
   @property
@@ -272,16 +319,18 @@ class Residual(types.Emitting, spec.Residual[types.Sequence, types.ShapeDType]):
   def from_config(cls, config, backend='mlx'):
     from sequence_layers.mlx import utils as mlx_utils
     layers = [mlx_utils.make_layer(c, backend=backend) for c in config.layers]
+    names = [getattr(c, 'name', None) for c in config.layers]
     shortcut = None
     if hasattr(config, 'shortcut_layers') and config.shortcut_layers:
       shortcut_layers = [
           mlx_utils.make_layer(c, backend=backend) for c in config.shortcut_layers
       ]
+      shortcut_names = [getattr(c, 'name', None) for c in config.shortcut_layers]
       if len(shortcut_layers) == 1:
         shortcut = shortcut_layers[0]
       else:
-        shortcut = Serial(shortcut_layers)
-    instance = cls(layers, shortcut=shortcut)
+        shortcut = Serial(shortcut_layers, names=shortcut_names)
+    instance = cls(layers, names=names, shortcut=shortcut)
     instance.config = config
     return instance
 
@@ -293,6 +342,23 @@ class Repeat(types.Emitting, spec.Repeat[types.Sequence, types.ShapeDType]):
   MLX Repeat creates N independent copies of the child layer.
   Each copy has its own parameters.
   """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Repeat.Config):
+    """Configuration for Repeat."""
+
+    layer: types.SequenceLayerConfig
+    num_repeats: int
+    remat: bool = False
+    prevent_cse: bool = False
+    policy: Callable[..., bool] | None = None
+    unroll_layer: bool = False
+    unroll_step: bool = False
+    name: str | None = None
+
+    @override
+    def make(self) -> 'Repeat':
+      return Repeat.from_config(self)
 
   def __init__(
       self,
@@ -368,6 +434,22 @@ class Parallel(types.Emitting, spec.Parallel[types.Sequence, types.ShapeDType]):
 
   All children must have equal output_ratio and block_size.
   """
+
+  @dataclasses.dataclass(frozen=True)
+  class Config(types.SequenceLayerConfig, spec.Parallel.Config):
+    """Configuration for Parallel."""
+
+    layers: _Sequence[types.SequenceLayerConfig]
+    combination: CombinationMode = CombinationMode.STACK
+    share_scope: bool | _Sequence[bool] = False
+    name: str | None = None
+
+    def __post_init__(self):
+      object.__setattr__(self, 'layers', tuple(self.layers))
+
+    @override
+    def make(self) -> 'Parallel':
+      return Parallel.from_config(self)
 
   def __init__(
       self,
