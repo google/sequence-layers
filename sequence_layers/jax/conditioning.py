@@ -16,14 +16,16 @@
 import abc
 import dataclasses
 import enum
+from typing import override
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+
 from sequence_layers.jax import dense
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-
+from sequence_layers.specs import conditioning as conditioning_spec
 
 __all__ = (
     # go/keep-sorted start
@@ -61,43 +63,11 @@ def _get_conditioning(
 
 
 class BaseConditioning(
-    types.PreservesType, types.SequenceLayer, metaclass=abc.ABCMeta
+    types.PreservesType,
+    conditioning_spec.BaseConditioning[types.Sequence, types.ChannelSpec],
+    metaclass=abc.ABCMeta,
 ):
   """Base class for conditioning types."""
-
-  @enum.unique
-  class Projection(enum.Enum):
-    """The type of projection to perform."""
-
-    # No projection.
-    IDENTITY = 1
-    # Dense projection from every element of c at a given time step, to a tensor
-    # of the same shape as x at given time step (c.channel_shape.num_elements()
-    # to x.channel_shape.num_elements()).
-    LINEAR = 2
-    # Dense projection from every element of c at a given time step, to a tensor
-    # of shape [2, x.shape...] at given time step (
-    # c.channel_shape.num_elements() to 2 * x.channel_shape.num_elements()).
-    LINEAR_AFFINE = 3
-
-  @enum.unique
-  class Combination(enum.Enum):
-    """The type of combination to perform."""
-
-    # Broadcast-add conditioning.
-    ADD = 1
-    # Broadcast-concat conditioning.
-    CONCAT = 2
-    # Affine conditioning. Requires LINEAR_AFFINE projection.
-    AFFINE = 3
-    # Affine shift conditioning. Requires LINEAR projection.
-    AFFINE_SHIFT = 4
-    # Affine scale conditioning. Requires LINEAR projection.
-    AFFINE_SCALE = 5
-    # Broadcast-multiply conditioning. Requires LINEAR or IDENTITY projection.
-    MUL = 6
-    # Broadcast-concat conditioning via prepending.
-    CONCAT_BEFORE = 7
 
   def _projected_condition_shape(
       self, input_shape: types.Shape, condition_shape: types.Shape
@@ -133,7 +103,7 @@ class BaseConditioning(
 
   @property
   @abc.abstractmethod
-  def _projection(self) -> Projection:
+  def _projection(self) -> conditioning_spec.Projection:
     pass
 
   @property
@@ -143,7 +113,7 @@ class BaseConditioning(
 
   @property
   @abc.abstractmethod
-  def _combination(self) -> Combination:
+  def _combination(self) -> conditioning_spec.Combination:
     pass
 
   @property
@@ -332,7 +302,10 @@ def _tensor_to_fake_sequence(t: jax.Array) -> types.MaskedSequence:
   )
 
 
-class Conditioning(BaseConditioning):
+class Conditioning(
+    BaseConditioning,
+    conditioning_spec.Conditioning[types.Sequence, types.ChannelSpec],
+):
   """Conditions the sequence x on a conditioning sequence c.
 
   Conditioning is done in a time-synchronized way, where each time step of x is
@@ -361,46 +334,17 @@ class Conditioning(BaseConditioning):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(conditioning_spec.Conditioning.Config):
     """Config for Conditioning."""
 
-    # The name of the conditioning sequence or array in the constants
-    # dictionary.
-    conditioning_name: str
-    # The type of projection to perform to project the conditioning before
-    # combination.
-    projection: BaseConditioning.Projection
-    # The type of combination to perform between the projected conditioning and
-    # the input sequence.
-    combination: BaseConditioning.Combination
-    # If projection is LINEAR or LINEAR_AFFINE, the channel shape to project the
-    # conditioning to. If unspecified, projects to the input sequence's channel
-    # shape.
-    projection_channel_shape: types.Shape | None = None
-    # If true, the conditioning sequence is expected to be streamed at the same
-    # block_size as the input sequence.
-    streaming: bool = False
-    # The dtype to use for layer compute.
-    compute_dtype: types.DType | None = None
-    # The dtype to use for layer parameters.
+    # Override defaults or add JAX-specific fields
     param_dtype: types.DType = jnp.float32
-    # Initializer for the kernel.
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
-    # Optional sharding for the kernel. Any axes that are present in the input
-    # spec are marked as FANIN.
     kernel_sharding: types.Sharding | None = None
-    # Initializer for the bias, if used and not gated by another config option.
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
-    # Optional sharding for the bias.
     bias_sharding: types.Sharding | None = None
-    # An offset to add to the affine scale when `combination` is AFFINE or
-    # AFFINE_SCALE. Typically 1.0 is used with parameter initializations near 0,
-    # as this is close to an identity function and allows the network to learn
-    # residual scaling adjustments more easily.
-    affine_scale_offset: complex = 1.0
-    # An optional name for the layer.
-    name: str | None = None
 
+    @override
     def make(self) -> 'Conditioning':
       return Conditioning(self, name=self.name)
 

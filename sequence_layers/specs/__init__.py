@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
 from . import combinators as _combinators
+from . import conditioning as _conditioning
 from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
@@ -43,6 +44,10 @@ class ModuleSpec(Protocol):
 
   @property
   def convolution(self) -> _convolution.ModuleSpec:
+    ...
+
+  @property
+  def conditioning(self) -> _conditioning.ModuleSpec:
     ...
 
   @property
@@ -136,6 +141,10 @@ class ModuleSpec(Protocol):
 
   @property
   def EinsumDense(self) -> type[_dense.EinsumDense]:
+    ...
+
+  @property
+  def Conditioning(self) -> type[_conditioning.Conditioning]:
     ...
 
   @property

@@ -41,6 +41,7 @@ from .combinators import Residual
 from .combinators import Serial
 from .combinators import SerialCombinatorMixin
 from .combinators import SerialModules
+from .conditioning import Conditioning
 from .convolution import Conv1D
 from .convolution import Conv1DTranspose
 from .convolution import DepthwiseConv1D
@@ -146,6 +147,7 @@ __all__ = [
     'Emits',
     'Emitting',
     'ChannelSpec',
+    'Conditioning',
     'Dense',
     'EinsumDense',
     'Conv1D',
