@@ -30,6 +30,11 @@ from . import test_utils
 from . import types
 from .dense import Dense
 from .dense import EinsumDense
+from .normalization import BatchNormalization
+from .normalization import GroupNormalization
+from .normalization import L2Normalize
+from .normalization import LayerNormalization
+from .normalization import RMSNormalization
 from .simple import Abs
 from .simple import Add
 from .simple import Cast
@@ -147,4 +152,9 @@ __all__ = [
     'CheckpointName',
     'Lambda',
     'Logging',
+    'L2Normalize',
+    'RMSNormalization',
+    'LayerNormalization',
+    'BatchNormalization',
+    'GroupNormalization',
 ]

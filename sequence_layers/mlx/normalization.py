@@ -58,7 +58,7 @@ class L2Normalize(
   @override
   @types.check_layer
   def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, constants=None
+      self, x, *, training: bool = False, constants=None
   ):
     values = x.values
     axes = _normalize_axes(self.config.axis, values.shape)
@@ -129,7 +129,7 @@ class RMSNormalization(
   @override
   @types.check_layer
   def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, constants=None
+      self, x, *, training: bool = False, constants=None
   ):
     self._ensure_initialized(x.values.shape)
 
@@ -225,7 +225,7 @@ class LayerNormalization(
   @override
   @types.check_layer
   def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, constants=None
+      self, x, *, training: bool = False, constants=None
   ):
     self._ensure_initialized(x.values.shape)
 
@@ -317,7 +317,7 @@ class BatchNormalization(
   @override
   @types.check_layer
   def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, constants=None
+      self, x, *, training: bool = False, constants=None
   ):
     self._ensure_initialized(x.values.shape)
     assert self._running_mean is not None
@@ -402,7 +402,7 @@ class GroupNormalization(
   @override
   @types.check_layer
   def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, constants=None
+      self, x, *, training: bool = False, constants=None
   ):
     self._ensure_initialized(x.values.shape)
 

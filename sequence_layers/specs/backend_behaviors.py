@@ -70,3 +70,41 @@ class BackendNNTest(test_utils_spec.SequenceLayerTest):
     y = self.nn.gelu(x)
     expected = self.xp.array(np.array([[0.0]], dtype=np.float32))
     self.assertAllEqual(y, expected)
+
+
+class BackendXPTest(test_utils_spec.SequenceLayerTest):
+  """Test behavior of backend.xp operations."""
+
+  def test_mean_simple(self):
+    x = self.xp.array(np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+    y = self.xp.mean(x)
+    self.assertAllEqual(y, self.xp.array(2.0))
+
+  def test_mean_with_axis(self):
+    x = self.xp.array(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+    y = self.xp.mean(x, axis=0)
+    self.assertAllEqual(y, self.xp.array([2.0, 3.0]))
+
+  def test_mean_with_keepdims(self):
+    x = self.xp.array(np.array([[1.0, 2.0]], dtype=np.float32))
+    y = self.xp.mean(x, axis=1, keepdims=True)
+    self.assertAllEqual(y, self.xp.array([[1.5]]))
+
+  def test_mean_with_where(self):
+    x = self.xp.array(np.array([[1.0, 2.0, 10.0]], dtype=np.float32))
+    where = self.xp.array(np.array([[True, True, False]], dtype=bool))
+    y = self.xp.mean(x, where=where)
+    self.assertAllEqual(y, self.xp.array(1.5))
+
+  def test_var_simple(self):
+    x = self.xp.array(np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+    y = self.xp.var(x)
+    expected_var = np.var(np.array([1.0, 2.0, 3.0], dtype=np.float32))
+    self.assertAllEqual(y, self.xp.array(expected_var))
+
+  def test_var_with_where(self):
+    x = self.xp.array(np.array([[1.0, 3.0, 10.0]], dtype=np.float32))
+    where = self.xp.array(np.array([[True, True, False]], dtype=bool))
+    y = self.xp.var(x, where=where)
+    expected_var = np.var(np.array([1.0, 3.0], dtype=np.float32))
+    self.assertAllEqual(y, self.xp.array(expected_var))

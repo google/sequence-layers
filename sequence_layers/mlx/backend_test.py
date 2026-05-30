@@ -14,5 +14,9 @@ class BackendNNTest(test_utils.SequenceLayerTest, spec.BackendNNTest):
   """Tests for MLX backend.nn operations."""
 
 
+class BackendXPTest(test_utils.SequenceLayerTest, spec.BackendXPTest):
+  """Tests for MLX backend.xp operations."""
+
+
 if __name__ == '__main__':
   absltest.main()
