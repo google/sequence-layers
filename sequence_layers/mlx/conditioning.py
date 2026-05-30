@@ -3,7 +3,7 @@
 import dataclasses
 import enum
 import math
-from typing import override
+from typing import Any, override
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -163,35 +163,67 @@ class Conditioning(
   Combination = conditioning_spec.Combination
 
   @dataclasses.dataclass(frozen=True)
-  class Config(conditioning_spec.Conditioning.Config):
-    # Override defaults for MLX
+  class Config(types.SequenceLayerConfig, conditioning_spec.Conditioning.Config):
+    """Configuration for Conditioning."""
+
+    conditioning_name: str
+    projection: conditioning_spec.Projection
+    combination: conditioning_spec.Combination
+    projection_channel_shape: types.Shape | None = None
+    streaming: bool = False
+    affine_scale_offset: complex = 1.0
+    compute_dtype: Any = None
     param_dtype: types.DType = mx.float32
+    name: str | None = None
 
     @override
     def make(self) -> 'Conditioning':
-      return Conditioning.from_config(self)
+      return Conditioning(self)
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      conditioning_name,
-      projection,
-      combination,
+      conditioning_name: str | None = None,
+      projection: conditioning_spec.Projection | None = None,
+      combination: conditioning_spec.Combination | None = None,
       projection_channel_shape=None,
-      streaming=False,
+      streaming: bool = False,
       affine_scale_offset=1.0,
       compute_dtype=None,
       param_dtype=mx.float32,
   ):
     super().__init__()
-    self._conditioning_name = conditioning_name
-    self._projection = projection
-    self._combination = combination
-    self._projection_channel_shape = projection_channel_shape
-    self._streaming = streaming
-    self._affine_scale_offset = affine_scale_offset
-    self._compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
+    if config is not None:
+      self.config = config
+    else:
+      if conditioning_name is None or projection is None or combination is None:
+        raise ValueError(
+            'Must provide either config or conditioning_name, projection, and combination'
+        )
+      self.config = self.Config(
+          conditioning_name=conditioning_name,
+          projection=projection,
+          combination=combination,
+          projection_channel_shape=projection_channel_shape,
+          streaming=streaming,
+          affine_scale_offset=affine_scale_offset,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
+
+    self._conditioning_name = self.config.conditioning_name
+    self._projection = self.config.projection
+    self._combination = self.config.combination
+    self._projection_channel_shape = self.config.projection_channel_shape
+    self._streaming = self.config.streaming
+    self._affine_scale_offset = self.config.affine_scale_offset
+    self._compute_dtype = (
+        _to_mx_dtype(self.config.compute_dtype)
+        if self.config.compute_dtype is not None
+        else None
+    )
+    self._param_dtype = _to_mx_dtype(self.config.param_dtype)
 
     # Projection kernel/bias (deferred until first use).
     self.kernel = None
@@ -401,7 +433,7 @@ class Conditioning(
     # Map JAX enum values to MLX enum values.
     projection = cls.Projection(config.projection.value)
     combination = cls.Combination(config.combination.value)
-    return cls(
+    mlx_config = cls.Config(
         conditioning_name=config.conditioning_name,
         projection=projection,
         combination=combination,
@@ -410,4 +442,6 @@ class Conditioning(
         affine_scale_offset=config.affine_scale_offset,
         compute_dtype=compute_dtype,
         param_dtype=_to_mx_dtype(config.param_dtype),
+        name=config.name,
     )
+    return cls(mlx_config)
