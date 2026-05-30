@@ -111,6 +111,32 @@ class ApplyRotaryPositionalEncodingTest(
       )
       self.verify_contract(layer, x, training=False)
 
+  def test_step_positions_advance(self):
+    max_wavelength = 10000.0
+    config = self.sl.ApplyRotaryPositionalEncoding.Config(
+        max_wavelength=max_wavelength,
+        only_advance_position_for_valid_timesteps=True,
+    )
+    layer = self.make_layer(config)
+    spec = self.sl.types.ShapeDType((8,), mx.float32)
+    state = layer.get_initial_state(1, spec, training=False)
+
+    # Step with valid mask.
+    x1 = self.sl.types.MaskedSequence(
+        mx.ones((1, 1, 8)),
+        mx.ones((1, 1), dtype=mx.bool_),
+    )
+    _, state = layer.step(x1, state, training=False)
+    self.assertEqual(int(state[0, 0]), 0)
+
+    # Step with invalid mask.
+    x2 = self.sl.types.MaskedSequence(
+        mx.ones((1, 1, 8)),
+        mx.zeros((1, 1), dtype=mx.bool_),
+    )
+    _, state = layer.step(x2, state, training=False)
+    self.assertEqual(int(state[0, 0]), 0)
+
 
 if __name__ == '__main__':
   parameterized.absltest.main()

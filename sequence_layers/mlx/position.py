@@ -15,13 +15,13 @@
 
 import dataclasses
 import math
-from typing import override
+from typing import Any, Callable, override
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from sequence_layers.mlx import basic_types as bt
+from . import types as bt
 from sequence_layers.mlx import types
 from sequence_layers.specs import position as position_spec
 
@@ -83,15 +83,25 @@ class AddTimingSignal(
   """Adds sinusoids at varying frequencies to the input channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(position_spec.AddTimingSignal.Config):
+  class Config(types.SequenceLayerConfig, position_spec.AddTimingSignal.Config):
+    """Configuration for AddTimingSignal."""
+
+    min_timescale: float = 1.0
+    max_timescale: float = 1.0e4
+    trainable_scale: bool = False
+    axes: int | tuple[int, ...] | None = None
+    sharding: Any = None
     param_dtype: types.DType = mx.float32
+    only_advance_position_for_valid_timesteps: bool = True
+    name: str | None = None
 
     @override
     def make(self) -> 'AddTimingSignal':
-      return AddTimingSignal.from_config(self)
+      return AddTimingSignal(self)
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
       min_timescale: float = 1.0,
       max_timescale: float = 1.0e4,
@@ -101,14 +111,26 @@ class AddTimingSignal(
       param_dtype: types.DType = mx.float32,
   ):
     super().__init__()
-    self.min_timescale = min_timescale
-    self.max_timescale = max_timescale
-    self.trainable_scale = trainable_scale
-    self.axes = axes
+    if config is not None:
+      self.config = config
+    else:
+      self.config = self.Config(
+          min_timescale=min_timescale,
+          max_timescale=max_timescale,
+          trainable_scale=trainable_scale,
+          axes=axes,
+          only_advance_position_for_valid_timesteps=only_advance_position_for_valid_timesteps,
+          param_dtype=param_dtype,
+      )
+
+    self.min_timescale = self.config.min_timescale
+    self.max_timescale = self.config.max_timescale
+    self.trainable_scale = self.config.trainable_scale
+    self.axes = self.config.axes
     self.only_advance_position_for_valid_timesteps = (
-        only_advance_position_for_valid_timesteps
+        self.config.only_advance_position_for_valid_timesteps
     )
-    self.param_dtype = param_dtype
+    self.param_dtype = self.config.param_dtype
 
     if self.trainable_scale:
       self.scale = mx.ones((), dtype=self.param_dtype)
@@ -198,16 +220,16 @@ class AddTimingSignal(
   def from_config(cls, config):
     from sequence_layers.mlx.init_mapping import _to_mx_dtype
 
-    layer = cls(
+    mlx_config = cls.Config(
         min_timescale=config.min_timescale,
         max_timescale=config.max_timescale,
         trainable_scale=config.trainable_scale,
         axes=config.axes,
         only_advance_position_for_valid_timesteps=config.only_advance_position_for_valid_timesteps,
         param_dtype=_to_mx_dtype(config.param_dtype),
+        name=config.name,
     )
-    layer.config = config
-    return layer
+    return cls(mlx_config)
 
 
 class ApplyRotaryPositionalEncoding(
@@ -221,29 +243,54 @@ class ApplyRotaryPositionalEncoding(
   """Applies Rotary Positional Encodings (RoPE) to the sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(position_spec.ApplyRotaryPositionalEncoding.Config):
+  class Config(
+      types.SequenceLayerConfig,
+      position_spec.ApplyRotaryPositionalEncoding.Config,
+  ):
+    """Configuration for ApplyRotaryPositionalEncoding."""
+
+    max_wavelength: float
+    axis: int = -1
+    only_advance_position_for_valid_timesteps: bool = True
+    positions_in_at_least_fp32: bool = True
+    positions_name: str | None = None
+    name: str | None = None
 
     @override
     def make(self) -> 'ApplyRotaryPositionalEncoding':
-      return ApplyRotaryPositionalEncoding.from_config(self)
+      return ApplyRotaryPositionalEncoding(self)
 
   def __init__(
       self,
+      config: Config | None = None,
       *,
-      max_wavelength: float,
+      max_wavelength: float | None = None,
       axis: int = -1,
       only_advance_position_for_valid_timesteps: bool = True,
       positions_in_at_least_fp32: bool = True,
       positions_name: str | None = None,
   ):
     super().__init__()
-    self.max_wavelength = max_wavelength
-    self._axis = axis
+    if config is not None:
+      self.config = config
+    else:
+      if max_wavelength is None:
+        raise ValueError('Must provide either config or max_wavelength')
+      self.config = self.Config(
+          max_wavelength=max_wavelength,
+          axis=axis,
+          only_advance_position_for_valid_timesteps=only_advance_position_for_valid_timesteps,
+          positions_in_at_least_fp32=positions_in_at_least_fp32,
+          positions_name=positions_name,
+      )
+
+    self.max_wavelength = self.config.max_wavelength
+    self._axis = self.config.axis
     self.only_advance_position_for_valid_timesteps = (
-        only_advance_position_for_valid_timesteps
+        self.config.only_advance_position_for_valid_timesteps
     )
-    self.positions_in_at_least_fp32 = positions_in_at_least_fp32
-    self.positions_name = positions_name
+    self.positions_in_at_least_fp32 = self.config.positions_in_at_least_fp32
+    self.positions_name = self.config.positions_name
 
   def _validate(self):
     if self.only_advance_position_for_valid_timesteps and self.positions_name:
@@ -253,6 +300,7 @@ class ApplyRotaryPositionalEncoding(
       )
 
   def _check_inputs(self, input_spec):
+    self._validate()
     if input_spec.dtype not in (
         mx.float16,
         mx.bfloat16,
@@ -281,38 +329,82 @@ class ApplyRotaryPositionalEncoding(
   def get_output_dtype(self, input_dtype, *, constants=None):
     return input_dtype
 
-  def _apply_rope(self, x, positions):
-    """Applies rotary position encoding to x with given positions tensor."""
+  def _apply_rope(self, x, offset_or_positions):
+    """Applies rotary position encoding to x.
+
+    If rotation axis is the last dimension and we are using a simple temporal offset
+    (i.e. not custom positions from positions_name), we leverage the highly optimized
+    `mx.fast.rope` C++ operation. Otherwise, we fall back to manual trig calculation.
+    """
     axis = self._axis + x.ndim if self._axis < 0 else self._axis
-    assert axis > 1
 
-    channel_ndim = x.ndim - 2
-    axis_dim = x.shape[axis]
-    assert axis_dim % 2 == 0
-
-    freq_exponents = (
-        2.0 * mx.arange(axis_dim // 2).astype(mx.float32) / axis_dim
+    is_custom_positions = (
+        hasattr(offset_or_positions, 'ndim') and offset_or_positions.ndim >= 2
     )
-    timescale = self.max_wavelength**freq_exponents
 
-    broadcast_shape = [1] * x.ndim
-    broadcast_shape[axis] = axis_dim // 2
+    if is_custom_positions or axis != x.ndim - 1:
+      # Manual fallback
+      channel_ndim = x.ndim - 2
+      axis_dim = x.shape[axis]
+      assert axis_dim % 2 == 0
 
-    # Compute position angles
-    positions_f = positions.astype(mx.float32)
-    radians = positions_f.reshape(
-        positions_f.shape + (1,) * channel_ndim
-    ) / timescale.reshape(broadcast_shape)
-    sin_r = mx.sin(radians)
-    cos_r = mx.cos(radians)
+      freq_exponents = (
+          2.0 * mx.arange(axis_dim // 2).astype(mx.float32) / axis_dim
+      )
+      timescale = self.max_wavelength**freq_exponents
 
-    splits = mx.split(x, 2, axis=axis)
-    x1, x2 = splits[0], splits[1]
-    result = mx.concatenate(
-        [x1 * cos_r - x2 * sin_r, x2 * cos_r + x1 * sin_r],
-        axis=axis,
+      broadcast_shape = [1] * x.ndim
+      broadcast_shape[axis] = axis_dim // 2
+
+      if is_custom_positions:
+        positions = offset_or_positions
+      else:
+        offset = offset_or_positions
+        positions = mx.arange(x.shape[1])[None, :] + offset[:, None]
+
+      positions_f = positions.astype(mx.float32)
+      radians = positions_f.reshape(
+          positions_f.shape + (1,) * channel_ndim
+      ) / timescale.reshape(broadcast_shape)
+      sin_r = mx.sin(radians)
+      cos_r = mx.cos(radians)
+
+      splits = mx.split(x, 2, axis=axis)
+      x1, x2 = splits[0], splits[1]
+      result = mx.concatenate(
+          [x1 * cos_r - x2 * sin_r, x2 * cos_r + x1 * sin_r],
+          axis=axis,
+      )
+      return result.astype(x.dtype)
+
+    # Optimized mx.fast.rope path
+    offset = offset_or_positions
+    original_axes = list(range(x.ndim))
+    if x.ndim >= 3:
+      transpose_axes = original_axes.copy()
+      transpose_axes.pop(1)
+      transpose_axes.insert(-1, 1)
+      x_t = mx.transpose(x, transpose_axes)
+    else:
+      x_t = x
+
+    y_t = mx.fast.rope(
+        x_t,
+        dims=x.shape[-1],
+        traditional=False,
+        base=self.max_wavelength,
+        scale=1.0,
+        offset=offset,
     )
-    return result.astype(x.dtype)
+
+    if x.ndim >= 3:
+      inv_axes = original_axes.copy()
+      inv_axes.pop(-2)
+      inv_axes.insert(1, x.ndim - 2)
+      y = mx.transpose(y_t, inv_axes)
+    else:
+      y = y_t
+    return y.astype(x.dtype)
 
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
@@ -328,34 +420,34 @@ class ApplyRotaryPositionalEncoding(
 
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
-    self._validate()
     self._check_inputs(x.channel_spec)
     x_time = x.shape[1]
 
     if self.positions_name:
-      # Read from constants dictionary if specified
       if constants is None or self.positions_name not in constants:
         raise ValueError(
             f'Expected constants dict containing {self.positions_name!r}'
         )
       positions_const = constants[self.positions_name]
       if isinstance(positions_const, (Sequence, MaskedSequence)):
-        positions = positions_const.values
+        offset_or_positions = positions_const.values
       else:
-        positions = positions_const
+        offset_or_positions = positions_const
     elif self.only_advance_position_for_valid_timesteps:
+      offset = mx.maximum(0, state[:, 0] + 1)
       positions = state + mx.cumsum(x.mask.astype(mx.int32), axis=1)
       state = positions[:, -1:]
+      offset_or_positions = offset
     else:
-      positions = state + mx.arange(x_time, dtype=mx.int32)
+      offset = state[:, 0]
       state = state + x_time
+      offset_or_positions = offset
 
-    y = x.apply_values(self._apply_rope, positions)
+    y = x.apply_values(self._apply_rope, offset_or_positions)
     return y, state
 
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
-    self._validate()
     self._check_inputs(x.channel_spec)
     if self.positions_name:
       if constants is None or self.positions_name not in constants:
@@ -364,18 +456,27 @@ class ApplyRotaryPositionalEncoding(
         )
       positions_const = constants[self.positions_name]
       if isinstance(positions_const, (Sequence, MaskedSequence)):
-        positions = positions_const.values
+        offset_or_positions = positions_const.values
       else:
-        positions = positions_const
+        offset_or_positions = positions_const
     elif self.only_advance_position_for_valid_timesteps:
-      positions = mx.maximum(0, mx.cumsum(x.mask.astype(mx.int32), axis=1) - 1)
+      offset_or_positions = mx.maximum(
+          0, mx.cumsum(x.mask.astype(mx.int32), axis=1) - 1
+      )
     else:
-      positions = mx.arange(x.shape[1], dtype=mx.int32)[None, :]
-    return x.apply_values(self._apply_rope, positions)
+      offset_or_positions = mx.zeros((x.shape[0],), dtype=mx.int32)
+
+    y = x.apply_values(self._apply_rope, offset_or_positions)
+    return y
+
+  @property
+  @override
+  def receptive_field(self) -> types.ReceptiveField:
+    return (0, 0)
 
   @classmethod
   def from_config(cls, config):
-    layer = cls(
+    mlx_config = cls.Config(
         max_wavelength=config.max_wavelength,
         axis=config.axis,
         only_advance_position_for_valid_timesteps=(
@@ -383,6 +484,6 @@ class ApplyRotaryPositionalEncoding(
         ),
         positions_in_at_least_fp32=config.positions_in_at_least_fp32,
         positions_name=config.positions_name,
+        name=config.name,
     )
-    layer.config = config
-    return layer
+    return cls(mlx_config)
