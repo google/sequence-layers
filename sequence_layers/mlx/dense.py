@@ -18,26 +18,23 @@ class Dense(types.Stateless, spec.Dense):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig, spec.Dense.Config):
-    """Dense config."""
-
-    features: int
-    use_bias: bool = True
-    activation: Callable | None = None
-    compute_dtype: types.DType | None = None
+  class Config(spec.Dense.Config):
     param_dtype: types.DType = mx.float32
-    name: str | None = None
 
     @override
     def make(self) -> 'Dense':
-      return Dense(self)
+      return Dense.from_config(self)
 
-  def __init__(self, config: Config):
+  @classmethod
+  def from_config(cls, config: spec.Dense.Config) -> 'Dense':
+    return cls(config)
+
+  def __init__(self, config: spec.Dense.Config):
     """Initialize Dense."""
     super().__init__()
     self.config = config
     self._compute_dtype = _to_mx_dtype(config.compute_dtype)
-    self._param_dtype = _to_mx_dtype(config.param_dtype)
+    self._param_dtype = _to_mx_dtype(config.param_dtype) or mx.float32
     self._linear = None
 
   @property
@@ -96,30 +93,26 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
   """Dense layer using Einstein summation notation."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig, spec.EinsumDense.Config):
-    """MLX-native configuration for EinsumDense."""
-
-    equation: str = ''
-    output_shape: tuple[int | None, ...] = ()
-    bias_axes: str = ''
-    activation: Callable | None = None
-    compute_dtype: types.DType | None = None
+  class Config(spec.EinsumDense.Config):
     param_dtype: types.DType = mx.float32
-    name: str | None = None
 
     def __post_init__(self):
       object.__setattr__(self, 'output_shape', tuple(self.output_shape))
 
     @override
     def make(self) -> 'EinsumDense':
-      return EinsumDense(self)
+      return EinsumDense.from_config(self)
 
-  def __init__(self, config: Config):
+  @classmethod
+  def from_config(cls, config: spec.EinsumDense.Config) -> 'EinsumDense':
+    return cls(config)
+
+  def __init__(self, config: spec.EinsumDense.Config):
     """Initialize EinsumDense."""
     super().__init__()
     self.config = config
     self._compute_dtype = _to_mx_dtype(config.compute_dtype)
-    self._param_dtype = _to_mx_dtype(config.param_dtype)
+    self._param_dtype = _to_mx_dtype(config.param_dtype) or mx.float32
     self.kernel = None
     self.bias = None
     self._initialized = False
