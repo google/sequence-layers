@@ -60,6 +60,8 @@ from .normalization import RMSNormalization
 from .pooling import AveragePooling1D
 from .pooling import MaxPooling1D
 from .pooling import MinPooling1D
+from .position import AddTimingSignal
+from .position import ApplyRotaryPositionalEncoding
 from .projection_configs import CombinedQueryKeyValueProjection
 from .projection_configs import QueryAndKeyValueProjection
 from .projection_configs import QueryAndSharedKeyValueProjection
@@ -176,6 +178,8 @@ __all__ = [
     'QueryAndKeyValueProjection',
     'QueryAndSharedKeyValueProjection',
     'SeparateQueryKeyValueProjection',
+    'AddTimingSignal',
+    'ApplyRotaryPositionalEncoding',
     'Identity',
     'Relu',
     'Gelu',

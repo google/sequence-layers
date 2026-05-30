@@ -11,6 +11,7 @@ from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
 from . import pooling as _pooling
+from . import position as _position
 from . import simple as _simple
 from . import types as _types
 
@@ -48,6 +49,10 @@ class ModuleSpec(Protocol):
 
   @property
   def conditioning(self) -> _conditioning.ModuleSpec:
+    ...
+
+  @property
+  def position(self) -> _position.ModuleSpec:
     ...
 
   @property
@@ -145,6 +150,16 @@ class ModuleSpec(Protocol):
 
   @property
   def Conditioning(self) -> type[_conditioning.Conditioning]:
+    ...
+
+  @property
+  def AddTimingSignal(self) -> type[_position.AddTimingSignal]:
+    ...
+
+  @property
+  def ApplyRotaryPositionalEncoding(
+      self,
+  ) -> type[_position.ApplyRotaryPositionalEncoding]:
     ...
 
   @property

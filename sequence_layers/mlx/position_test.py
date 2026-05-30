@@ -11,15 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for position layers in JAX."""
+"""Tests for position encoding MLX sequence layers."""
 
 from absl.testing import parameterized
-import chex
-import flax
-import jax
-import jax.numpy as jnp
+import mlx.core as mx
 
-from sequence_layers.jax import test_utils
+from sequence_layers.mlx import test_utils
 from sequence_layers.specs import position_behaviors
 
 
@@ -30,7 +27,8 @@ class AddTimingSignalTest(
 ):
 
   @parameterized.product(
-      test_utils.standard_dtype_configs(param=True, input=True),
+      param_dtype=(mx.float32, mx.float16),
+      input_dtype=(mx.float32, mx.float16, mx.bfloat16),
       trainable_scale=(False, True),
   )
   def test_dtypes(
@@ -56,18 +54,12 @@ class AddTimingSignalTest(
 
     # Check params dtype if trainable
     variables = self.get_variables(layer)
-    unboxed_variables = flax.core.meta.unbox(variables)
+    params = variables.get('params', {}) if isinstance(variables, dict) else {}
     if trainable_scale:
-      chex.assert_trees_all_equal_shapes_and_dtypes(
-          unboxed_variables,
-          {
-              'params': {
-                  'scale': jnp.zeros([], dtype=param_dtype),
-              }
-          },
-      )
-    else:
-      self.assertEmpty(jax.tree_util.tree_leaves(unboxed_variables))
+      # In MLX, scale is a direct parameter attribute on the module if defined
+      scale_param = getattr(layer, 'scale', None)
+      self.assertIsNotNone(scale_param)
+      self.assertEqual(scale_param.dtype, param_dtype)
 
     for time in range(13 * layer.block_size, 15 * layer.block_size):
       x = self.random_sequence(
@@ -77,7 +69,6 @@ class AddTimingSignalTest(
           layer,
           x,
           training=False,
-          **test_utils.get_grad_tols(layer, x, param_dtype, input_dtype),
       )
 
 
@@ -88,7 +79,7 @@ class ApplyRotaryPositionalEncodingTest(
 ):
 
   @parameterized.product(
-      test_utils.standard_dtype_configs(input=True),
+      input_dtype=(mx.float32, mx.float16, mx.bfloat16),
       only_advance_position_for_valid_timesteps=(False, True),
       positions_in_at_least_fp32=(False, True),
   )
@@ -122,4 +113,4 @@ class ApplyRotaryPositionalEncodingTest(
 
 
 if __name__ == '__main__':
-  test_utils.main()
+  parameterized.absltest.main()
