@@ -28,6 +28,7 @@ from . import dense
 from . import simple
 from . import test_utils
 from . import types
+from . import types as basic_types
 from .convolution import Conv1D
 from .convolution import Conv1DTranspose
 from .convolution import DepthwiseConv1D
@@ -43,6 +44,9 @@ from .normalization import GroupNormalization
 from .normalization import L2Normalize
 from .normalization import LayerNormalization
 from .normalization import RMSNormalization
+from .pooling import AveragePooling1D
+from .pooling import MaxPooling1D
+from .pooling import MinPooling1D
 from .simple import Abs
 from .simple import Add
 from .simple import Cast
@@ -99,6 +103,7 @@ from .types import Stateless
 from .types import StatelessPointwise
 
 __all__ = [
+    'basic_types',
     'dense',
     'backend',
     'simple',
@@ -135,6 +140,9 @@ __all__ = [
     'AveragePooling2D',
     'Upsample2D',
     'ParallelChannels',
+    'MaxPooling1D',
+    'MinPooling1D',
+    'AveragePooling1D',
     'Identity',
     'Relu',
     'Gelu',
