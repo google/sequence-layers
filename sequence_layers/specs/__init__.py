@@ -5,6 +5,7 @@
 from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
+from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
 from . import simple as _simple
@@ -32,6 +33,10 @@ class ModuleSpec(Protocol):
 
   @property
   def simple(self) -> _simple.ModuleSpec:
+    ...
+
+  @property
+  def convolution(self) -> _convolution.ModuleSpec:
     ...
 
   @property
@@ -125,6 +130,26 @@ class ModuleSpec(Protocol):
 
   @property
   def EinsumDense(self) -> type[_dense.EinsumDense]:
+    ...
+
+  @property
+  def Conv1D(self) -> type[_convolution.Conv1D]:
+    ...
+
+  @property
+  def DepthwiseConv1D(self) -> type[_convolution.DepthwiseConv1D]:
+    ...
+
+  @property
+  def Conv1DTranspose(self) -> type[_convolution.Conv1DTranspose]:
+    ...
+
+  @property
+  def Conv2D(self) -> type[_convolution.Conv2D]:
+    ...
+
+  @property
+  def Conv2DTranspose(self) -> type[_convolution.Conv2DTranspose]:
     ...
 
   @property

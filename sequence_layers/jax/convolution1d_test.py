@@ -22,6 +22,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+import tensorflow as tf
+
 from sequence_layers.jax import combinators
 from sequence_layers.jax import convolution
 from sequence_layers.jax import dsp
@@ -29,7 +31,7 @@ from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
-import tensorflow as tf
+from sequence_layers.specs import convolution_behaviors as spec
 
 
 class IdentityArrayConstraint(nn.Module):
@@ -638,7 +640,7 @@ class LatencyTest(test_utils.SequenceLayerTest):
     self.verify_contract(l, x, training=False)
 
 
-class Conv1DTest(test_utils.SequenceLayerTest):
+class Conv1DTest(spec.Conv1DTest, test_utils.SequenceLayerTest):
 
   @parameterized.product(
       params=[
@@ -866,6 +868,11 @@ class Conv1DTest(test_utils.SequenceLayerTest):
         expected_variables,
     )
     self.verify_contract(l, x, training=False)
+
+
+class DepthwiseConv1DTest(
+    spec.DepthwiseConv1DTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       params=[
@@ -1169,7 +1176,9 @@ class Conv1DTest(test_utils.SequenceLayerTest):
       self.assertSequencesClose(y, y_tf)
 
 
-class Conv1DTransposeTest(test_utils.SequenceLayerTest):
+class Conv1DTransposeTest(
+    spec.Conv1DTransposeTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       params=[

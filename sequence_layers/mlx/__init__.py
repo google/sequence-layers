@@ -28,6 +28,11 @@ from . import dense
 from . import simple
 from . import test_utils
 from . import types
+from .convolution import Conv1D
+from .convolution import Conv1DTranspose
+from .convolution import DepthwiseConv1D
+from .convolution2d import Conv2D
+from .convolution2d import Conv2DTranspose
 from .dense import Dense
 from .dense import EinsumDense
 from .normalization import BatchNormalization
@@ -119,6 +124,11 @@ __all__ = [
     'ChannelSpec',
     'Dense',
     'EinsumDense',
+    'Conv1D',
+    'DepthwiseConv1D',
+    'Conv1DTranspose',
+    'Conv2D',
+    'Conv2DTranspose',
     'Identity',
     'Relu',
     'Gelu',
