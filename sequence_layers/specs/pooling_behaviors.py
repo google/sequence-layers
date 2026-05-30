@@ -156,14 +156,15 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
   def test_masked_average(self, masked_average):
     pool_size, stride, dilation_rate = 3, 3, 1
     padding = 'reverse_causal'
-    l = self.sl.AveragePooling1D.Config(
+    config = self.sl.AveragePooling1D.Config(
         pool_size=pool_size,
         strides=stride,
         dilation_rate=dilation_rate,
         padding=padding,
         name='pool_1d',
         masked_average=masked_average,
-    ).make()
+    )
+    l = self.make_layer(config)
 
     x_values = np.array(
         [
@@ -242,34 +243,36 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
 
     match pool_type:
       case 'min':
-        l = self.sl.MinPooling1D.Config(
+        config = self.sl.MinPooling1D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
             padding=padding,
             name='pool_1d',
             **kwargs,
-        ).make()
+        )
       case 'max':
-        l = self.sl.MaxPooling1D.Config(
+        config = self.sl.MaxPooling1D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
             padding=padding,
             name='pool_1d',
             **kwargs,
-        ).make()
+        )
       case 'average':
-        l = self.sl.AveragePooling1D.Config(
+        config = self.sl.AveragePooling1D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
             padding=padding,
             name='pool_1d',
             **kwargs,
-        ).make()
+        )
       case _:
         raise NotImplementedError()
+
+    l = self.make_layer(config)
 
     self.assertEqual(l.block_size, stride)
     self.assertEqual(1 / l.output_ratio, stride)
@@ -454,7 +457,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
     pool_size, stride, dilation_rate = (3, 2), (3, 2), (1, 1)
     time_padding = 'reverse_causal'
     spatial_padding = 'reverse_causal'
-    l = self.sl.AveragePooling2D.Config(
+    config = self.sl.AveragePooling2D.Config(
         pool_size=pool_size,
         strides=stride,
         dilation_rate=dilation_rate,
@@ -462,7 +465,8 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         spatial_padding=spatial_padding,
         name='pool_2d',
         masked_average=masked_average,
-    ).make()
+    )
+    l = self.make_layer(config)
 
     x_values = np.array(
         [
@@ -554,7 +558,7 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
 
     match pool_type:
       case 'min':
-        l = self.sl.MinPooling2D.Config(
+        config = self.sl.MinPooling2D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -562,9 +566,9 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             spatial_padding=spatial_padding,
             name='pool_2d',
             **kwargs,
-        ).make()
+        )
       case 'max':
-        l = self.sl.MaxPooling2D.Config(
+        config = self.sl.MaxPooling2D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -572,9 +576,9 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             spatial_padding=spatial_padding,
             name='pool_2d',
             **kwargs,
-        ).make()
+        )
       case 'average':
-        l = self.sl.AveragePooling2D.Config(
+        config = self.sl.AveragePooling2D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -582,9 +586,11 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
             spatial_padding=spatial_padding,
             name='pool_2d',
             **kwargs,
-        ).make()
+        )
       case _:
         raise NotImplementedError()
+
+    l = self.make_layer(config)
 
     self.assertEqual(l.block_size, stride)
     self.assertEqual(1 / l.output_ratio, stride)
@@ -774,7 +780,7 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
 
     match pool_type:
       case 'min':
-        l = self.sl.MinPooling3D.Config(
+        config = self.sl.MinPooling3D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -782,9 +788,9 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             spatial_padding=(spatial_padding, spatial_padding),
             name='pool_3d',
             **kwargs,
-        ).make()
+        )
       case 'max':
-        l = self.sl.MaxPooling3D.Config(
+        config = self.sl.MaxPooling3D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -792,9 +798,9 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             spatial_padding=(spatial_padding, spatial_padding),
             name='pool_3d',
             **kwargs,
-        ).make()
+        )
       case 'average':
-        l = self.sl.AveragePooling3D.Config(
+        config = self.sl.AveragePooling3D.Config(
             pool_size=pool_size,
             strides=stride,
             dilation_rate=dilation_rate,
@@ -802,9 +808,11 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
             spatial_padding=(spatial_padding, spatial_padding),
             name='pool_3d',
             **kwargs,
-        ).make()
+        )
       case _:
         raise NotImplementedError()
+
+    l = self.make_layer(config)
 
     self.assertEqual(l.block_size, stride)
     self.assertEqual(1 / l.output_ratio, stride)

@@ -5,6 +5,7 @@
 from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
+from . import combinators as _combinators
 from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
@@ -34,6 +35,10 @@ class ModuleSpec(Protocol):
 
   @property
   def simple(self) -> _simple.ModuleSpec:
+    ...
+
+  @property
+  def combinators(self) -> _combinators.ModuleSpec:
     ...
 
   @property
@@ -207,4 +212,28 @@ class ModuleSpec(Protocol):
 
   @property
   def GroupNormalization(self) -> type[_normalization.GroupNormalization]:
+    ...
+
+  @property
+  def CombinationMode(self) -> type[_combinators.CombinationMode]:
+    ...
+
+  @property
+  def Serial(self) -> type[_combinators.Serial]:
+    ...
+
+  @property
+  def SerialModules(self) -> type[_combinators.SerialModules]:
+    ...
+
+  @property
+  def Residual(self) -> type[_combinators.Residual]:
+    ...
+
+  @property
+  def Repeat(self) -> type[_combinators.Repeat]:
+    ...
+
+  @property
+  def Parallel(self) -> type[_combinators.Parallel]:
     ...

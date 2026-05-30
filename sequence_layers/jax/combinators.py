@@ -17,7 +17,7 @@ import dataclasses
 import fractions
 import functools
 import math
-from typing import Callable, Sequence as TypingSequence, TypeVar
+from typing import Callable, override, Sequence as TypingSequence, TypeVar
 
 import flax
 import flax.linen as nn
@@ -28,9 +28,10 @@ from sequence_layers.jax import meta
 from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+from sequence_layers.specs import combinators as spec
 
 
-CombinationMode = utils.CombinationMode
+CombinationMode = spec.CombinationMode
 
 __all__ = (
     # go/keep-sorted start
@@ -312,11 +313,15 @@ class SerialCombinatorMixin:
     return x, emits
 
 
-class Serial(SerialCombinatorMixin, types.Emitting):
+class Serial(
+    SerialCombinatorMixin,
+    types.Emitting,
+    spec.Serial[types.Sequence, types.ShapeDType],
+):
   """A combinator that processes SequenceLayers serially."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Serial.Config):
     """Configuration for Serial."""
 
     layers: TypingSequence[types.SequenceLayerConfig]
@@ -344,7 +349,11 @@ class Serial(SerialCombinatorMixin, types.Emitting):
       utils.setup_shared_scope(self, self.layers, self.config.share_scope)
 
 
-class SerialModules(SerialCombinatorMixin, types.Emitting):
+class SerialModules(
+    SerialCombinatorMixin,
+    types.Emitting,
+    spec.SerialModules[types.Sequence, types.ShapeDType],
+):
   """A Serial combinator that processes pre-existing SequenceLayers serially.
 
   Passing pre-constructed modules into another nn.Module can have unintended
@@ -375,18 +384,18 @@ class SerialModules(SerialCombinatorMixin, types.Emitting):
   layers: tuple[types.SequenceLayer, ...]
 
 
-class Parallel(types.Emitting):
+class Parallel(types.Emitting, spec.Parallel[types.Sequence, types.ShapeDType]):
   """Applies a sequence of layers in parallel.
 
   Outputs are broadcasted and combined together.
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Parallel.Config):
     """Config for Parallel."""
 
     layers: TypingSequence[types.SequenceLayerConfig]
-    combination: utils.CombinationMode = utils.CombinationMode.STACK
+    combination: CombinationMode = CombinationMode.STACK
     # If true, a list of boolean values for each layer in `layers` indicating
     # whether to share this Serial's Flax parameter scope with that layer. This
     # is useful to avoid representing the Serial layer in the parameter tree. If
@@ -776,7 +785,11 @@ class ParallelChannels(WrapperMixin, types.SequenceLayer):
     return y, tuple(states), tuple(emits)
 
 
-class Residual(SerialCombinatorMixin, types.Emitting):
+class Residual(
+    SerialCombinatorMixin,
+    types.Emitting,
+    spec.Residual[types.Sequence, types.ShapeDType],
+):
   """A residual wrapper around l that computes `y = l(x) + shortcut(x)`.
 
   If shortcut is not provided, it defaults to an identity or a linear projection
@@ -786,7 +799,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Residual.Config):
     """Config for Residual."""
 
     layers: TypingSequence[types.SequenceLayerConfig]
@@ -1017,7 +1030,7 @@ class Residual(SerialCombinatorMixin, types.Emitting):
     return jnp.result_type(layer_dtype, shortcut_dtype)
 
 
-class Repeat(types.Emitting):
+class Repeat(types.Emitting, spec.Repeat[types.Sequence, types.ShapeDType]):
   """A combinator that repeats the specified SequenceLayer N times.
 
   Execution is performed in a loop, enabling reduced compilation times since the
@@ -1035,7 +1048,7 @@ class Repeat(types.Emitting):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Repeat.Config):
     """Configuration for Repeat."""
     layer: types.SequenceLayerConfig
     num_repeats: int

@@ -29,6 +29,17 @@ from . import simple
 from . import test_utils
 from . import types
 from . import types as basic_types
+from .attention import DotProductAttention
+from .attention import DotProductSelfAttention
+from .attention import LocalDotProductSelfAttention
+from .attention import StreamingDotProductAttention
+from .combinators import CombinationMode
+from .combinators import Parallel
+from .combinators import Repeat
+from .combinators import Residual
+from .combinators import Serial
+from .combinators import SerialCombinatorMixin
+from .combinators import SerialModules
 from .convolution import Conv1D
 from .convolution import Conv1DTranspose
 from .convolution import DepthwiseConv1D
@@ -143,6 +154,17 @@ __all__ = [
     'MaxPooling1D',
     'MinPooling1D',
     'AveragePooling1D',
+    'Serial',
+    'SerialModules',
+    'SerialCombinatorMixin',
+    'Residual',
+    'Repeat',
+    'Parallel',
+    'CombinationMode',
+    'DotProductSelfAttention',
+    'DotProductAttention',
+    'StreamingDotProductAttention',
+    'LocalDotProductSelfAttention',
     'Identity',
     'Relu',
     'Gelu',

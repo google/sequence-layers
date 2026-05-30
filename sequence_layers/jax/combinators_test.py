@@ -35,6 +35,11 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+from sequence_layers.specs import combinators_behaviors as spec
+
+
+class CombinatorBehaviorsTest(test_utils.SequenceLayerTest, spec.CombinatorBehaviorsTest):
+  """Shared behavior tests for combinators in JAX."""
 
 
 class SerialTest(test_utils.SequenceLayerTest):
