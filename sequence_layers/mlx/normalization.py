@@ -96,13 +96,33 @@ class RMSNormalization(
     def make(self) -> 'RMSNormalization':
       return RMSNormalization(self)
 
-  def __init__(self, config: Config):
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      axis: int | _Sequence[int] = -1,
+      epsilon: float = 1e-6,
+      use_scale: bool = True,
+      scale_init: Any | None = None,
+      compute_dtype: types.DType | None = None,
+      param_dtype: types.DType = mx.float32,
+  ):
     super().__init__()
-    self.config = config
+    if config is not None:
+      self.config = config
+    else:
+      self.config = self.Config(
+          axis=axis,
+          epsilon=epsilon,
+          use_scale=use_scale,
+          scale_init=scale_init,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
     from sequence_layers.mlx.init_mapping import _to_mx_dtype
 
-    self._param_dtype = _to_mx_dtype(config.param_dtype)
-    self._scale_init = init_mapping.map_initializer(config.scale_init)
+    self._param_dtype = _to_mx_dtype(self.config.param_dtype)
+    self._scale_init = init_mapping.map_initializer(self.config.scale_init)
     # mlx.nn.RMSNorm created lazily since we need input shape.
     self._rms_norm = None
     self._use_builtin = False
