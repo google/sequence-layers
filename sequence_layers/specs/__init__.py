@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 from . import backend as _backend
 from . import dense as _dense
+from . import normalization as _normalization
 from . import simple as _simple
 from . import types as _types
 
@@ -124,4 +125,24 @@ class ModuleSpec(Protocol):
 
   @property
   def EinsumDense(self) -> type[_dense.EinsumDense]:
+    ...
+
+  @property
+  def L2Normalize(self) -> type[_normalization.L2Normalize]:
+    ...
+
+  @property
+  def RMSNormalization(self) -> type[_normalization.RMSNormalization]:
+    ...
+
+  @property
+  def LayerNormalization(self) -> type[_normalization.LayerNormalization]:
+    ...
+
+  @property
+  def BatchNormalization(self) -> type[_normalization.BatchNormalization]:
+    ...
+
+  @property
+  def GroupNormalization(self) -> type[_normalization.GroupNormalization]:
     ...
