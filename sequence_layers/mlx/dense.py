@@ -18,7 +18,7 @@ class Dense(types.Stateless, spec.Dense):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(spec.Dense.Config):
+  class Config(types.SequenceLayerConfig, spec.Dense.Config):
     """Dense config."""
 
     features: int
@@ -30,18 +30,46 @@ class Dense(types.Stateless, spec.Dense):
 
     @override
     def make(self) -> 'Dense':
-      return Dense.from_config(self)
+      return Dense(self)
 
   @classmethod
   def from_config(cls, config: spec.Dense.Config) -> 'Dense':
-    return cls(config)
+    mlx_config = cls.Config(
+        features=config.features,
+        use_bias=config.use_bias,
+        activation=config.activation,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        name=config.name,
+    )
+    return cls(mlx_config)
 
-  def __init__(self, config: spec.Dense.Config):
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      features: int | None = None,
+      use_bias: bool = True,
+      activation=None,
+      compute_dtype=None,
+      param_dtype=mx.float32,
+  ):
     """Initialize Dense."""
     super().__init__()
-    self.config = config
-    self._compute_dtype = _to_mx_dtype(config.compute_dtype)
-    self._param_dtype = _to_mx_dtype(config.param_dtype) or mx.float32
+    if config is not None:
+      self.config = config
+    else:
+      if features is None:
+        raise ValueError('Must provide either config or features')
+      self.config = self.Config(
+          features=features,
+          use_bias=use_bias,
+          activation=activation,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
+    self._compute_dtype = _to_mx_dtype(self.config.compute_dtype)
+    self._param_dtype = _to_mx_dtype(self.config.param_dtype) or mx.float32
     self._linear = None
 
   @property
@@ -100,11 +128,11 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
   """Dense layer using Einstein summation notation."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(spec.EinsumDense.Config):
+  class Config(types.SequenceLayerConfig, spec.EinsumDense.Config):
     """MLX-native configuration for EinsumDense."""
 
-    equation: str = ''
-    output_shape: tuple[int | None, ...] = ()
+    equation: str
+    output_shape: tuple[int | None, ...]
     bias_axes: str = ''
     activation: Callable | None = None
     compute_dtype: types.DType | None = None
@@ -116,18 +144,49 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
 
     @override
     def make(self) -> 'EinsumDense':
-      return EinsumDense.from_config(self)
+      return EinsumDense(self)
 
   @classmethod
   def from_config(cls, config: spec.EinsumDense.Config) -> 'EinsumDense':
-    return cls(config)
+    mlx_config = cls.Config(
+        equation=config.equation,
+        output_shape=tuple(config.output_shape),
+        bias_axes=config.bias_axes,
+        activation=config.activation,
+        compute_dtype=config.compute_dtype,
+        param_dtype=config.param_dtype or mx.float32,
+        name=config.name,
+    )
+    return cls(mlx_config)
 
-  def __init__(self, config: spec.EinsumDense.Config):
+  def __init__(
+      self,
+      config: Config | None = None,
+      *,
+      equation: str | None = None,
+      output_shape: tuple[int | None, ...] = (),
+      bias_axes: str = '',
+      activation=None,
+      compute_dtype=None,
+      param_dtype=mx.float32,
+  ):
     """Initialize EinsumDense."""
     super().__init__()
-    self.config = config
-    self._compute_dtype = _to_mx_dtype(config.compute_dtype)
-    self._param_dtype = _to_mx_dtype(config.param_dtype) or mx.float32
+    if config is not None:
+      self.config = config
+    else:
+      if equation is None:
+        raise ValueError('Must provide either config or equation')
+      self.config = self.Config(
+          equation=equation,
+          output_shape=output_shape,
+          bias_axes=bias_axes,
+          activation=activation,
+          compute_dtype=compute_dtype,
+          param_dtype=param_dtype,
+      )
+    self._compute_dtype = _to_mx_dtype(self.config.compute_dtype)
+    self._param_dtype = _to_mx_dtype(self.config.param_dtype) or mx.float32
     self.kernel = None
     self.bias = None
     self._initialized = False
