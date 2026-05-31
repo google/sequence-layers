@@ -18,31 +18,6 @@ MaskedSequence = types.MaskedSequence
 ShapeDType = types.ShapeDType
 
 
-def _to_tuple(x: complex | list[Any]) -> complex | tuple[Any, ...]:
-  """Converts a nested list to a nested tuple."""
-  if isinstance(x, list):
-    return tuple(_to_tuple(item) for item in x)
-  return x
-
-
-@dataclasses.dataclass(frozen=True)
-class HashableArray(spec.HashableArray):
-  """Hashable multidimensional array of tuples."""
-
-  data: complex | tuple[Any, ...]
-  dtype: np.dtype
-
-  @classmethod
-  def from_array(cls, x: np.ndarray) -> 'HashableArray':
-    """Creates a HashableArray from a numpy array."""
-    x = np.asarray(x)
-    return HashableArray(_to_tuple(x.tolist()), x.dtype)
-
-  @override
-  def to_array(self) -> np.ndarray:
-    return np.asarray(self.data, dtype=self.dtype)
-
-
 def _to_mx_dtype(dtype: Any) -> mx.Dtype | None:
   """Converts various dtype representations to MLX DType."""
   if dtype is None:
@@ -575,7 +550,7 @@ class Scale(
     super().__init__()
     self.config = config
     assert isinstance(config.scale, types.HashableArray)
-    self._scale = config.scale.to_array()
+    self._scale = mx.array(config.scale.to_array())
 
   @override
   def get_output_shape(
@@ -635,9 +610,11 @@ class Add(
     self.config = config
     shift = config.shift
     if hasattr(shift, 'data') and hasattr(shift, 'dtype'):
-      self._shift = np.array(shift.data, dtype=shift.dtype)
+      self._shift = mx.array(np.array(shift.data, dtype=shift.dtype))
     elif hasattr(shift, 'array'):
-      self._shift = np.asarray(shift.array)
+      self._shift = mx.array(np.asarray(shift.array))
+    elif isinstance(shift, np.ndarray):
+      self._shift = mx.array(shift)
     else:
       self._shift = shift
 
@@ -1457,7 +1434,7 @@ class Lambda(types.Stateless, spec.Lambda[types.Sequence, types.ShapeDType]):
   def __init__(self, config: Config):
     super().__init__()
     self.config = config
-    self._cached_output_spec = None
+    self._cached_output_specs = {}
 
   @property
   @override
@@ -1468,8 +1445,9 @@ class Lambda(types.Stateless, spec.Lambda[types.Sequence, types.ShapeDType]):
     """Probe the function with a dummy to infer output shape/dtype."""
     if self.config.expected_output_spec is not None:
       return self.config.expected_output_spec
-    if self._cached_output_spec is not None:
-      return self._cached_output_spec
+    cache_key = (tuple(input_shape), input_dtype)
+    if cache_key in self._cached_output_specs:
+      return self._cached_output_specs[cache_key]
     try:
       dummy_values = mx.zeros((1, 1) + tuple(input_shape), dtype=input_dtype)
       dummy_mask = mx.ones((1, 1), dtype=mx.bool_)
@@ -1482,8 +1460,9 @@ class Lambda(types.Stateless, spec.Lambda[types.Sequence, types.ShapeDType]):
         out_values = self.config.fn(dummy_values)
         out_shape = out_values.shape[2:]
         out_dtype = out_values.dtype
-      self._cached_output_spec = types.ShapeDType(out_shape, out_dtype)
-      return self._cached_output_spec
+      out_spec = types.ShapeDType(out_shape, out_dtype)
+      self._cached_output_specs[cache_key] = out_spec
+      return out_spec
     except Exception:  # pylint: disable=broad-exception-caught
       return None
 
