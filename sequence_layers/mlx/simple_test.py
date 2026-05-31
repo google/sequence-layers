@@ -1,7 +1,5 @@
 """Tests for simple MLX sequence layers."""
 
-from typing import override
-
 from absl.testing import absltest
 import numpy as np
 
@@ -25,11 +23,7 @@ class IdentityTest(test_utils.SequenceLayerTest, spec.IdentityTest):
 
 
 class PointwiseMathTest(test_utils.SequenceLayerTest, spec.PointwiseMathTest):
-
-  @override
-  def make_layer(self, layer_name):
-    layer_cls = getattr(self.sl, layer_name)
-    return layer_cls(layer_cls.Config())
+  pass
 
 
 class CastTest(test_utils.SequenceLayerTest, spec.CastTest):

@@ -1481,9 +1481,7 @@ class Lambda(types.Stateless, spec.Lambda[types.Sequence, types.ShapeDType]):
     return input_dtype
 
   @override
-  def layer(  # pyrefly: ignore[missing-override-decorator]
-      self, x, *, training: bool, constants=None
-  ):
+  def layer(self, x, *, training: bool, constants=None):
     """Applies a custom Python callable to the input sequence."""
     assert self.config.fn is not None
     if self.config.sequence_input:

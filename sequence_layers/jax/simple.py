@@ -750,7 +750,6 @@ class Cast(
       values: ValuesT,
       mask: MaskT,
   ) -> tuple[ValuesT, MaskT]:
-    # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[missing-attribute]
     return values.astype(self.config.dtype), mask
 
@@ -1092,7 +1091,6 @@ class Lambda(
     self._validate_input_spec(input_spec)
     if self.config.sequence_input:
       # pyrefly: ignore[bad-assignment]
-      # pyrefly: ignore[bad-specialization]
       input_spec = types.Sequence(
           types.ShapeDType(
               (1, 1) + tuple(input_spec.shape),
@@ -1272,7 +1270,6 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
         channel_shape,
         self.config.param_dtype,
     )
-    # pyrefly: ignore[bad-argument-type]
     alpha = jnp.exp(alpha_log)[jnp.newaxis, jnp.newaxis, ...]
     if self.config.separate_beta:
       beta_log = self.param(
@@ -1281,12 +1278,10 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
           channel_shape,
           self.config.param_dtype,
       )
-      # pyrefly: ignore[bad-argument-type]
       beta = jnp.exp(beta_log)[jnp.newaxis, jnp.newaxis, ...]
     else:
       beta = alpha
 
-    # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[unsupported-operation]
     values += jnp.square(jnp.sin(values * alpha)) / (beta + 1e-12)
     return values, mask
@@ -1442,13 +1437,11 @@ class PRelu(types.PreservesType, types.StatelessPointwiseFunctor):
   ) -> tuple[ValuesT, MaskT]:
 
     return (
-        # pyrefly: ignore[no-matching-overload]
         jnp.where(
             # pyrefly: ignore[unsupported-operation]
             values >= 0,
             values,
             # pyrefly: ignore[unsupported-operation]
-            # pyrefly: ignore[bad-argument-type]
             self.negative_slope.astype(values.dtype) * values,
         ),
         mask,
@@ -1709,8 +1702,6 @@ class Swish(
 
   @override
   @nn.nowrap
-  # pyrefly: ignore[missing-override-decorator]
-  # pyrefly: ignore[bad-argument-type]
   def fn[
       ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
       MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
@@ -1748,8 +1739,6 @@ class Gelu(
 
   @override
   @nn.nowrap
-  # pyrefly: ignore[missing-override-decorator]
-  # pyrefly: ignore[bad-argument-type]
   def fn[
       ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
       MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),

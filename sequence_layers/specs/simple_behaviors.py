@@ -232,7 +232,6 @@ class FlattenTest(test_utils.SequenceLayerTest):
   )
   def test_flatten(self, shape):
     x = self.random_sequence(*shape)
-    # pyrefly: ignore [missing-attribute]
     l = self.sl.Flatten.Config(name='flatten').make()
     l = self.init_layer(l, x)
 
