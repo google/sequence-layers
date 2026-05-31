@@ -8,11 +8,13 @@ from typing import Any, Callable, override
 import mlx.core as mx
 import mlx.nn as nn
 
-from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
-from sequence_layers.mlx.types import SequenceLayerConfig as _SequenceLayerConfig
+from sequence_layers.mlx.types import \
+    SequenceLayerConfig as _SequenceLayerConfig
 from sequence_layers.specs import convolution as spec
+
+from . import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -57,6 +59,17 @@ def _explicit_padding(padding, kernel_size, stride, dilation_rate):
     raise ValueError(f'Unsupported padding mode: {padding}')
 
 
+def _compute_output_length(L_in, kernel_size, stride, dilation_rate, padding):
+  """Computes the expected output sequence length."""
+  pad_left, pad_right = _explicit_padding(
+      padding, kernel_size, stride, dilation_rate
+  )
+  L_pad = L_in + pad_left + pad_right
+  K_eff = _effective_kernel_size(kernel_size, dilation_rate)
+  L_out = (L_pad - K_eff) // stride + 1
+  return max(L_out, 0)
+
+
 def _buffer_width(padding, kernel_size, stride, dilation_rate):
   """Returns the buffer width for step mode."""
   ek = _effective_kernel_size(kernel_size, dilation_rate)
@@ -91,7 +104,13 @@ def _supports_step(padding):
 def _compute_conv_mask(
     mask, kernel_size, stride, dilation_rate, padding, is_step
 ):
-  """Compute the output mask for a convolution-like operation."""
+  if not is_step:
+    L_out = _compute_output_length(
+        mask.shape[1], kernel_size, stride, dilation_rate, padding
+    )
+    if L_out == 0:
+      return mx.zeros((mask.shape[0], 0), dtype=mx.bool_)
+
   ek = _effective_kernel_size(kernel_size, dilation_rate)
 
   if is_step:
@@ -275,7 +294,9 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
       self.config = config
     else:
       if filters is None or kernel_size is None:
-        raise ValueError('Must provide either config or filters and kernel_size')
+        raise ValueError(
+            'Must provide either config or filters and kernel_size'
+        )
       self.config = self.Config(
           filters=filters,
           kernel_size=kernel_size,
@@ -439,6 +460,21 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
     self._ensure_initialized(x.shape[-1])
+    L_out = _compute_output_length(
+        x.shape[1],
+        self.kernel_size,
+        self.strides,
+        self.dilation_rate,
+        self.padding,
+    )
+    if L_out == 0:
+      output_spec = self.get_output_spec(x.channel_spec, constants=constants)
+      empty_values = mx.zeros(
+          (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
+      )
+      empty_mask = mx.zeros((x.shape[0], 0), dtype=mx.bool_)
+      return Sequence(empty_values, empty_mask)
+
     if self.kernel_size > 1:
       x = x.mask_invalid()
 
@@ -676,6 +712,21 @@ class DepthwiseConv1D(
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
     self._ensure_initialized(x.shape[-1])
+    L_out = _compute_output_length(
+        x.shape[1],
+        self.kernel_size,
+        self.strides,
+        self.dilation_rate,
+        self.padding,
+    )
+    if L_out == 0:
+      output_spec = self.get_output_spec(x.channel_spec, constants=constants)
+      empty_values = mx.zeros(
+          (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
+      )
+      empty_mask = mx.zeros((x.shape[0], 0), dtype=mx.bool_)
+      return Sequence(empty_values, empty_mask)
+
     if self.kernel_size > 1:
       x = x.mask_invalid()
 
@@ -841,7 +892,9 @@ class Conv1DTranspose(
       self.config = config
     else:
       if filters is None or kernel_size is None:
-        raise ValueError('Must provide either config or filters and kernel_size')
+        raise ValueError(
+            'Must provide either config or filters and kernel_size'
+        )
       self.config = self.Config(
           filters=filters,
           kernel_size=kernel_size,
@@ -1045,6 +1098,3 @@ class Conv1DTranspose(
   @classmethod
   def from_config(cls, config):
     return cls(config)
-
-
-

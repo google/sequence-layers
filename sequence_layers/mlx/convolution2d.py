@@ -2,18 +2,20 @@
 
 import dataclasses
 import fractions
-import math
-from typing import Any, Callable, override, Sequence as TypingSequence
+from typing import Any, Callable, override
+from typing import Sequence as TypingSequence
 
 import mlx.core as mx
-import mlx.nn as nn
 
-from sequence_layers.jax.types import SequenceLayerConfig as _SequenceLayerConfig
-from sequence_layers.mlx import basic_types as bt
+from sequence_layers.jax.types import \
+    SequenceLayerConfig as _SequenceLayerConfig
 from sequence_layers.mlx import convolution as conv_utils
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
+from sequence_layers.mlx import utils as mlx_utils
 from sequence_layers.specs import convolution as spec
+
+from . import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -64,7 +66,9 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     strides: int | TypingSequence[int] = 1
     dilation_rate: int | TypingSequence[int] = 1
     time_padding: bt.PaddingModeString = PaddingMode.VALID.value
-    spatial_padding: bt.PaddingModeString | tuple[int, int] = PaddingMode.SAME.value
+    spatial_padding: bt.PaddingModeString | tuple[int, int] = (
+        PaddingMode.SAME.value
+    )
     groups: int = 1
     use_bias: bool = True
     activation: Callable | None = None
@@ -98,7 +102,9 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       self.config = config
     else:
       if filters is None or kernel_size is None:
-        raise ValueError('Must provide either config or filters and kernel_size')
+        raise ValueError(
+            'Must provide either config or filters and kernel_size'
+        )
       self.config = self.Config(
           filters=filters,
           kernel_size=kernel_size,
@@ -326,6 +332,21 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
     self._ensure_initialized(x.channel_shape[-1])
+    L_out_time = conv_utils._compute_output_length(
+        x.shape[1],
+        self.kernel_size[0],
+        self.strides[0],
+        self.dilation_rate[0],
+        self.time_padding,
+    )
+    if L_out_time == 0:
+      output_spec = self.get_output_spec(x.channel_spec, constants=constants)
+      empty_values = mx.zeros(
+          (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
+      )
+      empty_mask = mx.zeros((x.shape[0], 0), dtype=mx.bool_)
+      return Sequence(empty_values, empty_mask)
+
     if self.kernel_size[0] > 1:
       x = x.mask_invalid()
 
@@ -361,9 +382,6 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     return cls(config)
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Conv2DTranspose
 # ---------------------------------------------------------------------------
@@ -383,7 +401,9 @@ class Conv2DTranspose(
     strides: int | TypingSequence[int] = 1
     dilation_rate: int | TypingSequence[int] = 1
     time_padding: bt.PaddingModeString = PaddingMode.VALID.value
-    spatial_padding: bt.PaddingModeString | tuple[int, int] = PaddingMode.SAME.value
+    spatial_padding: bt.PaddingModeString | tuple[int, int] = (
+        PaddingMode.SAME.value
+    )
     groups: int = 1
     use_bias: bool = True
     activation: Callable | None = None
@@ -417,7 +437,9 @@ class Conv2DTranspose(
       self.config = config
     else:
       if filters is None or kernel_size is None:
-        raise ValueError('Must provide either config or filters and kernel_size')
+        raise ValueError(
+            'Must provide either config or filters and kernel_size'
+        )
       self.config = self.Config(
           filters=filters,
           kernel_size=kernel_size,
@@ -675,9 +697,6 @@ class Conv2DTranspose(
     return cls(config)
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # AveragePooling2D
 # ---------------------------------------------------------------------------
@@ -815,8 +834,24 @@ class AveragePooling2D(types.SequenceLayer):
     result = sum(patches) / len(patches)
     return result
 
+  @override
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool = False, constants=None):
+    L_out_time = conv_utils._compute_output_length(
+        x.shape[1],
+        self.pool_size[0],
+        self.strides[0],
+        self.dilation_rate[0],
+        self.time_padding,
+    )
+    if L_out_time == 0:
+      output_spec = self.get_output_spec(x.channel_spec, constants=constants)
+      empty_values = mx.zeros(
+          (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
+      )
+      empty_mask = mx.zeros((x.shape[0], 0), dtype=mx.bool_)
+      return Sequence(empty_values, empty_mask)
+
     time_pad = conv_utils._explicit_padding(
         self.time_padding,
         self.pool_size[0],
@@ -844,7 +879,10 @@ class AveragePooling2D(types.SequenceLayer):
     )
     return Sequence(values, mask)
 
-  def get_initial_state(self, batch_size, input_spec, *, constants=None):
+  @override
+  def get_initial_state(
+      self, batch_size, input_spec, *, training: bool = False, constants=None
+  ):
     bw = conv_utils._buffer_width(
         self.time_padding,
         self.pool_size[0],
@@ -866,8 +904,9 @@ class AveragePooling2D(types.SequenceLayer):
     )
     return MaskedSequence(values, mask)
 
+  @override
   @types.check_step
-  def step(self, x, state, *, constants=None):
+  def step(self, x, state, *, training: bool = False, constants=None):
     bw = conv_utils._buffer_width(
         self.time_padding,
         self.pool_size[0],
@@ -955,8 +994,9 @@ class Upsample2D(types.PreservesType, types.Stateless):
       )
     return (input_shape[0] * self._rate[1], input_shape[1])
 
+  @override
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool = False, constants=None):
     values = mx.repeat(x.values, self._rate[0], axis=1)
     values = mx.repeat(values, self._rate[1], axis=2)
     mask = mx.repeat(x.mask, self._rate[0], axis=1)
@@ -1074,22 +1114,32 @@ class ParallelChannels(types.Emitting):
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.child.get_output_dtype(input_dtype, constants=constants)
 
+  @override
   @types.check_layer
-  def layer(self, x, *, constants=None):
+  def layer(self, x, *, training: bool = False, constants=None):
     groups = self._split(x)
-    outputs = [self.child.layer(g, constants=constants) for g in groups]
+    outputs = [
+        self.child.layer(g, training=training, constants=constants)
+        for g in groups
+    ]
     return self._combine(outputs)
 
-  def layer_with_emits(self, x, *, constants=None):
+  @override
+  def layer_with_emits(self, x, *, training: bool = False, constants=None):
     groups = self._split(x)
     outputs, emits = [], []
     for g in groups:
-      y, e = self.child.layer_with_emits(g, constants=constants)
+      y, e = self.child.layer_with_emits(
+          g, training=training, constants=constants
+      )
       outputs.append(y)
       emits.append(e)
     return self._combine(outputs), tuple(emits)
 
-  def get_initial_state(self, batch_size, input_spec, *, constants=None):
+  @override
+  def get_initial_state(
+      self, batch_size, input_spec, *, training: bool = False, constants=None
+  ):
     if not input_spec.shape:
       raise ValueError(f'Input must be at least 3D, got: {input_spec.shape=}.')
     if input_spec.shape[-1] % self._num_groups != 0:
@@ -1099,33 +1149,37 @@ class ParallelChannels(types.Emitting):
       )
     group_shape = list(input_spec.shape)
     group_shape[-1] //= self._num_groups
-    from sequence_layers.mlx import types as sl_types
-
-    group_spec = sl_types.ChannelSpec(
+    group_spec = types.ChannelSpec(
         shape=tuple(group_shape),
         dtype=input_spec.dtype,
     )
     state = self.child.get_initial_state(
-        batch_size, group_spec, constants=constants
+        batch_size, group_spec, training=training, constants=constants
     )
     return (state,) * self._num_groups
 
+  @override
   @types.check_step
-  def step(self, x, state, *, constants=None):
+  def step(self, x, state, *, training: bool = False, constants=None):
     groups = self._split(x)
     outputs = []
     new_states = []
     for g, s in zip(groups, state):
-      y, ns = self.child.step(g, s, constants=constants)
+      y, ns = self.child.step(g, s, training=training, constants=constants)
       outputs.append(y)
       new_states.append(ns)
     return self._combine(outputs), tuple(new_states)
 
-  def step_with_emits(self, x, state, *, constants=None):
+  @override
+  def step_with_emits(
+      self, x, state, *, training: bool = False, constants=None
+  ):
     groups = self._split(x)
     outputs, new_states, emits = [], [], []
     for g, s in zip(groups, state):
-      y, ns, e = self.child.step_with_emits(g, s, constants=constants)
+      y, ns, e = self.child.step_with_emits(
+          g, s, training=training, constants=constants
+      )
       outputs.append(y)
       new_states.append(ns)
       emits.append(e)
@@ -1133,7 +1187,7 @@ class ParallelChannels(types.Emitting):
 
   @classmethod
   def from_config(cls, config, backend='mlx'):
-    child = config.child_layer.make(backend=backend)
+    child = mlx_utils.make_layer(config.child_layer, backend=backend)
     return cls(
         child_layer=child,
         num_groups=config.num_groups,
