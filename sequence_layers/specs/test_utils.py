@@ -7,17 +7,18 @@ from typing import Sequence as TypingSequence
 from typing import TypeVar
 
 from absl.testing import parameterized
+import numpy as np
 import typeguard
 
 from sequence_layers import specs
 from sequence_layers.specs import backend as backend_spec
 from sequence_layers.specs import types as types_spec
+
 _T = TypeVar('_T')
 
 
 class _AbcParameterizedTestCaseMeta(abc.ABCMeta, type(parameterized.TestCase)):
   """Metaclass for abstract parameterized test cases."""
-
 
 
 def zip_longest(
@@ -145,6 +146,15 @@ class SequenceLayerTest[
     """Returns the backend wrapper."""
     return self.sl.backend.xp
 
+  @property
+  def nn(self) -> backend_spec.nn:
+    """Returns the backend nn wrapper."""
+    return self.sl.backend.nn
+
+  def make_layer(self, config: types_spec.SequenceLayerConfig) -> Any:
+    """Instantiates a layer from its config, delegating to the backend."""
+    return config.make()
+
   @abc.abstractmethod
   def assertSequencesEqual(self, x: SequenceT, y: SequenceT) -> None:  # pylint: disable=invalid-name
     """Asserts that two sequences are equal."""
@@ -152,6 +162,16 @@ class SequenceLayerTest[
   @abc.abstractmethod
   def assertAllEqual(self, x: Any, y: Any) -> None:  # pylint: disable=invalid-name
     """Asserts that all elements are equal."""
+
+  def assertNotAllEqual(self, x: Any, y: Any) -> None:  # pylint: disable=invalid-name
+    """Asserts that not all elements are equal."""
+    x_np = np.asarray(x)
+    y_np = np.asarray(y)
+    self.assertFalse(np.all(x_np == y_np))
+
+  @abc.abstractmethod
+  def get_variables(self, layer: SequenceLayerT) -> dict[str, Any]:
+    """Returns the variables or parameters of the layer."""
 
   @abc.abstractmethod
   def random_sequence(
@@ -166,6 +186,23 @@ class SequenceLayerTest[
       high_length: int | None = None,
   ) -> SequenceT:
     """Generates a random sequence."""
+
+  @abc.abstractmethod
+  def init_layer(
+      self,
+      layer: types_spec.SequenceLayer,
+      x: types_spec.Sequence,
+      bind_only: bool = False,
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.SequenceLayer:
+    """Initializes and binds a SequenceLayer for testing.
+
+    Args:
+      layer: Layer to initialize and bind.
+      x: Example input sequence to use for initialization.
+      bind_only: If True, skip initialization and only bind the layer (if
+        applicable to the backend).
+    """
 
   @abc.abstractmethod
   def _step_by_step(
@@ -199,6 +236,18 @@ class SequenceLayerTest[
   def assertSequencesClose(self, x: Any, y: Any, **kwargs) -> None:  # pylint: disable=invalid-name
     """Asserts that two sequences are close."""
 
+  def assertConfigDefaults(  # pylint: disable=invalid-name
+      self, config_cls: type, expected_defaults: dict[str, Any], **kwargs
+  ) -> None:
+    """Helper to verify that a config class has the expected defaults."""
+    config = config_cls(**kwargs)
+    for field_name, expected_val in expected_defaults.items():
+      self.assertEqual(
+          getattr(config, field_name),
+          expected_val,
+          f'Default for {field_name} in {config_cls.__name__} does not match!',
+      )
+
 
 class ModuleSpecTest(SequenceLayerTest):
   """Test that a backend-specific module implements the ModuleSpec protocol."""
@@ -218,6 +267,8 @@ class ModuleSpecTest(SequenceLayerTest):
       typeguard.check_type('backend_module', mod, protocol)
 
 
+# pylint: disable=invalid-name
+# pylint: disable=missing-function-docstring
 @runtime_checkable
 class ModuleSpec(Protocol):
   """Specification for sequence_layers.<backend>.test_utils"""
@@ -227,17 +278,21 @@ class ModuleSpec(Protocol):
       targets: Iterable[Iterable[Any]],
       sources: Iterable[Any],
   ) -> list[Any]:
-    """Zips targets and sources."""
+    ...
 
   def named_product(
       self,
       first: Iterable[Any],
       second: Iterable[Any],
   ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Creates a named product."""
+    ...
 
   @property
-  def SequenceLayerTest(self) -> type:  # pylint: disable=invalid-name
+  def SequenceLayerTest(self) -> type:
+    ...
+
+  @property
+  def NonSteppableLayer(self) -> type:
     ...
 
 
