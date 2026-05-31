@@ -13,9 +13,11 @@
 # limitations under the License.
 
 from typing import Literal
+
 from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
+
 from sequence_layers.jax import position
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
@@ -23,9 +25,13 @@ from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
 from sequence_layers.jax.attention import streaming_dot_product_attention
 from sequence_layers.jax.attention import test_utils as attention_test_utils
+from sequence_layers.specs import attention_behaviors as attention_spec_behaviors
 
 
-class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
+class StreamingDotProductAttentionTest(
+    test_utils.SequenceLayerTest,
+    attention_spec_behaviors.StreamingDotProductAttentionTest,
+):
 
   @parameterized.parameters(
       # max_past_horizon > 0, max_future_horizon == 0
@@ -347,65 +353,6 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     self.assertSequencesClose(
         y_layer.mask_invalid(), y_step[:, max_future_horizon:].mask_invalid()
     )
-
-  def test_query_key_value_network_supports_step(self):
-    key = jax.random.PRNGKey(1234)
-    x = test_utils.random_sequence(2, 1, 3)
-    source = test_utils.random_sequence(2, 1, 5)
-    constants = {'source': source}
-    l = streaming_dot_product_attention.StreamingDotProductAttention.Config(
-        'source',
-        num_heads=3,
-        units_per_head=5,
-        max_past_horizon=3,
-        max_future_horizon=0,
-        query_network=position.AddTimingSignal.Config(),
-        key_network=position.AddTimingSignal.Config(),
-        value_network=position.AddTimingSignal.Config(),
-    ).make()
-    l = self.init_and_bind_layer(key, l, x, constants=constants)
-    self.assertTrue(l.supports_step)
-
-    l = streaming_dot_product_attention.StreamingDotProductAttention.Config(
-        'source',
-        num_heads=3,
-        units_per_head=5,
-        max_past_horizon=3,
-        max_future_horizon=0,
-        query_network=test_utils.NonSteppableLayer.Config(),
-        key_network=position.AddTimingSignal.Config(),
-        value_network=position.AddTimingSignal.Config(),
-    ).make()
-    l = self.init_and_bind_layer(key, l, x, constants=constants)
-    self.assertFalse(l.supports_step)
-
-    l = streaming_dot_product_attention.StreamingDotProductAttention.Config(
-        'source',
-        num_heads=3,
-        units_per_head=5,
-        max_past_horizon=3,
-        max_future_horizon=0,
-        query_network=position.AddTimingSignal.Config(),
-        key_network=test_utils.NonSteppableLayer.Config(),
-        value_network=position.AddTimingSignal.Config(),
-    ).make()
-    l = self.init_and_bind_layer(key, l, x, constants=constants)
-    # The key/value network must be steppable for streaming.
-    self.assertFalse(l.supports_step)
-
-    l = streaming_dot_product_attention.StreamingDotProductAttention.Config(
-        'source',
-        num_heads=3,
-        units_per_head=5,
-        max_past_horizon=3,
-        max_future_horizon=0,
-        query_network=position.AddTimingSignal.Config(),
-        key_network=position.AddTimingSignal.Config(),
-        value_network=test_utils.NonSteppableLayer.Config(),
-    ).make()
-    l = self.init_and_bind_layer(key, l, x, constants=constants)
-    # The key/value network must be steppable for streaming.
-    self.assertFalse(l.supports_step)
 
   @parameterized.product(
       (

@@ -1,9 +1,10 @@
 """Tests for attention MLX sequence layers."""
 
-import mlx.core as mx
-import numpy as np
 from absl.testing import absltest
 from absl.testing import parameterized
+import mlx.core as mx
+import numpy as np
+
 from sequence_layers.mlx import attention
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import position
@@ -11,7 +12,9 @@ from sequence_layers.mlx import test_utils
 from sequence_layers.specs import attention_behaviors as spec
 
 
-class DotProductSelfAttentionTest(test_utils.SequenceLayerTest, spec.DotProductSelfAttentionTest):
+class DotProductSelfAttentionTest(
+    test_utils.SequenceLayerTest, spec.DotProductSelfAttentionTest
+):
 
   def test_step_builds_kv_cache(self):
     layer = attention.DotProductSelfAttention(
@@ -31,8 +34,8 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest, spec.DotProductS
       _, state = layer.step(x, state, training=False)
 
     # Check KV cache has been populated.
-    kv_keys = state[0]
-    self.assertEqual(kv_keys.shape[1], 10)  # buffer size
+    kv_mask = state[2]
+    self.assertEqual(mx.sum(kv_mask).item(), 5)
 
   def test_with_query_key_networks(self):
     """Test with RoPE on Q/K."""
@@ -52,7 +55,6 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest, spec.DotProductS
     x = test_utils.random_sequence(1, 5, 8)
     y = layer.layer(x, training=False)
     self.assertEqual(y.shape, (1, 5, 2, 4))
-
 
   def test_per_dim_scale(self):
     """Test per_dim_scale creates parameter and affects output."""
@@ -96,15 +98,11 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest, spec.DotProductS
     )
 
 
-
-
 class DotProductSelfAttentionFromConfigTest(test_utils.SequenceLayerTest):
 
   def test_from_config(self):
+    from sequence_layers.jax.attention import dot_product_self_attention as jax_attn
     import sequence_layers.mlx
-    from sequence_layers.jax.attention import (
-        dot_product_self_attention as jax_attn,
-    )
 
     config = jax_attn.DotProductSelfAttention.Config(
         num_heads=4,
@@ -129,10 +127,8 @@ class DotProductAttentionTest(
   """Tests for cross-attention."""
 
   def test_from_config(self):
+    from sequence_layers.jax.attention import dot_product_attention as jax_cross_attn
     import sequence_layers.mlx
-    from sequence_layers.jax.attention import (
-        dot_product_attention as jax_cross_attn,
-    )
 
     config = jax_cross_attn.DotProductAttention.Config(
         source_name='enc',
@@ -151,27 +147,13 @@ class DotProductAttentionTest(
     self.assertEqual(y.channel_shape, (4, 8))
 
 
-class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
+class StreamingDotProductAttentionTest(
+    test_utils.SequenceLayerTest, spec.StreamingDotProductAttentionTest
+):
   """Tests for streaming cross-attention."""
 
   def _make_source(self, batch, time, features, name='source'):
     return test_utils.random_sequence(batch, time, features)
-
-  def test_layer_basic(self):
-    """Basic layer mode with banded visibility mask."""
-    layer = attention.StreamingDotProductAttention(
-        in_features=8,
-        source_features=12,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=4,
-    )
-    source = self._make_source(2, 8, 12)
-    x = test_utils.random_sequence(2, 8, 8)
-    y = layer.layer(x, constants={'source': source}, training=False)
-    self.assertEqual(y.channel_shape, (2, 4))
-    self.assertEqual(y.shape, (2, 8, 2, 4))
 
   def test_step_builds_kv_cache(self):
     """KV buffer grows correctly during step mode."""
@@ -205,79 +187,6 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     kv_keys = state[0]
     self.assertEqual(kv_keys.shape[1], 10)  # buffer size
 
-  def test_step_matches_layer(self):
-    """Step-by-step with streaming constants matches layer()."""
-    layer = attention.StreamingDotProductAttention(
-        in_features=8,
-        source_features=12,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=16,
-    )
-    batch, time = 1, 8
-    x = test_utils.random_sequence(batch, time, 8)
-    source = self._make_source(batch, time, 12)
-    constants = {'source': source}
-
-    # Layer mode.
-    y_layer = layer.layer(x, constants=constants, training=False)
-
-    # Step-by-step mode.
-    y_step, _ = test_utils.step_by_step(
-        layer,
-        x,
-        block_size=1,
-        stream_constants={'source': source},
-    )
-
-    np.testing.assert_allclose(
-        np.array(y_step.values),
-        np.array(y_layer.values),
-        atol=1e-4,
-        rtol=1e-4,
-        err_msg='step vs layer mismatch',
-    )
-
-  def test_with_future_horizon(self):
-    """Query delay buffer with max_future_horizon > 0."""
-    layer = attention.StreamingDotProductAttention(
-        in_features=8,
-        source_features=8,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=4,
-        max_future_horizon=2,
-        use_query_delay_buffer=True,
-    )
-    self.assertEqual(layer.input_latency, 2)
-    source = self._make_source(1, 8, 8)
-    spec = bt.ShapeDType((8,), mx.float32)
-    state = layer.get_initial_state(
-        1, spec, constants={'source': source}, training=False
-    )
-
-    # Verify delay buffer is in state.
-    q_delay_values = state[7]
-    self.assertFalse(isinstance(q_delay_values, tuple))
-    self.assertEqual(q_delay_values.shape[1], 2)
-
-    # Run a few steps to make sure it doesn't crash.
-    for _ in range(5):
-      x = bt.MaskedSequence(
-          mx.random.normal(shape=(1, 1, 8)),
-          mx.ones((1, 1), dtype=mx.bool_),
-      )
-      src = bt.MaskedSequence(
-          mx.random.normal(shape=(1, 1, 8)),
-          mx.ones((1, 1), dtype=mx.bool_),
-      )
-      y, state, _ = layer.step_with_emits(
-          x, state, constants={'source': src}, training=False
-      )
-      self.assertEqual(y.channel_shape, (2, 4))
-
   def test_no_query_delay_buffer(self):
     """use_query_delay_buffer=False has no delay."""
     layer = attention.StreamingDotProductAttention(
@@ -300,49 +209,11 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     self.assertIsInstance(state[7], tuple)
     self.assertEqual(state[7], ())
 
-  def test_with_rope(self):
-    """Q/K processing networks (RoPE)."""
-    rope_q = position.ApplyRotaryPositionalEncoding(
-        max_wavelength=10000.0, axis=-1
-    )
-    rope_k = position.ApplyRotaryPositionalEncoding(
-        max_wavelength=10000.0, axis=-1
-    )
-    layer = attention.StreamingDotProductAttention(
-        in_features=8,
-        source_features=12,
-        source_name='source',
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=16,
-        query_network=rope_q,
-        key_network=rope_k,
-    )
-    source = self._make_source(1, 5, 12)
-    x = test_utils.random_sequence(1, 5, 8)
-    y = layer.layer(x, constants={'source': source}, training=False)
-    self.assertEqual(y.shape, (1, 5, 2, 4))
-
-  def test_output_shape(self):
-    layer = attention.StreamingDotProductAttention(
-        in_features=16,
-        source_features=16,
-        source_name='source',
-        num_heads=4,
-        units_per_head=8,
-        max_past_horizon=8,
-    )
-    self.assertEqual(layer.get_output_shape((16,)), (4, 8))
-
   def test_from_config(self):
     """Both Streaming and StreamingLocal configs produce correct layer."""
+    from sequence_layers.jax.attention import streaming_dot_product_attention as jax_streaming_attn
+    from sequence_layers.jax.attention import streaming_local_dot_product_attention as jax_streaming_local_attn
     import sequence_layers.mlx
-    from sequence_layers.jax.attention import (
-        streaming_dot_product_attention as jax_streaming_attn,
-    )
-    from sequence_layers.jax.attention import (
-        streaming_local_dot_product_attention as jax_streaming_local_attn,
-    )
 
     config = jax_streaming_attn.StreamingDotProductAttention.Config(
         source_name='source',
@@ -378,85 +249,15 @@ class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
     )
 
 
-class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
+class LocalDotProductSelfAttentionTest(
+    test_utils.SequenceLayerTest, spec.LocalDotProductSelfAttentionTest
+):
 
-  def test_layer(self):
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=16,
-        num_heads=4,
-        units_per_head=4,
-        max_past_horizon=8,
-        block_size_config=2,
-    )
-    self.verify_contract(layer, (16,), atol=1e-4, rtol=1e-4)
-
-  def test_block_size(self):
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=4,
-        block_size_config=4,
-    )
-    self.assertEqual(layer.block_size, 4)
-
-  def test_with_future_horizon(self):
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=4,
-        max_future_horizon=2,
-        block_size_config=1,
-    )
-    self.assertEqual(layer.input_latency, 2)
-    self.verify_contract(
-        layer, (8,), atol=1e-4, rtol=1e-4, test_step=False
-    )
-
-  def test_with_soft_cap(self):
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=8,
-        block_size_config=1,
-        attention_logits_soft_cap=50.0,
-    )
-    self.verify_contract(layer, (8,), atol=1e-4, rtol=1e-4)
-
-  def test_with_rope(self):
-    rope = position.ApplyRotaryPositionalEncoding(
-        max_wavelength=10000.0, axis=-1
-    )
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=8,
-        num_heads=2,
-        units_per_head=4,
-        max_past_horizon=8,
-        block_size_config=1,
-        query_network=rope,
-        key_network=position.ApplyRotaryPositionalEncoding(
-            max_wavelength=10000.0, axis=-1
-        ),
-    )
-    self.verify_contract(layer, (8,), atol=1e-4, rtol=1e-4)
-
-  def test_output_shape(self):
-    layer = attention.LocalDotProductSelfAttention(
-        in_features=16,
-        num_heads=4,
-        units_per_head=8,
-        max_past_horizon=8,
-        block_size_config=2,
-    )
-    self.assertEqual(layer.get_output_shape((16,)), (4, 8))
+  test_step_in_future_horizon = False
 
   def test_from_config(self):
+    from sequence_layers.jax.attention import local_dot_product_self_attention as jax_local_attn
     import sequence_layers.mlx
-    from sequence_layers.jax.attention import (
-        local_dot_product_self_attention as jax_local_attn,
-    )
 
     config = jax_local_attn.LocalDotProductSelfAttention.Config(
         num_heads=2,

@@ -180,9 +180,7 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     self.assertEqual(l.block_size, 1)
     self.assertEqual(l.output_ratio, 1)
     self.assertEqual(l.name, 'dot_product_self_attention')
-    self.assertEqual(
-        l.get_output_shape((2,)), (num_heads, units_per_head)
-    )
+    self.assertEqual(l.get_output_shape((2,)), (num_heads, units_per_head))
     self.assertTrue(l.supports_step)
     self.assertEqual(l.input_latency, max(0, max_future_horizon))
 
@@ -193,8 +191,6 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         grad_atol=1e-5,
         grad_rtol=1e-5,
     )
-
-
 
 
 class DotProductAttentionTest(test_utils.SequenceLayerTest):
@@ -302,3 +298,361 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         grad_atol=1e-5,
         grad_rtol=1e-5,
     )
+
+
+class StreamingDotProductAttentionTest(test_utils.SequenceLayerTest):
+  """Test behavior of StreamingDotProductAttention layer."""
+
+  def test_layer_basic(self):
+    """Basic contract verification."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 4
+    batch_size, source_time, source_channels = 2, 8, 12
+    time, channels = 8, 8
+    source_name = 'source'
+
+    layer = self.sl.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        name='streaming_dot_product_attention',
+    ).make()
+
+    source = self.random_sequence(batch_size, source_time, source_channels)
+    constants = {source_name: source}
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x, constants=constants)
+
+    self.assertEqual(layer.block_size, 1)
+    self.assertEqual(layer.output_ratio, 1)
+    self.assertEqual(layer.name, 'streaming_dot_product_attention')
+    self.assertEqual(
+        layer.get_output_shape((channels,)),
+        (num_heads, units_per_head),
+    )
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=True,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_future_horizon(self):
+    """Delay buffer with max_future_horizon > 0."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 4
+    max_future_horizon = 2
+    batch_size, source_time, source_channels = 2, 8, 8
+    time, channels = 8, 8
+    source_name = 'source'
+
+    layer = self.sl.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        name='streaming_dot_product_attention_future',
+    ).make()
+
+    source = self.random_sequence(batch_size, source_time, source_channels)
+    constants = {source_name: source}
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x, constants=constants)
+
+    self.assertEqual(layer.input_latency, max_future_horizon)
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=True,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_with_rope(self):
+    """Position processing networks (RoPE)."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 16
+    batch_size, source_time, source_channels = 2, 8, 12
+    time, channels = 8, 8
+    source_name = 'source'
+
+    rope_q = self.sl.ApplyRotaryPositionalEncoding.Config(
+        max_wavelength=10000.0
+    )
+    rope_k = self.sl.ApplyRotaryPositionalEncoding.Config(
+        max_wavelength=10000.0
+    )
+
+    layer = self.sl.StreamingDotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        query_network=rope_q,
+        key_network=rope_k,
+        name='streaming_dot_product_attention_rope',
+    ).make()
+
+    source = self.random_sequence(batch_size, source_time, source_channels)
+    constants = {source_name: source}
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x, constants=constants)
+
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        constants=constants,
+        stream_constants=True,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_query_key_value_network_supports_step(self):
+    x = self.random_sequence(2, 1, 3)
+    source = self.random_sequence(2, 1, 5)
+    constants = {'source': source}
+
+    l = self.sl.StreamingDotProductAttention.Config(
+        source_name='source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x, constants=constants)
+    self.assertTrue(l.supports_step)
+
+    l = self.sl.StreamingDotProductAttention.Config(
+        source_name='source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=self.sl.test_utils.NonSteppableLayer.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x, constants=constants)
+    self.assertFalse(l.supports_step)
+
+    l = self.sl.StreamingDotProductAttention.Config(
+        source_name='source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.test_utils.NonSteppableLayer.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x, constants=constants)
+    self.assertFalse(l.supports_step)
+
+    l = self.sl.StreamingDotProductAttention.Config(
+        source_name='source',
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.test_utils.NonSteppableLayer.Config(),
+    ).make()
+    l = self.init_layer(l, x, constants=constants)
+    self.assertFalse(l.supports_step)
+
+
+class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
+  """Test behavior of LocalDotProductSelfAttention layer."""
+
+  test_step_in_future_horizon = True
+
+  def test_layer_basic(self):
+    """Basic contract verification."""
+    num_heads, units_per_head = 4, 4
+    max_past_horizon = 8
+    block_size = 2
+    batch_size, time, channels = 2, 8, 16
+
+    layer = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        block_size=block_size,
+        name='local_dot_product_self_attention',
+    ).make()
+
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x)
+
+    self.assertEqual(layer.output_ratio, 1)
+    self.assertEqual(layer.name, 'local_dot_product_self_attention')
+    self.assertEqual(
+        layer.get_output_shape((channels,)),
+        (num_heads, units_per_head),
+    )
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_future_horizon(self):
+    """Delay buffer with max_future_horizon > 0."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 4
+    max_future_horizon = 2
+    block_size = 1
+    batch_size, time, channels = 2, 8, 8
+
+    layer = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        block_size=block_size,
+        name='local_dot_product_self_attention_future',
+    ).make()
+
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x)
+
+    self.assertEqual(layer.input_latency, max_future_horizon)
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        test_step=self.test_step_in_future_horizon,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_with_soft_cap(self):
+    """Soft cap on attention logits."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 8
+    block_size = 1
+    batch_size, time, channels = 2, 8, 8
+
+    layer = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        block_size=block_size,
+        attention_logits_soft_cap=50.0,
+        name='local_dot_product_self_attention_soft_cap',
+    ).make()
+
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x)
+
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_with_rope(self):
+    """Rotary Positional Encoding on query/key."""
+    num_heads, units_per_head = 2, 4
+    max_past_horizon = 8
+    block_size = 1
+    batch_size, time, channels = 2, 8, 8
+
+    rope_q = self.sl.ApplyRotaryPositionalEncoding.Config(
+        max_wavelength=10000.0
+    )
+    rope_k = self.sl.ApplyRotaryPositionalEncoding.Config(
+        max_wavelength=10000.0
+    )
+
+    layer = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        max_past_horizon=max_past_horizon,
+        block_size=block_size,
+        query_network=rope_q,
+        key_network=rope_k,
+        name='local_dot_product_self_attention_rope',
+    ).make()
+
+    x = self.random_sequence(batch_size, time, channels)
+    layer = self.init_layer(layer, x)
+
+    self.verify_contract(
+        layer,
+        x,
+        training=False,
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+  def test_query_key_value_network_supports_step(self):
+    x = self.random_sequence(2, 1, 3)
+
+    l = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        block_size=1,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x)
+    self.assertTrue(l.supports_step)
+
+    l = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        block_size=1,
+        query_network=self.sl.test_utils.NonSteppableLayer.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x)
+    self.assertFalse(l.supports_step)
+
+    l = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        block_size=1,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.test_utils.NonSteppableLayer.Config(),
+        value_network=self.sl.AddTimingSignal.Config(),
+    ).make()
+    l = self.init_layer(l, x)
+    self.assertFalse(l.supports_step)
+
+    l = self.sl.LocalDotProductSelfAttention.Config(
+        num_heads=3,
+        units_per_head=5,
+        max_past_horizon=3,
+        max_future_horizon=0,
+        block_size=1,
+        query_network=self.sl.AddTimingSignal.Config(),
+        key_network=self.sl.AddTimingSignal.Config(),
+        value_network=self.sl.test_utils.NonSteppableLayer.Config(),
+    ).make()
+    l = self.init_layer(l, x)
+    self.assertFalse(l.supports_step)
