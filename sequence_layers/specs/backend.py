@@ -26,16 +26,82 @@ class xp(Protocol):
     """Creates an array of zeros."""
 
   def concatenate(self, arrays: list[Array], axis: int = 0) -> Array:
-    ...
+    """Concatenates arrays."""
+
+  def broadcast_to(self, array: Array, shape: tuple[int, ...]) -> Array:
+    """Broadcasts an array to a new shape."""
+
+  def abs(self, x: Array) -> Array:
+    """Computes absolute value."""
+
+  def exp(self, x: Array) -> Array:
+    """Computes exponential."""
+
+  def log(self, x: Array) -> Array:
+    """Computes natural logarithm."""
+
+  def mean(
+      self,
+      x: Array,
+      axis: int | tuple[int, ...] | None = None,
+      dtype: Any = None,
+      keepdims: bool = False,
+      where: Array | None = None,
+  ) -> Array:
+    """Computes the arithmetic mean along the specified axes."""
+
+  def var(
+      self,
+      x: Array,
+      axis: int | tuple[int, ...] | None = None,
+      dtype: Any = None,
+      keepdims: bool = False,
+      where: Array | None = None,
+  ) -> Array:
+    """Computes the variance along the specified axes."""
 
 
+class nn(Protocol):
+  """Protocol for neural network operations (activations)."""
+
+  def relu(self, x: Array) -> Array:
+    """Computes ReLU activation."""
+
+  def sigmoid(self, x: Array) -> Array:
+    """Computes sigmoid activation."""
+
+  def tanh(self, x: Array) -> Array:
+    """Computes tanh activation."""
+
+  def swish(self, x: Array) -> Array:
+    """Computes swish activation."""
+
+  def gelu(self, x: Array) -> Array:
+    """Computes GeLU activation."""
+
+  def elu(self, x: Array) -> Array:
+    """Computes ELU activation."""
+
+  def softplus(self, x: Array) -> Array:
+    """Computes softplus activation."""
+
+  def softmax(self, x: Array, axis: int = -1) -> Array:
+    """Computes softmax activation."""
+
+
+# pylint: disable=invalid-name
+# pylint: disable=missing-function-docstring
 @runtime_checkable
 class ModuleSpec(Protocol):
   """Specification for sequence_layers.<backend>.backend"""
 
   @property
   def xp(self) -> xp:
-    """Returns the NumPy-compatible interface."""
+    ...
+
+  @property
+  def nn(self) -> nn:
+    ...
 
 
 __all__ = [

@@ -39,6 +39,7 @@ ReceptiveField = tuple[float | int, float | int] | None
 InputT = TypeVar('InputT', bound='Sequence')
 OutputT = TypeVar('OutputT', bound='Sequence')
 
+
 __all__ = (
     # go/keep-sorted start
     'ChannelSpec',
@@ -52,6 +53,7 @@ __all__ = (
     'MaskT',
     'MaskedSequence',
     'PaddingMode',
+    'PaddingModeString',
     'PreservesShape',
     'PreservesType',
     'ReceptiveField',
@@ -98,6 +100,7 @@ class ShapeDType:
 ChannelSpec = ShapeDType
 
 PaddingMode = spec.PaddingMode
+PaddingModeString = spec.PaddingModeString
 
 
 def sequence_mask(lengths: LengthsT, maxlen: int) -> mx.array:
@@ -121,7 +124,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
   @override
   def shape(self) -> Shape:
     """Returns the shape of the sequence values."""
-    return self.values.shape
+    return tuple(self.values.shape)
 
   @property
   @override
@@ -133,7 +136,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
   @override
   def channel_shape(self) -> Shape:
     """Returns the channel shape (the shape without batch and time)."""
-    return self.values.shape[2:]
+    return tuple(self.values.shape[2:])
 
   @property
   def channel_spec(self) -> ChannelSpec:
@@ -169,7 +172,10 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
     """Returns a MaskedSequence assuming every timestep is valid."""
     if values.ndim < 2:
       raise ValueError(f'Expected {values.ndim=} to be at least 2.')
-    return MaskedSequence(values, mx.ones(values.shape[:2], dtype=mx.bool_))
+    array_values = values if isinstance(values, mx.array) else mx.array(values)
+    return MaskedSequence(
+        array_values, mx.ones(array_values.shape[:2], dtype=mx.bool_)
+    )
 
   @classmethod
   @override
@@ -354,16 +360,19 @@ def mask_invalid(
     mask_value: complex | None = None,
 ) -> 'Sequence':
   """Returns a sequence with invalid timesteps replaced."""
+  values = sequence.values
+  if not isinstance(values, mx.array):
+    values = mx.array(values)
   expanded_mask = sequence.expanded_mask()
   if mask_value is None:
-    masked_values = mx.zeros_like(sequence.values)
+    masked_values = mx.zeros_like(values)
     result_type: type[Sequence] = MaskedSequence
   else:
     masked_values = mx.full(
-        sequence.values.shape, mask_value, sequence.values.dtype  # type: ignore[arg-type]
+        values.shape, mask_value, values.dtype  # type: ignore[arg-type]
     )
     result_type = Sequence
-  masked_values = mx.where(expanded_mask, sequence.values, masked_values)
+  masked_values = mx.where(expanded_mask, values, masked_values)
   return result_type(masked_values, sequence.mask)
 
 
@@ -516,6 +525,20 @@ class Steppable(spec.Steppable[Sequence, Sequence, ChannelSpec]):
   @override
   def supports_step(self) -> bool:
     return True
+
+  def get_output_shape_for_sequence(
+      self,
+      x: Sequence,
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    """Returns the output shape this layer produces for the provided Sequence."""
+    return self.get_output_shape(x.channel_shape, constants=constants)
+
+  @property
+  def name(self) -> str | None:
+    """Returns the name of the layer."""
+    return self.config.name if hasattr(self, 'config') else None
 
   @property
   @override
@@ -766,11 +789,11 @@ class Steppable(spec.Steppable[Sequence, Sequence, ChannelSpec]):
 # ---------------------------------------------------------------------------
 
 
+# pylint: disable=abstract-method
 class SequenceLayer(
     nn.Module,
     Steppable,
     spec.SequenceLayer[Sequence, Sequence, ChannelSpec],
-    metaclass=abc.ABCMeta,
 ):
   """Base Module for Sequence Layers."""
 
@@ -794,10 +817,10 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
 # ---------------------------------------------------------------------------
 
 
+# pylint: disable=abstract-method
 class PreservesType(
     SequenceLayer,
     spec.PreservesType[Sequence, Sequence, ChannelSpec],
-    metaclass=abc.ABCMeta,
 ):
   """A mix-in for layers that do not change the input dtype."""
 
@@ -812,10 +835,10 @@ class PreservesType(
     return input_dtype
 
 
+# pylint: disable=abstract-method
 class PreservesShape(
     SequenceLayer,
     spec.PreservesShape[Sequence, Sequence, ChannelSpec],
-    metaclass=abc.ABCMeta,
 ):
   """A mix-in for layers that do not change the input shape."""
 
@@ -902,13 +925,18 @@ class Stateless(SequenceLayer, spec.Stateless[Sequence, Sequence, ChannelSpec]):
     return self.layer(x, training=training, constants=constants), state
 
 
+# pylint: disable=abstract-method
 class StatelessPointwise(
     PreservesShape,
     Stateless,
     spec.StatelessPointwise[Sequence, Sequence, ChannelSpec],
-    metaclass=abc.ABCMeta,
 ):
   """A SequenceLayer that has no state and operates pointwise on its input."""
+
+  @property
+  @override
+  def receptive_field(self) -> tuple[int, int]:
+    return (0, 0)
 
 
 class StatelessPointwiseFunctor(
@@ -919,12 +947,12 @@ class StatelessPointwiseFunctor(
 
   @abc.abstractmethod
   @override
-  def fn(self, values: ValuesT, mask: MaskT) -> tuple[ValuesT, MaskT]:
+  def fn(self, values: mx.array, mask: mx.array) -> tuple[mx.array, mx.array]:
     """Transforms each scalar in values independently."""
 
   @property
   @override
-  def mask_required(self):
+  def mask_required(self) -> bool:
     """Returns true if fn can change the sequence's masked state.
 
     If fn(0) -> 0, then mask_required() is False.
@@ -1123,3 +1151,5 @@ class StatelessEmitting(
         x, training=training, constants=constants
     )
     return outputs, state, emits
+
+
