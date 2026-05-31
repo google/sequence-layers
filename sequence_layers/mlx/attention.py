@@ -235,11 +235,11 @@ class DotProductSelfAttention(
 
     from sequence_layers.mlx import utils as mlx_utils
 
-    if isinstance(self.query_network, types.SequenceLayerConfig):
+    if hasattr(self.query_network, 'make'):
       self.query_network = mlx_utils.make_layer(self.query_network)
-    if isinstance(self.key_network, types.SequenceLayerConfig):
+    if hasattr(self.key_network, 'make'):
       self.key_network = mlx_utils.make_layer(self.key_network)
-    if isinstance(self.value_network, types.SequenceLayerConfig):
+    if hasattr(self.value_network, 'make'):
       self.value_network = mlx_utils.make_layer(self.value_network)
 
     param_dtype = self._param_dtype
@@ -1038,11 +1038,11 @@ class DotProductAttention(
 
     from sequence_layers.mlx import utils as mlx_utils
 
-    if isinstance(self.query_network, types.SequenceLayerConfig):
+    if hasattr(self.query_network, 'make'):
       self.query_network = mlx_utils.make_layer(self.query_network)
-    if isinstance(self.key_network, types.SequenceLayerConfig):
+    if hasattr(self.key_network, 'make'):
       self.key_network = mlx_utils.make_layer(self.key_network)
-    if isinstance(self.value_network, types.SequenceLayerConfig):
+    if hasattr(self.value_network, 'make'):
       self.value_network = mlx_utils.make_layer(self.value_network)
 
     param_dtype = self._param_dtype
@@ -1508,11 +1508,11 @@ class StreamingDotProductAttention(
 
     from sequence_layers.mlx import utils as mlx_utils
 
-    if isinstance(self.query_network, types.SequenceLayerConfig):
+    if hasattr(self.query_network, 'make'):
       self.query_network = mlx_utils.make_layer(self.query_network)
-    if isinstance(self.key_network, types.SequenceLayerConfig):
+    if hasattr(self.key_network, 'make'):
       self.key_network = mlx_utils.make_layer(self.key_network)
-    if isinstance(self.value_network, types.SequenceLayerConfig):
+    if hasattr(self.value_network, 'make'):
       self.value_network = mlx_utils.make_layer(self.value_network)
 
     param_dtype = self._param_dtype

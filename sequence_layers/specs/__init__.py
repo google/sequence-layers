@@ -180,6 +180,30 @@ class ModuleSpec(Protocol):
     ...
 
   @property
+  def CombinedQueryKeyValueProjection(
+      self,
+  ) -> type[_attention.CombinedQueryKeyValueProjection]:
+    ...
+
+  @property
+  def SeparateQueryKeyValueProjection(
+      self,
+  ) -> type[_attention.SeparateQueryKeyValueProjection]:
+    ...
+
+  @property
+  def QueryAndKeyValueProjection(
+      self,
+  ) -> type[_attention.QueryAndKeyValueProjection]:
+    ...
+
+  @property
+  def QueryAndSharedKeyValueProjection(
+      self,
+  ) -> type[_attention.QueryAndSharedKeyValueProjection]:
+    ...
+
+  @property
   def Conditioning(self) -> type[_conditioning.Conditioning]:
     ...
 
