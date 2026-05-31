@@ -12,6 +12,7 @@ from typing import (Any, Callable, cast, Iterable, MutableMapping, override,
 import jaxtyping as jt
 from mlx import nn
 import mlx.core as mx
+import numpy as np
 
 from sequence_layers.specs import types as spec
 
@@ -40,6 +41,35 @@ InputT = TypeVar('InputT', bound='Sequence')
 OutputT = TypeVar('OutputT', bound='Sequence')
 
 
+def _to_tuple(x: complex | list[Any]) -> complex | tuple[Any, ...]:
+  """Replaces lists in a pytree of complex with tuples."""
+  if isinstance(x, list):
+    return tuple(_to_tuple(i) for i in x)
+  return x
+
+
+@dataclasses.dataclass(frozen=True)
+class HashableArray:
+  """Hashable multidimensional array of tuples."""
+
+  data: complex | tuple[Any, ...]
+  dtype: Any
+
+  @classmethod
+  def from_array(cls, x: Any) -> 'HashableArray':
+    """Creates a HashableArray from a numpy-like array."""
+    if isinstance(x, cls):
+      return x
+    if hasattr(x, 'data') and hasattr(x, 'dtype') and hasattr(x, 'to_array'):
+      return cls(x.data, x.dtype)
+    x = np.asarray(x)
+    return cls(_to_tuple(x.tolist()), x.dtype)
+
+  def to_array(self) -> Any:
+    """Converts HashableArray back to a numpy array."""
+    return np.asarray(self.data, dtype=self.dtype)
+
+
 __all__ = (
     # go/keep-sorted start
     'ChannelSpec',
@@ -48,6 +78,7 @@ __all__ = (
     'Emits',
     'Emitting',
     'ExpandedMaskT',
+    'HashableArray',
     'LengthsT',
     'MASK_DTYPE',
     'MaskT',
@@ -1151,5 +1182,3 @@ class StatelessEmitting(
         x, training=training, constants=constants
     )
     return outputs, state, emits
-
-

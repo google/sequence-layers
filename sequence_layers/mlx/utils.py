@@ -1,6 +1,14 @@
 """Utility functions for MLX sequence layers."""
 
+import dataclasses
 import inspect
+from typing import Any
+
+from mlx import nn
+import mlx.core as mx
+import numpy as np
+
+from sequence_layers.specs import types as specs_types
 
 
 def get_output_latency(config, accumulated_output_latency=0):
@@ -119,3 +127,160 @@ def call_get_initial_state(
     if k in sig.parameters:
       call_kwargs[k] = v
   return layer.get_initial_state(batch_size, input_spec, **call_kwargs)
+
+
+def _to_mx_dtype(dtype: Any) -> Any:
+  """Converts various dtype representations to MLX DType."""
+  if dtype is None:
+    return None
+  if isinstance(dtype, str):
+    if dtype == 'float32':
+      return mx.float32
+    if dtype == 'float16':
+      return mx.float16
+    if dtype == 'int32':
+      return mx.int32
+    if dtype == 'bool':
+      return mx.bool_
+  # Handle JAX/Numpy dtypes
+  try:
+    np_dtype = np.dtype(dtype)
+    if np_dtype == np.float32:
+      return mx.float32
+    if np_dtype == np.float16:
+      return mx.float16
+    if np_dtype == np.int32:
+      return mx.int32
+    if np_dtype == np.bool_:
+      return mx.bool_
+  except (TypeError, ValueError):
+    pass
+  return dtype
+
+
+def _map_activation(act: Any) -> Any:
+  """Maps an activation function or its name to the corresponding MLX activation."""
+  if act is None:
+    return None
+  if not callable(act):
+    return act
+
+  name = getattr(act, '__name__', None)
+  if name is None:
+    return act
+
+  activations = {
+      'relu': nn.relu,
+      'gelu': nn.gelu,
+      'silu': nn.silu,
+      'swish': nn.silu,
+      'sigmoid': mx.sigmoid,
+      'tanh': mx.tanh,
+      'elu': nn.elu,
+      'softmax': mx.softmax,
+      'softplus': nn.softplus,
+  }
+  return activations.get(name, act)
+
+
+# pylint: disable=too-many-nested-blocks
+def make_layer(config, backend='mlx') -> Any:
+  """Instantiates an MLX layer from a JAX or Spec config."""
+
+  # 1. Try calling config.make() if it supports backend argument.
+  if (
+      hasattr(config, 'make')
+      and type(config).make != specs_types.SequenceLayerConfig.make
+  ):
+    sig = inspect.signature(config.make)
+    if 'backend' in sig.parameters:
+      layer = config.make(backend=backend)
+      if layer is not None:
+        return layer
+    # If it's an MLX-specific config, it might have no-arg make() returning MLX layer.
+    config_module = config.__class__.__module__
+    if 'mlx' in config_module:
+      layer = config.make()
+      if layer is not None:
+        return layer
+
+  # 2. Fallback to from_config resolution.
+  config_class = config.__class__
+  parts = config_class.__qualname__.split('.')
+  if len(parts) > 1 and parts[-1] == 'Config':
+    class_name = parts[-2]
+  else:
+    class_name = config_class.__name__
+    if class_name.endswith('Config'):
+      class_name = class_name[:-6]
+
+  import sequence_layers.mlx as mlx_module  # pylint: disable=import-outside-toplevel
+
+  if not hasattr(mlx_module, class_name):
+    raise AttributeError(
+        f"Concrete MLX class '{class_name}' not found in sequence_layers.mlx."
+        ' Make sure it is imported and exposed in'
+        ' sequence_layers/mlx/__init__.py.'
+    )
+  mlx_class = getattr(mlx_module, class_name)
+
+  if hasattr(mlx_class, 'from_config'):
+    sig = inspect.signature(mlx_class.from_config)
+    if 'backend' in sig.parameters:
+      return mlx_class.from_config(config, backend=backend)
+    return mlx_class.from_config(config)
+
+  # 3. Dynamic conversion fallback for leaf layers without from_config.
+  if hasattr(mlx_class, 'Config') and dataclasses.is_dataclass(
+      mlx_class.Config
+  ):
+    mlx_config_class = mlx_class.Config
+    mlx_fields = {f.name: f for f in dataclasses.fields(mlx_config_class)}
+
+    kwargs = {}
+    for f in dataclasses.fields(config):
+      if f.name in mlx_fields:
+        val = getattr(config, f.name)
+
+        # Map activations and dtypes
+        if f.name == 'activation':
+          val = _map_activation(val)
+        elif 'dtype' in f.name:
+          val = _to_mx_dtype(val)
+
+        # Recursively convert nested configs
+        if isinstance(val, (list, tuple)):
+          new_val = []
+          for item in val:
+            if hasattr(item, '__class__') and dataclasses.is_dataclass(item):
+              try:
+                new_val.append(make_layer(item, backend=backend))
+              except Exception:  # pylint: disable=broad-exception-caught
+                new_val.append(item)
+            else:
+              new_val.append(item)
+          val = type(val)(new_val)
+        elif hasattr(val, '__class__') and dataclasses.is_dataclass(val):
+          try:
+            val = make_layer(val, backend=backend)
+          except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+        kwargs[f.name] = val
+
+    try:
+      mlx_config = mlx_config_class(**kwargs)
+      return mlx_config.make()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      raise AttributeError(
+          f"Concrete MLX class '{class_name}' does not implement from_config "
+          f'and dynamic instantiation failed: {e}'
+      ) from e
+
+  raise AttributeError(
+      f"Concrete MLX class '{class_name}' does not implement from_config "
+      'and has no Config dataclass for dynamic instantiation.'
+  )
+
+
+# pylint: enable=too-many-nested-blocks
