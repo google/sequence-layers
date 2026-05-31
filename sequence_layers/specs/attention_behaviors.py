@@ -5,6 +5,8 @@ Backend-specific test files should inherit from these tests.
 
 # pylint: disable=abstract-method
 
+from absl.testing import parameterized
+
 from sequence_layers.specs import test_utils
 
 
@@ -89,6 +91,111 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     layer = self.init_layer(layer, x)
     self.verify_contract(layer, x, atol=1e-4, rtol=1e-4)
 
+  @parameterized.product(
+      (
+          # CombinedQueryKeyValueProjection. GQA is not supported.
+          {
+              'input_projection_name': 'CombinedQueryKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 3,
+              'num_kv_heads': None,
+          },
+          {
+              'input_projection_name': 'CombinedQueryKeyValueProjection',
+              'share_kv_projection': True,
+              'num_heads': 3,
+              'num_kv_heads': None,
+          },
+          # SeparateQueryKeyValueProjection. MHA and GQA supported.
+          {
+              'input_projection_name': 'SeparateQueryKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 3,
+              'num_kv_heads': None,
+          },
+          {
+              'input_projection_name': 'SeparateQueryKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 6,
+              'num_kv_heads': 3,
+          },
+          # QueryAndKeyValueProjection. MHA and GQA supported.
+          {
+              'input_projection_name': 'QueryAndKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 3,
+              'num_kv_heads': None,
+          },
+          {
+              'input_projection_name': 'QueryAndKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 6,
+              'num_kv_heads': 3,
+          },
+          # QueryAndSharedKeyValueProjection. MHA and GQA supported.
+          {
+              'input_projection_name': 'QueryAndSharedKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 3,
+              'num_kv_heads': None,
+          },
+          {
+              'input_projection_name': 'QueryAndSharedKeyValueProjection',
+              'share_kv_projection': False,
+              'num_heads': 6,
+              'num_kv_heads': 3,
+          },
+      ),
+  )
+  def test_projection_config_contract(
+      self,
+      input_projection_name: str,
+      share_kv_projection: bool,
+      num_heads: int,
+      num_kv_heads: int | None,
+  ):
+    proj_cls = getattr(self.sl.attention, input_projection_name)
+    if input_projection_name == 'CombinedQueryKeyValueProjection':
+      input_projection = proj_cls(share_kv_projection=share_kv_projection)
+    else:
+      input_projection = proj_cls()
+
+    batch_size, units_per_head = 2, 5
+    max_past_horizon = 7
+    max_future_horizon = 11
+
+    l = self.sl.DotProductSelfAttention.Config(
+        num_heads=num_heads,
+        num_kv_heads=num_kv_heads,
+        units_per_head=units_per_head,
+        input_projection=input_projection,
+        max_past_horizon=max_past_horizon,
+        max_future_horizon=max_future_horizon,
+        name='dot_product_self_attention',
+    ).make()
+
+    x = self.random_sequence(batch_size, 16, 2)
+    l = self.init_layer(l, x)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'dot_product_self_attention')
+    self.assertEqual(
+        l.get_output_shape((2,)), (num_heads, units_per_head)
+    )
+    self.assertTrue(l.supports_step)
+    self.assertEqual(l.input_latency, max(0, max_future_horizon))
+
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        grad_atol=1e-5,
+        grad_rtol=1e-5,
+    )
+
+
+
 
 class DotProductAttentionTest(test_utils.SequenceLayerTest):
   """Test behavior of DotProductAttention layer."""
@@ -160,3 +267,38 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
     layer = self.init_layer(layer, x, bind_only=True)
     with self.assertRaises(ValueError):
       layer.layer(x, constants={}, training=False)
+
+  def test_logits_soft_cap(self):
+    num_heads, units_per_head = 3, 5
+    batch_size, source_time, source_channels = 2, 11, 2
+    source_name = 'source'
+    l = self.sl.DotProductAttention.Config(
+        source_name,
+        num_heads=num_heads,
+        units_per_head=units_per_head,
+        attention_logits_soft_cap=50.0,
+        name='dot_product_attention',
+    ).make()
+
+    source = self.random_sequence(batch_size, source_time, source_channels)
+    constants = {source_name: source}
+    time, channels = 21, 3
+    x = self.random_sequence(batch_size, time, channels)
+    l = self.init_layer(l, x, constants=constants)
+
+    self.assertEqual(l.block_size, 1)
+    self.assertEqual(l.output_ratio, 1)
+    self.assertEqual(l.name, 'dot_product_attention')
+
+    self.assertEqual(
+        l.get_output_shape((channels,)),
+        (num_heads, units_per_head),
+    )
+    self.verify_contract(
+        l,
+        x,
+        training=False,
+        constants=constants,
+        grad_atol=1e-5,
+        grad_rtol=1e-5,
+    )

@@ -10,6 +10,10 @@ import numpy as np
 from collections.abc import Sequence as TypingSequence
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import projection_configs
+from sequence_layers.mlx.projection_configs import CombinedQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import SeparateQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryAndKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryAndSharedKeyValueProjection
 from sequence_layers.mlx import types
 from sequence_layers.specs import attention as attention_spec
 
