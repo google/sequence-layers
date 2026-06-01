@@ -91,6 +91,19 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     layer = self.init_layer(layer, x)
     self.verify_contract(layer, x, atol=1e-4, rtol=1e-4)
 
+  @parameterized.parameters(1, 4, 6)
+  def test_use_kv_cache_ringbuffer(self, time: int):
+    """Test ring buffer wrap-around: layer() vs step() parity."""
+    layer = self.sl.DotProductSelfAttention.Config(
+        num_heads=2,
+        units_per_head=4,
+        max_past_horizon=4,
+        max_future_horizon=0,
+    ).make()
+    x = self.random_sequence(2, time, 8)
+    layer = self.init_layer(layer, x)
+    self.verify_contract(layer, x, atol=1e-4, rtol=1e-4)
+
   @parameterized.product(
       (
           # CombinedQueryKeyValueProjection. GQA is not supported.
