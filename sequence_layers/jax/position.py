@@ -45,7 +45,15 @@ class AddTimingSignal(
   class Config(position_spec.AddTimingSignal.Config):
     """Config for AddTimingSignal."""
 
+    # Stated explicitly for JAX documentation and IDE support
+    min_timescale: float = 1.0
+    max_timescale: float = 1.0e4
+    trainable_scale: bool = False
+    axes: int | tuple[int, ...] | None = None
+    sharding: types.Sharding | None = None
     param_dtype: types.DType = jnp.float32
+    only_advance_position_for_valid_timesteps: bool = True
+    name: str | None = None
 
     @override
     def make(self) -> 'AddTimingSignal':
@@ -193,6 +201,14 @@ class ApplyRotaryPositionalEncoding(
   @dataclasses.dataclass(frozen=True)
   class Config(position_spec.ApplyRotaryPositionalEncoding.Config):
     """Config for ApplyRotaryPositionalEncoding."""
+
+    # Stated explicitly for JAX documentation and IDE support
+    max_wavelength: float
+    axis: int = -1
+    only_advance_position_for_valid_timesteps: bool = True
+    positions_in_at_least_fp32: bool = True
+    positions_name: str | None = None
+    name: str | None = None
 
     @override
     def make(self) -> 'ApplyRotaryPositionalEncoding':

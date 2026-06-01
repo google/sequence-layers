@@ -338,12 +338,20 @@ class Conditioning(
   class Config(conditioning_spec.Conditioning.Config):
     """Config for Conditioning."""
 
-    # Override defaults or add JAX-specific fields
+    # Stated explicitly for JAX documentation and IDE support
+    conditioning_name: str
+    projection: BaseConditioning.Projection
+    combination: BaseConditioning.Combination
+    projection_channel_shape: types.Shape | None = None
+    streaming: bool = False
+    affine_scale_offset: complex = 1.0
+    compute_dtype: types.DType | None = None
     param_dtype: types.DType = jnp.float32
     kernel_init: nn.initializers.Initializer = nn.linear.default_kernel_init
     kernel_sharding: types.Sharding | None = None
     bias_init: nn.initializers.Initializer = nn.initializers.zeros_init()
     bias_sharding: types.Sharding | None = None
+    name: str | None = None
 
     @override
     def make(self) -> 'Conditioning':
