@@ -19,6 +19,21 @@ from sequence_layers.specs import attention as attention_spec
 Sequence = types.Sequence
 MaskedSequence = types.MaskedSequence
 
+
+@dataclasses.dataclass(frozen=True)
+class SelfAttentionEmits:
+  """A structure for emits produced by self attention layers."""
+
+  probabilities: Sequence
+
+
+@dataclasses.dataclass(frozen=True)
+class CrossAttentionEmits:
+  """A structure for emits produced by attention layers."""
+
+  probabilities_by_source: dict[str, Sequence]
+
+
 __all__ = (
     'DotProductSelfAttention',
     'DotProductAttention',
@@ -28,6 +43,8 @@ __all__ = (
     'SeparateQueryKeyValueProjection',
     'QueryAndKeyValueProjection',
     'QueryAndSharedKeyValueProjection',
+    'SelfAttentionEmits',
+    'CrossAttentionEmits',
 )
 
 
@@ -416,7 +433,9 @@ class DotProductSelfAttention(
         Sequence(val, x.mask),
     )
 
-  def _compute_attention(self, queries, keys, values, mask):
+  def _compute_attention(
+      self, queries, keys, values, mask, emit_attention_weights=False
+  ):
     """Compute scaled dot-product attention.
 
     Args:
@@ -424,15 +443,18 @@ class DotProductSelfAttention(
       keys: [b, kv_t, num_kv_heads, units_per_head]
       values: [b, kv_t, num_kv_heads, units_per_head]
       mask: [b, 1, q_t, kv_t] boolean mask (True = attend)
+      emit_attention_weights: bool. Whether to emit attention weights.
 
     Returns:
-      context: [b, q_t, num_heads, units_per_head]
+      (context, weights) tuple.
+        context: [b, q_t, num_heads, units_per_head]
+        weights: [b, q_t, num_heads, kv_t] or ()
     """
     # Use mx.fast.scaled_dot_product_attention unless soft_cap forces
-    # manual logit manipulation.
+    # manual logit manipulation or emits are requested.
     has_soft_cap = getattr(self, '_attention_logits_soft_cap', None) is not None
 
-    if not has_soft_cap:
+    if not has_soft_cap and not emit_attention_weights:
       # SDPA path — handles both plain and sink cases.
       q = mx.transpose(queries, (0, 2, 1, 3))
       k = mx.transpose(keys, (0, 2, 1, 3))
@@ -486,9 +508,9 @@ class DotProductSelfAttention(
       context = mx.fast.scaled_dot_product_attention(
           q, k, v, scale=1.0, mask=mask
       )
-      return mx.transpose(context, (0, 2, 1, 3))
+      return mx.transpose(context, (0, 2, 1, 3)), ()
 
-    # Manual path — only for attention_logits_soft_cap.
+    # Manual path — for attention_logits_soft_cap or when emits are requested.
     num_groups = self.num_heads // self.num_kv_heads
     if num_groups > 1:
       keys = mx.repeat(keys, num_groups, axis=2)
@@ -527,8 +549,9 @@ class DotProductSelfAttention(
         )
         mask = mx.concatenate([sink_mask, mask], axis=-1)
 
-    cap = cast(Any, self._attention_logits_soft_cap)
-    logits = mx.tanh(logits / cap) * cap
+    if has_soft_cap:
+      cap = cast(Any, self._attention_logits_soft_cap)
+      logits = mx.tanh(logits / cap) * cap
 
     if mask is not None:
       large_neg = mx.array(-1e9, dtype=logits.dtype)
@@ -540,7 +563,13 @@ class DotProductSelfAttention(
     weights = mx.softmax(logits_f32, axis=-1).astype(v.dtype)
     context = mx.matmul(weights, v)
     context = mx.transpose(context, (0, 2, 1, 3))
-    return context
+
+    emits = ()
+    if emit_attention_weights:
+      # Transpose from [b, nh, q, kv] back to [b, q, nh, kv] to match JAX.
+      emits = mx.transpose(weights, (0, 2, 1, 3))
+
+    return context, emits
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -697,10 +726,17 @@ class DotProductSelfAttention(
       banded = (col >= row - past) & (col <= row + future)
       valid_mask = valid_mask & banded.reshape(1, 1, t, t)
 
-    context = self._compute_attention(
-        queries.values, keys.values, values.values, valid_mask
+    context, probs = self._compute_attention(
+        queries.values,
+        keys.values,
+        values.values,
+        valid_mask,
+        emit_attention_weights=self.config.emit_attention_weights,
     )
-    return Sequence(context, x.mask), ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = SelfAttentionEmits(Sequence(probs, x.mask))
+    return Sequence(context, x.mask), emits
 
   @override
   def step_with_emits(self, x, state: Any, *, training: bool, constants=None):
@@ -794,8 +830,12 @@ class DotProductSelfAttention(
           1, 1, x_time, kv_buffer_size + x_time
       )
 
-      context = self._compute_attention(
-          queries.values, combined_k, combined_v, kv_valid
+      context, probs = self._compute_attention(
+          queries.values,
+          combined_k,
+          combined_v,
+          kv_valid,
+          emit_attention_weights=self.config.emit_attention_weights,
       )
 
       # Ring buffer write AFTER read: insert new K/V at rotating positions.
@@ -817,8 +857,12 @@ class DotProductSelfAttention(
       if x_time > 1:
         causal = _causal_mask(x_time, x_time)
         kv_valid = kv_valid & causal
-      context = self._compute_attention(
-          queries.values, keys.values, values.values, kv_valid
+      context, probs = self._compute_attention(
+          queries.values,
+          keys.values,
+          values.values,
+          kv_valid,
+          emit_attention_weights=self.config.emit_attention_weights,
       )
 
     new_state = (
@@ -832,7 +876,10 @@ class DotProductSelfAttention(
         q_delay_values,
         q_delay_mask,
     )
-    return Sequence(context, queries.mask), new_state, ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = SelfAttentionEmits(Sequence(probs, queries.mask))
+    return Sequence(context, queries.mask), new_state, emits
 
   def to_quantized(
       self, group_size: int = 64, bits: int = 4, mode: str = 'affine'
@@ -1200,7 +1247,9 @@ class DotProductAttention(
       raise ValueError(f'Source "{self.source_name}" not found in constants.')
     return constants[self.source_name]
 
-  def _compute_attention(self, queries, keys, values, mask):
+  def _compute_attention(
+      self, queries, keys, values, mask, emit_attention_weights=False
+  ):
     """Compute scaled dot-product attention (no causal mask)."""
     q = mx.transpose(queries, (0, 2, 1, 3))
     k = mx.transpose(keys, (0, 2, 1, 3))
@@ -1210,10 +1259,28 @@ class DotProductAttention(
         q, self._per_dim_scale, self._query_scale, self.units_per_head
     )
 
-    context = mx.fast.scaled_dot_product_attention(
-        q, k, v, scale=1.0, mask=mask
+    if not emit_attention_weights:
+      context = mx.fast.scaled_dot_product_attention(
+          q, k, v, scale=1.0, mask=mask
+      )
+      return mx.transpose(context, (0, 2, 1, 3)), ()
+
+    # Manual path for emits
+    logits = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))
+
+    if mask is not None:
+      large_neg = mx.array(-1e9, dtype=logits.dtype)
+      logits = mx.where(mask, logits, large_neg)
+
+    logits_f32 = (
+        logits.astype(mx.float32) if logits.dtype != mx.float32 else logits
     )
-    return mx.transpose(context, (0, 2, 1, 3))
+    weights = mx.softmax(logits_f32, axis=-1).astype(v.dtype)
+    context = mx.matmul(weights, v)
+    context = mx.transpose(context, (0, 2, 1, 3))
+
+    emits = mx.transpose(weights, (0, 2, 1, 3))
+    return context, emits
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -1304,10 +1371,17 @@ class DotProductAttention(
 
     values = values.mask_invalid()
     valid_mask = source.mask[:, None, None, :]
-    context = self._compute_attention(
-        queries.values, keys.values, values.values, valid_mask
+    context, probs = self._compute_attention(
+        queries.values,
+        keys.values,
+        values.values,
+        valid_mask,
+        emit_attention_weights=self.config.emit_attention_weights,
     )
-    return Sequence(context, x.mask), ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = CrossAttentionEmits({self.source_name: Sequence(probs, x.mask)})
+    return Sequence(context, x.mask), emits
 
   @override
   def step_with_emits(self, x, state: Any, *, training: bool, constants=None):
@@ -1322,8 +1396,12 @@ class DotProductAttention(
       )
 
     valid_mask = kv_mask[:, None, None, :]
-    context = self._compute_attention(
-        queries.values, keys_v, values_v, valid_mask
+    context, probs = self._compute_attention(
+        queries.values,
+        keys_v,
+        values_v,
+        valid_mask,
+        emit_attention_weights=self.config.emit_attention_weights,
     )
 
     new_state = (
@@ -1333,7 +1411,10 @@ class DotProductAttention(
         q_net_state,
         time_step + x.shape[1],
     )
-    return Sequence(context, x.mask), new_state, ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = CrossAttentionEmits({self.source_name: Sequence(probs, x.mask)})
+    return Sequence(context, x.mask), new_state, emits
 
   @classmethod
   def from_config(cls, config: Any) -> 'DotProductAttention':
@@ -1727,7 +1808,9 @@ class StreamingDotProductAttention(
       raise ValueError(f'Source "{self.source_name}" not found in constants.')
     return constants[self.source_name]
 
-  def _compute_attention(self, queries, keys, values, mask):
+  def _compute_attention(
+      self, queries, keys, values, mask, emit_attention_weights=False
+  ):
     """Compute scaled dot-product attention."""
     q = mx.transpose(queries, (0, 2, 1, 3))
     k = mx.transpose(keys, (0, 2, 1, 3))
@@ -1737,31 +1820,61 @@ class StreamingDotProductAttention(
         q, self._per_dim_scale, self._query_scale, self.units_per_head
     )
 
+    if not emit_attention_weights:
+      if self.sink_key_embeddings is not None:
+        # JAX computes sink logits with *unscaled* queries.  Pre-divide
+        # sink keys by the scale so that SDPA produces equivalent logits:
+        #   scaled_q @ (sink_k / scale) == unscaled_q @ sink_k
+        scale_vec = _query_scale_vector(
+            self._per_dim_scale,
+            self._query_scale,
+            self.units_per_head,
+            q.dtype,
+        )
+        sink_k = self.sink_key_embeddings.astype(q.dtype) / scale_vec
+        sink_v = self.sink_value_embeddings.astype(v.dtype)
+
+        sink_k_b = mx.broadcast_to(
+            mx.transpose(sink_k, (1, 0, 2))[None],
+            (q.shape[0], self.num_heads, sink_k.shape[0], self.units_per_head),
+        )
+        sink_v_b = mx.broadcast_to(
+            mx.transpose(sink_v, (1, 0, 2))[None],
+            (v.shape[0], self.num_heads, sink_v.shape[0], self.units_per_head),
+        )
+
+        k = mx.concatenate([sink_k_b, k], axis=2)
+        v = mx.concatenate([sink_v_b, v], axis=2)
+
+        if mask is not None:
+          num_sinks = self.sink_key_embeddings.shape[0]
+          sink_mask = mx.ones(
+              (mask.shape[0], mask.shape[1], mask.shape[2], num_sinks),
+              dtype=mx.bool_,
+          )
+          mask = mx.concatenate([sink_mask, mask], axis=-1)
+
+      context = mx.fast.scaled_dot_product_attention(
+          q, k, v, scale=1.0, mask=mask
+      )
+      return mx.transpose(context, (0, 2, 1, 3)), ()
+
+    # Manual path for emits
+    sink_logits = None
     if self.sink_key_embeddings is not None:
-      # JAX computes sink logits with *unscaled* queries.  Pre-divide
-      # sink keys by the scale so that SDPA produces equivalent logits:
-      #   scaled_q @ (sink_k / scale) == unscaled_q @ sink_k
-      scale_vec = _query_scale_vector(
-          self._per_dim_scale,
-          self._query_scale,
-          self.units_per_head,
-          q.dtype,
-      )
-      sink_k = self.sink_key_embeddings.astype(q.dtype) / scale_vec
+      sink_k = self.sink_key_embeddings.astype(q.dtype)
+      sink_k_t = mx.transpose(sink_k, (1, 2, 0))
+      sink_logits = mx.matmul(q, sink_k_t)
+
+    logits = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))
+
+    if self.sink_key_embeddings is not None:
       sink_v = self.sink_value_embeddings.astype(v.dtype)
-
-      sink_k_b = mx.broadcast_to(
-          mx.transpose(sink_k, (1, 0, 2))[None],
-          (q.shape[0], self.num_heads, sink_k.shape[0], self.units_per_head),
-      )
-      sink_v_b = mx.broadcast_to(
-          mx.transpose(sink_v, (1, 0, 2))[None],
-          (v.shape[0], self.num_heads, sink_v.shape[0], self.units_per_head),
-      )
-
-      k = mx.concatenate([sink_k_b, k], axis=2)
+      sink_v_t = mx.transpose(sink_v, (1, 0, 2))
+      sink_v_b = mx.broadcast_to(sink_v_t[None], (v.shape[0],) + sink_v_t.shape)
       v = mx.concatenate([sink_v_b, v], axis=2)
-
+      assert sink_logits is not None
+      logits = mx.concatenate([sink_logits, logits], axis=-1)
       if mask is not None:
         num_sinks = self.sink_key_embeddings.shape[0]
         sink_mask = mx.ones(
@@ -1770,10 +1883,19 @@ class StreamingDotProductAttention(
         )
         mask = mx.concatenate([sink_mask, mask], axis=-1)
 
-    context = mx.fast.scaled_dot_product_attention(
-        q, k, v, scale=1.0, mask=mask
+    if mask is not None:
+      large_neg = mx.array(-1e9, dtype=logits.dtype)
+      logits = mx.where(mask, logits, large_neg)
+
+    logits_f32 = (
+        logits.astype(mx.float32) if logits.dtype != mx.float32 else logits
     )
-    return mx.transpose(context, (0, 2, 1, 3))
+    weights = mx.softmax(logits_f32, axis=-1).astype(v.dtype)
+    context = mx.matmul(weights, v)
+    context = mx.transpose(context, (0, 2, 1, 3))
+
+    emits = mx.transpose(weights, (0, 2, 1, 3))
+    return context, emits
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -1931,10 +2053,17 @@ class StreamingDotProductAttention(
     )
     valid_mask = valid_mask & banded
 
-    context = self._compute_attention(
-        queries.values, keys.values, values.values, valid_mask
+    context, probs = self._compute_attention(
+        queries.values,
+        keys.values,
+        values.values,
+        valid_mask,
+        emit_attention_weights=self.config.emit_attention_weights,
     )
-    return Sequence(context, x.mask), ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = CrossAttentionEmits({self.source_name: Sequence(probs, x.mask)})
+    return Sequence(context, x.mask), emits
 
   @override
   def step_with_emits(self, x, state: Any, *, training: bool, constants=None):
@@ -2014,7 +2143,13 @@ class StreamingDotProductAttention(
     if vis_mask is not None:
       valid_mask = valid_mask & vis_mask
 
-    context = self._compute_attention(queries.values, new_k, new_v, valid_mask)
+    context, probs = self._compute_attention(
+        queries.values,
+        new_k,
+        new_v,
+        valid_mask,
+        emit_attention_weights=self.config.emit_attention_weights,
+    )
 
     # Trim KV buffer to keep only last kv_buffer_size entries.
     new_k = new_k[:, -kv_buffer_size:]
@@ -2032,7 +2167,12 @@ class StreamingDotProductAttention(
         q_delay_values,
         q_delay_mask,
     )
-    return Sequence(context, queries.mask), new_state, ()
+    emits = ()
+    if self.config.emit_attention_weights:
+      emits = CrossAttentionEmits(
+          {self.source_name: Sequence(probs, queries.mask)}
+      )
+    return Sequence(context, queries.mask), new_state, emits
 
   def to_quantized(
       self, group_size: int = 64, bits: int = 4, mode: str = 'affine'

@@ -5,7 +5,7 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, override, Protocol, runtime_checkable, Type
 
 from sequence_layers.specs import types as types_spec
 
@@ -68,7 +68,10 @@ class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
 class DotProductSelfAttention[
     SequenceT: types_spec.Sequence,
     ShapeDTypeT: types_spec.ChannelSpec,
-](types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT], metaclass=abc.ABCMeta):
+](
+    types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT],
+    metaclass=abc.ABCMeta,
+):
   """Specification for DotProductSelfAttention layer.
 
   Multi-headed dot-product self-attention with causal masking and KV caching.
@@ -101,8 +104,10 @@ class DotProductSelfAttention[
     num_sink_embeddings: int = 0
     use_sink_scalars: bool = False
     use_kv_cache_ringbuffer: bool = False
+    emit_attention_weights: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
 
@@ -122,6 +127,7 @@ class LocalDotProductSelfAttention[
 
     block_size: int = 1
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
 
@@ -129,7 +135,10 @@ class LocalDotProductSelfAttention[
 class DotProductAttention[
     SequenceT: types_spec.Sequence,
     ShapeDTypeT: types_spec.ChannelSpec,
-](types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT], metaclass=abc.ABCMeta):
+](
+    types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT],
+    metaclass=abc.ABCMeta,
+):
   """Specification for DotProductAttention layer.
 
   Multi-headed cross-attention attending to an external source.
@@ -157,8 +166,10 @@ class DotProductAttention[
     zero_fully_masked: bool = False
     compute_dtype: types_spec.DType | None = None
     param_dtype: types_spec.DType | None = None
+    emit_attention_weights: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
 
@@ -166,7 +177,10 @@ class DotProductAttention[
 class StreamingDotProductAttention[
     SequenceT: types_spec.Sequence,
     ShapeDTypeT: types_spec.ChannelSpec,
-](types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT], metaclass=abc.ABCMeta):
+](
+    types_spec.Emitting[SequenceT, SequenceT, ShapeDTypeT],
+    metaclass=abc.ABCMeta,
+):
   """Specification for StreamingDotProductAttention layer.
 
   Streaming cross-attention with rolling KV buffer. Also covers
@@ -203,8 +217,10 @@ class StreamingDotProductAttention[
     num_sink_embeddings: int = 0
     use_sink_scalars: bool = False
     use_kv_cache_ringbuffer: bool = False
+    emit_attention_weights: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
 
@@ -213,6 +229,7 @@ class StreamingDotProductAttention[
 # ModuleSpec Protocol
 # =============================================================================
 
+
 # pylint: disable=invalid-name
 # pylint: disable=missing-function-docstring
 @runtime_checkable
@@ -220,27 +237,29 @@ class ModuleSpec(Protocol):
   """Protocol for the attention submodule of a backend."""
 
   @property
-  def DotProductSelfAttention(self) -> type[DotProductSelfAttention]:
+  def DotProductSelfAttention(self) -> Type[DotProductSelfAttention]:
     ...
 
   @property
-  def DotProductAttention(self) -> type[DotProductAttention]:
+  def DotProductAttention(self) -> Type[DotProductAttention]:
     ...
 
   @property
-  def StreamingDotProductAttention(self) -> type[StreamingDotProductAttention]:
+  def StreamingDotProductAttention(
+      self,
+  ) -> Type[StreamingDotProductAttention]:
     ...
 
   @property
   def StreamingLocalDotProductAttention(
       self,
-  ) -> type[StreamingDotProductAttention]:
+  ) -> Type[Any]:
     ...
 
   @property
   def LocalDotProductSelfAttention(
       self,
-  ) -> type[LocalDotProductSelfAttention]:
+  ) -> Type[LocalDotProductSelfAttention]:
     ...
 
   @property

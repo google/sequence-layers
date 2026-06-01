@@ -136,6 +136,8 @@ class StreamingDotProductAttention(
     # * Incompatible with relative_position_embedding.
     # * Requires streaming step sizes of 1.
     use_kv_cache_ringbuffer: bool = False
+    # Whether to emit attention weights.
+    emit_attention_weights: bool = False
     # An optional name for the layer.
     name: str | None = None
 

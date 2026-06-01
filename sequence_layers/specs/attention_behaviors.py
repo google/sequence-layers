@@ -6,6 +6,7 @@ Backend-specific test files should inherit from these tests.
 # pylint: disable=abstract-method
 
 from absl.testing import parameterized
+import numpy as np
 
 from sequence_layers.specs import test_utils
 
@@ -251,6 +252,32 @@ class DotProductSelfAttentionTest(test_utils.SequenceLayerTest):
         grad_rtol=1e-5,
     )
 
+  def test_attention_emits(self):
+    layer = self.sl.DotProductSelfAttention.Config(
+        num_heads=2,
+        units_per_head=4,
+        max_past_horizon=10,
+        emit_attention_weights=True,
+        name='self_attn_emits',
+    ).make()
+    x = self.random_sequence(2, 5, 8)
+    layer = self.init_layer(layer, x)
+
+    y_emits, emits = layer.layer_with_emits(x, training=False)
+    self.assertIsNotNone(emits)
+    self.assertTrue(hasattr(emits, 'probabilities'))
+
+    probs = emits.probabilities
+    self.assertEqual(probs.shape, (2, 5, 2, 5))
+
+    sum_probs = np.sum(np.asarray(probs.values), axis=-1)
+    np.testing.assert_allclose(sum_probs, 1.0, atol=1e-5)
+
+    y_standard = layer.layer(x, training=False)
+    np.testing.assert_allclose(
+        np.asarray(y_emits.values), np.asarray(y_standard.values), atol=1e-5
+    )
+
 
 class DotProductAttentionTest(test_utils.SequenceLayerTest):
   """Test behavior of DotProductAttention layer."""
@@ -356,6 +383,37 @@ class DotProductAttentionTest(test_utils.SequenceLayerTest):
         constants=constants,
         grad_atol=1e-5,
         grad_rtol=1e-5,
+    )
+
+  def test_attention_emits(self):
+    layer = self.sl.DotProductAttention.Config(
+        source_name='enc_source',
+        num_heads=2,
+        units_per_head=4,
+        emit_attention_weights=True,
+        name='cross_attn_emits',
+    ).make()
+    source = self.random_sequence(2, 6, 8)
+    x = self.random_sequence(2, 4, 8)
+    constants = {'enc_source': source}
+    layer = self.init_layer(layer, x, constants=constants)
+
+    y_emits, emits = layer.layer_with_emits(
+        x, constants=constants, training=False
+    )
+    self.assertIsNotNone(emits)
+    self.assertTrue(hasattr(emits, 'probabilities_by_source'))
+    self.assertIn('enc_source', emits.probabilities_by_source)
+
+    probs = emits.probabilities_by_source['enc_source']
+    self.assertEqual(probs.shape, (2, 4, 2, 6))
+
+    sum_probs = np.sum(np.asarray(probs.values), axis=-1)
+    np.testing.assert_allclose(sum_probs, 1.0, atol=1e-5)
+
+    y_standard = layer.layer(x, constants=constants, training=False)
+    np.testing.assert_allclose(
+        np.asarray(y_emits.values), np.asarray(y_standard.values), atol=1e-5
     )
 
 

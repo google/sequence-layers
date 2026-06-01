@@ -115,6 +115,8 @@ class DotProductAttention(
     sink_scalars_init: nn.initializers.Initializer = (
         nn.initializers.zeros_init()
     )
+    # Whether to emit attention weights.
+    emit_attention_weights: bool = False
     # An optional name for the layer.
     name: str | None = None
 
