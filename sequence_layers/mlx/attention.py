@@ -10,10 +10,13 @@ import mlx.core as mx
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import projection_configs
 from sequence_layers.mlx import types
-from sequence_layers.mlx.projection_configs import CombinedQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import \
+    CombinedQueryKeyValueProjection
 from sequence_layers.mlx.projection_configs import QueryAndKeyValueProjection
-from sequence_layers.mlx.projection_configs import QueryAndSharedKeyValueProjection
-from sequence_layers.mlx.projection_configs import SeparateQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import \
+    QueryAndSharedKeyValueProjection
+from sequence_layers.mlx.projection_configs import \
+    SeparateQueryKeyValueProjection
 from sequence_layers.specs import attention as attention_spec
 
 Sequence = types.Sequence
@@ -837,6 +840,11 @@ class DotProductSelfAttention(
           kv_valid,
           emit_attention_weights=self.config.emit_attention_weights,
       )
+
+      if self.config.emit_attention_weights:
+        assert isinstance(probs, mx.array)
+        sort_idx = mx.argsort(temporal)
+        probs = probs[..., sort_idx]
 
       # Ring buffer write AFTER read: insert new K/V at rotating positions.
       positions = (t0 + mx.arange(x_time)) % kv_buffer_size  # [x_time]
