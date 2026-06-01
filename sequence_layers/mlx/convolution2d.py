@@ -89,8 +89,8 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       kernel_size: int | TypingSequence[int] | None = None,
       strides: int | TypingSequence[int] = (1, 1),
       dilation_rate: int | TypingSequence[int] = (1, 1),
-      time_padding: str = 'valid',
-      spatial_padding: str | tuple[int, int] = 'same',
+      time_padding: Any = 'valid',
+      spatial_padding: Any = 'same',
       groups: int = 1,
       use_bias: bool = True,
       activation=None,
@@ -136,8 +136,8 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     )
     self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
 
-    self.kernel = None
-    self.bias = None
+    self.kernel: Any = None
+    self.bias: Any = None
     if in_features is not None:
       self._ensure_initialized(in_features)
 
@@ -164,18 +164,22 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       self.bias = mx.zeros((self.filters,), dtype=self._param_dtype)
 
   @property
+  @override
   def supports_step(self):
     return conv_utils._supports_step(self.time_padding)
 
   @property
+  @override
   def block_size(self):
     return self.strides[0]
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(1, self.strides[0])
 
   @property
+  @override
   def input_latency(self):
     ek = conv_utils._effective_kernel_size(
         self.kernel_size[0], self.dilation_rate[0]
@@ -193,11 +197,13 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       return ek - 1
     return 0
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 2:
       raise ValueError(
           f'Conv2D requires rank 4 input. Got channel_shape={input_shape}'
       )
+
     freq_dim = input_shape[0]
     # Compute spatial output size.
     if isinstance(self.spatial_padding, str):
@@ -215,6 +221,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     out_freq = (freq_dim + sp_pad[0] + sp_pad[1] - ek_sp) // self.strides[1] + 1
     return (out_freq, self.filters)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.compute_dtype or self._param_dtype
 
@@ -252,6 +259,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       y = self.activation(y)
     return y
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -280,6 +288,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     )
     return MaskedSequence(values, mask)
 
+  @override
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
     self._ensure_initialized(x.channel_shape[-1])
@@ -329,8 +338,10 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
     return Sequence(values, mask), state
 
+  @override
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+
     self._ensure_initialized(x.channel_shape[-1])
     L_out_time = conv_utils._compute_output_length(
         x.shape[1],
@@ -424,8 +435,8 @@ class Conv2DTranspose(
       kernel_size: int | TypingSequence[int] | None = None,
       strides: int | TypingSequence[int] = (1, 1),
       dilation_rate: int | TypingSequence[int] = (1, 1),
-      time_padding: str = 'valid',
-      spatial_padding: str | tuple[int, int] = 'same',
+      time_padding: Any = 'valid',
+      spatial_padding: Any = 'same',
       groups: int = 1,
       use_bias: bool = True,
       activation=None,
@@ -471,8 +482,8 @@ class Conv2DTranspose(
     )
     self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
 
-    self.kernel = None
-    self.bias = None
+    self.kernel: Any = None
+    self.bias: Any = None
     if in_features is not None:
       self._ensure_initialized(in_features)
 
@@ -499,18 +510,22 @@ class Conv2DTranspose(
       self.bias = mx.zeros((self.filters,), dtype=self._param_dtype)
 
   @property
+  @override
   def supports_step(self):
     return self.time_padding == PaddingMode.CAUSAL.value
 
   @property
+  @override
   def block_size(self):
     return 1
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(self.strides[0])
 
   @property
+  @override
   def input_latency(self):
     return 0
 
@@ -535,6 +550,7 @@ class Conv2DTranspose(
     else:
       return self.spatial_padding
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 2:
       raise ValueError(
@@ -550,6 +566,7 @@ class Conv2DTranspose(
     out_freq = raw_sp - sp_trim[0] - sp_trim[1]
     return (out_freq, self.filters)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.compute_dtype or self._param_dtype
 
@@ -603,6 +620,7 @@ class Conv2DTranspose(
     y = self._conv_raw(values, trim_time=True)
     return self._apply_bias_and_activation(y)
 
+  @override
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
     self._ensure_initialized(x.channel_shape[-1])
@@ -616,6 +634,7 @@ class Conv2DTranspose(
     )
     return Sequence(values, mask)
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -641,8 +660,10 @@ class Conv2DTranspose(
     mask = mx.zeros((batch_size, ola_buf), dtype=bt.MASK_DTYPE)
     return MaskedSequence(values, mask)
 
+  @override
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
+
     self._ensure_initialized(x.channel_shape[-1])
     x = x.mask_invalid()
     # Conv WITHOUT time trimming — keep full temporal output for overlap-add.
@@ -984,9 +1005,11 @@ class Upsample2D(types.PreservesType, types.Stateless):
     self._rate = _normalize_2tuple(rate)
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(self._rate[0])
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 2:
       raise ValueError(
@@ -1031,8 +1054,9 @@ class ParallelChannels(types.Emitting):
     combination: object = None  # CombinationMode enum value
     name: str | None = None
 
-    def make(self, backend='mlx') -> 'ParallelChannels':
-      return ParallelChannels.from_config(self, backend=backend)
+    @override
+    def make(self) -> 'ParallelChannels':
+      return ParallelChannels.from_config(self)
 
   def __init__(self, *, child_layer, num_groups, combination=CONCAT):
     super().__init__()
@@ -1047,18 +1071,22 @@ class ParallelChannels(types.Emitting):
       self._combination = int(combination)
 
   @property
+  @override
   def supports_step(self):
     return self.child.supports_step
 
   @property
+  @override
   def block_size(self):
     return self.child.block_size
 
   @property
+  @override
   def output_ratio(self):
     return self.child.output_ratio
 
   @property
+  @override
   def input_latency(self):
     return self.child.input_latency
 
@@ -1091,6 +1119,7 @@ class ParallelChannels(types.Emitting):
     else:
       raise ValueError(f'Unsupported combination mode: {self._combination}')
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if not input_shape:
       raise ValueError(f'Input must be at least 3D, got: {input_shape=}.')
@@ -1111,6 +1140,7 @@ class ParallelChannels(types.Emitting):
     else:
       raise ValueError(f'Unsupported combination mode: {self._combination}')
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.child.get_output_dtype(input_dtype, constants=constants)
 
@@ -1164,7 +1194,7 @@ class ParallelChannels(types.Emitting):
     groups = self._split(x)
     outputs = []
     new_states = []
-    for g, s in zip(groups, state):
+    for g, s in zip(groups, state):  # pyrefly: ignore[bad-argument-type]
       y, ns = self.child.step(g, s, training=training, constants=constants)
       outputs.append(y)
       new_states.append(ns)
@@ -1176,7 +1206,7 @@ class ParallelChannels(types.Emitting):
   ):
     groups = self._split(x)
     outputs, new_states, emits = [], [], []
-    for g, s in zip(groups, state):
+    for g, s in zip(groups, state):  # pyrefly: ignore[bad-argument-type]
       y, ns, e = self.child.step_with_emits(
           g, s, training=training, constants=constants
       )

@@ -20,12 +20,10 @@ Backend-specific test files should inherit from these tests.
 # pyrefly: disable=bad-instantiation
 
 import fractions
-from typing import Any
 
 from absl.testing import parameterized
 
 from sequence_layers.specs import test_utils
-from sequence_layers.specs import types as types_spec
 
 
 class Conv1DTest(test_utils.SequenceLayerTest):

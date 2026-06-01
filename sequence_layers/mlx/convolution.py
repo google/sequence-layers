@@ -282,7 +282,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
       kernel_size: int | None = None,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: Any = 'valid',
       groups: int = 1,
       use_bias: bool = True,
       activation=None,
@@ -349,18 +349,22 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
     )
 
   @property
+  @override
   def supports_step(self):
     return _supports_step(self.padding)
 
   @property
+  @override
   def block_size(self):
     return self.strides
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(1, self.strides)
 
   @property
+  @override
   def input_latency(self):
     ek = _effective_kernel_size(self.kernel_size, self.dilation_rate)
     if self.padding in (
@@ -377,6 +381,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
       return ek - 1
     return 0
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 1:
       raise ValueError(
@@ -384,6 +389,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
       )
     return (self.filters,)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.compute_dtype or self._param_dtype
 
@@ -401,6 +407,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
       y = self.activation(y)
     return y
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -420,6 +427,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
         self.padding,
     )
 
+  @override
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
     self._ensure_initialized(x.shape[-1])
@@ -457,8 +465,10 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
 
     return Sequence(values, mask), state
 
+  @override
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+
     self._ensure_initialized(x.shape[-1])
     L_out = _compute_output_length(
         x.shape[1],
@@ -542,7 +552,7 @@ class DepthwiseConv1D(
       channel_multiplier: int = 1,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: Any = 'valid',
       use_bias: bool = True,
       activation=None,
       compute_dtype=None,
@@ -581,7 +591,7 @@ class DepthwiseConv1D(
     )
     self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
 
-    self._conv = None
+    self._conv: Any = None
     if in_features is not None:
       self._ensure_initialized(in_features)
 
@@ -602,18 +612,22 @@ class DepthwiseConv1D(
     )
 
   @property
+  @override
   def supports_step(self):
     return _supports_step(self.padding)
 
   @property
+  @override
   def block_size(self):
     return self.strides
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(1, self.strides)
 
   @property
+  @override
   def input_latency(self):
     ek = _effective_kernel_size(self.kernel_size, self.dilation_rate)
     if self.padding in (
@@ -630,14 +644,17 @@ class DepthwiseConv1D(
       return ek - 1
     return 0
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 1:
+
       raise ValueError(
           'DepthwiseConv1D requires rank 3 input, got '
           f'channel_shape={input_shape}.'
       )
     return (input_shape[0] * self.channel_multiplier,)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.compute_dtype or self._param_dtype
 
@@ -654,6 +671,7 @@ class DepthwiseConv1D(
       y = self.activation(y)
     return y
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -673,6 +691,7 @@ class DepthwiseConv1D(
         self.padding,
     )
 
+  @override
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
     self._ensure_initialized(x.shape[-1])
@@ -709,8 +728,10 @@ class DepthwiseConv1D(
 
     return Sequence(values, mask), state
 
+  @override
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+
     self._ensure_initialized(x.shape[-1])
     L_out = _compute_output_length(
         x.shape[1],
@@ -880,7 +901,7 @@ class Conv1DTranspose(
       kernel_size: int | None = None,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: Any = 'valid',
       groups: int = 1,
       use_bias: bool = True,
       activation=None,
@@ -924,8 +945,8 @@ class Conv1DTranspose(
     )
     self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
 
-    self.kernel = None
-    self.bias = None
+    self.kernel: Any = None
+    self.bias: Any = None
     if in_features is not None:
       self._ensure_initialized(in_features)
 
@@ -947,21 +968,26 @@ class Conv1DTranspose(
       self.bias = mx.zeros((self.filters,), dtype=self._param_dtype)
 
   @property
+  @override
   def supports_step(self):
     return self.padding == PaddingMode.CAUSAL.value
 
   @property
+  @override
   def block_size(self):
     return 1
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(self.strides)
 
   @property
+  @override
   def input_latency(self):
     return 0
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 1:
       raise ValueError(
@@ -970,6 +996,7 @@ class Conv1DTranspose(
       )
     return (self.filters,)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.compute_dtype or self._param_dtype
 
@@ -1014,6 +1041,7 @@ class Conv1DTranspose(
         - self.strides,
     )
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -1029,6 +1057,7 @@ class Conv1DTranspose(
         dtype=compute_dtype,
     )
 
+  @override
   @types.check_step
   def step(self, x, state, *, training: bool, constants=None):
     self._ensure_initialized(x.shape[-1])
@@ -1058,8 +1087,10 @@ class Conv1DTranspose(
 
     return Sequence(values, mask), state
 
+  @override
   @types.check_layer
   def layer(self, x, *, training: bool, constants=None):
+
     self._ensure_initialized(x.shape[-1])
     if self.padding == PaddingMode.CAUSAL.value:
       # For causal, use raw conv and trim trailing overlap.

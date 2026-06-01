@@ -187,6 +187,9 @@ class Conv2DTranspose[
 class ModuleSpec(Protocol):
   """Protocol for convolution module."""
 
+  # pylint: disable=invalid-name
+  # pylint: disable=missing-function-docstring
+
   @property
   def Conv1D(self) -> type[Conv1D]:
     ...
