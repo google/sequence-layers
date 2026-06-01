@@ -7,12 +7,12 @@ from typing import Sequence as TypingSequence
 
 import mlx.core as mx
 
-from sequence_layers.jax.types import \
-    SequenceLayerConfig as _SequenceLayerConfig
 from sequence_layers.mlx import convolution as conv_utils
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
 from sequence_layers.mlx import utils as mlx_utils
+from sequence_layers.mlx.types import \
+    SequenceLayerConfig as _SequenceLayerConfig
 from sequence_layers.specs import convolution as spec
 
 from . import types as bt
@@ -288,8 +288,8 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     )
     return MaskedSequence(values, mask)
 
-  @override
   @types.check_step
+  @override
   def step(self, x, state, *, training: bool, constants=None):
     self._ensure_initialized(x.channel_shape[-1])
     ek_time = conv_utils._effective_kernel_size(
@@ -306,7 +306,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     )
 
     if bw:
-      state = state.concatenate(x)
+      state = state.concatenate(x)  # pyrefly: ignore[missing-attribute]
     else:
       state = x
 
@@ -338,8 +338,8 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
     return Sequence(values, mask), state
 
-  @override
   @types.check_layer
+  @override
   def layer(self, x, *, training: bool, constants=None):
 
     self._ensure_initialized(x.channel_shape[-1])
@@ -620,8 +620,8 @@ class Conv2DTranspose(
     y = self._conv_raw(values, trim_time=True)
     return self._apply_bias_and_activation(y)
 
-  @override
   @types.check_layer
+  @override
   def layer(self, x, *, training: bool, constants=None):
     self._ensure_initialized(x.channel_shape[-1])
     values = self._forward(x.values)
@@ -660,8 +660,8 @@ class Conv2DTranspose(
     mask = mx.zeros((batch_size, ola_buf), dtype=bt.MASK_DTYPE)
     return MaskedSequence(values, mask)
 
-  @override
   @types.check_step
+  @override
   def step(self, x, state, *, training: bool, constants=None):
 
     self._ensure_initialized(x.channel_shape[-1])
@@ -683,7 +683,8 @@ class Conv2DTranspose(
     if ola_buf:
       # Pad the state buffer to match the raw output length, then overlap-add.
       # raw has shape (B, raw_time, ...) where raw_time >= out_time + ola_buf
-      buf_values = state.values  # (B, ola_buf, ...)
+      buf_values = state.values  # pyrefly: ignore[missing-attribute]
+
       pad_len = raw.shape[1] - ola_buf
       if pad_len > 0:
         buf_values = mx.concatenate(
@@ -743,7 +744,8 @@ class AveragePooling2D(types.SequenceLayer):
           self, 'dilation_rate', _normalize_2tuple(self.dilation_rate)
       )
 
-    def make(self) -> 'AveragePooling2D':
+    @override
+    def make(self) -> types.SequenceLayer:
       return AveragePooling2D.from_config(self)
 
   def __init__(
@@ -862,9 +864,10 @@ class AveragePooling2D(types.SequenceLayer):
     result = sum(patches) / len(patches)
     return result
 
-  @override
   @types.check_layer
+  @override
   def layer(self, x, *, training: bool = False, constants=None):
+
     L_out_time = conv_utils._compute_output_length(
         x.shape[1],
         self.pool_size[0],
@@ -932,9 +935,10 @@ class AveragePooling2D(types.SequenceLayer):
     )
     return MaskedSequence(values, mask)
 
-  @override
   @types.check_step
+  @override
   def step(self, x, state, *, training: bool = False, constants=None):
+
     bw = conv_utils._buffer_width(
         self.time_padding,
         self.pool_size[0],
