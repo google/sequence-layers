@@ -7,10 +7,15 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import (Any, Callable, Protocol, runtime_checkable,
-                    Sequence, TypeVar)
+from typing import Any, Callable, Protocol, runtime_checkable, Sequence, TypeVar
 
 from sequence_layers.specs import types as types_spec
+
+# isort: off
+from sequence_layers.specs.types import (  # pylint: disable=unused-import
+    HashableArray,
+)
+# isort: on
 
 # ---------------------------------------------------------------------------
 # Activation Functions (StatelessPointwiseFunctor)
