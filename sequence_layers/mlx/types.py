@@ -829,6 +829,11 @@ class SequenceLayer(
 ):
   """Base Module for Sequence Layers."""
 
+  @property
+  @override
+  def receptive_field(self) -> ReceptiveField:
+    return super().receptive_field
+
 
 class SequenceLayerConfig(spec.SequenceLayerConfig):
   """Base class for SequenceLayer configuration objects."""

@@ -19,15 +19,16 @@ See the corresponding _behaviors module for behaviors.
 import abc
 import dataclasses
 import enum
-from typing import Any, Callable, Protocol, Sequence, override, runtime_checkable
+from typing import (Any, Callable, override, Protocol, runtime_checkable,
+                    Sequence)
 
 from sequence_layers.specs import types as types_spec
-
 
 
 @enum.unique
 class CombinationMode(enum.Enum):
   """The type of combination to perform."""
+
   STACK = 1
   CONCAT = 2
   ADD = 3
@@ -46,6 +47,7 @@ class Serial[
   @dataclasses.dataclass(frozen=True)
   class Config(types_spec.SequenceLayerConfig):
     """Configuration for Serial."""
+
     layers: Sequence[types_spec.SequenceLayerConfig] = ()
     name: str | None = None
 
@@ -74,6 +76,7 @@ class Residual[
   @dataclasses.dataclass(frozen=True)
   class Config(types_spec.SequenceLayerConfig):
     """Configuration for Residual."""
+
     layers: Sequence[types_spec.SequenceLayerConfig] = ()
     shortcut_layers: Sequence[types_spec.SequenceLayerConfig] | None = None
     name: str | None = None
@@ -94,6 +97,7 @@ class Repeat[
   @dataclasses.dataclass(frozen=True)
   class Config(types_spec.SequenceLayerConfig):
     """Configuration for Repeat."""
+
     layer: types_spec.SequenceLayerConfig
     num_repeats: int
     remat: bool = False
@@ -119,6 +123,7 @@ class Parallel[
   @dataclasses.dataclass(frozen=True)
   class Config(types_spec.SequenceLayerConfig):
     """Configuration for Parallel."""
+
     layers: Sequence[types_spec.SequenceLayerConfig]
     combination: CombinationMode = CombinationMode.STACK
     share_scope: bool | Sequence[bool] = False
@@ -158,4 +163,3 @@ class ModuleSpec(Protocol):
   @property
   def Parallel(self) -> type[Parallel]:
     ...
-

@@ -13,10 +13,11 @@
 # limitations under the License.
 """Tests for combinator MLX sequence layers."""
 
+# pylint: disable=import-outside-toplevel
+from absl.testing import absltest
 import mlx.core as mx
 import numpy as np
-from absl.testing import absltest
-from absl.testing import parameterized
+
 from sequence_layers.mlx import basic_types as bt
 from sequence_layers.mlx import combinators
 from sequence_layers.mlx import dense
@@ -25,7 +26,9 @@ from sequence_layers.mlx import test_utils
 from sequence_layers.specs import combinators_behaviors as spec_behaviors
 
 
-class CombinatorBehaviorsTest(test_utils.SequenceLayerTest, spec_behaviors.CombinatorBehaviorsTest):
+class CombinatorBehaviorsTest(
+    test_utils.SequenceLayerTest, spec_behaviors.CombinatorBehaviorsTest
+):
   """Shared behavior tests for combinators in MLX."""
 
 
@@ -57,7 +60,7 @@ class SerialTest(test_utils.SequenceLayerTest):
   def test_from_config(self):
     import sequence_layers.jax as sl
 
-    config = sl.Serial.Config([
+    config = sl.Serial.Config([  # pyrefly: ignore[bad-argument-type]
         sl.Identity.Config(),
         sl.Dense.Config(features=8),
     ])
@@ -83,7 +86,9 @@ class ResidualTest(test_utils.SequenceLayerTest):
   def test_from_config(self):
     import sequence_layers.jax as sl
 
-    config = sl.Residual.Config([sl.Identity.Config()])
+    config = sl.Residual.Config(
+        [sl.Identity.Config()]  # pyrefly: ignore[bad-argument-type]
+    )
     mlx_layer = combinators.Residual.from_config(config)
     self.assertIsInstance(mlx_layer, combinators.Residual)
 
@@ -111,7 +116,7 @@ class RepeatTest(test_utils.SequenceLayerTest):
     import sequence_layers.jax as sl
 
     config = sl.Repeat.Config(
-        layer=sl.Identity.Config(),
+        layer=sl.Identity.Config(),  # pyrefly: ignore[bad-argument-type]
         num_repeats=4,
     )
     mlx_layer = combinators.Repeat.from_config(config)
@@ -200,11 +205,14 @@ class ParallelTest(test_utils.SequenceLayerTest):
     self.assertEqual(layer.get_output_shape((4,)), (8,))
 
   def test_from_config(self):
-    import sequence_layers.jax as sl
     from sequence_layers.jax import utils as jax_utils
+    import sequence_layers.jax as sl
 
     config = sl.Parallel.Config(
-        layers=[sl.Identity.Config(), sl.Identity.Config()],
+        layers=[  # pyrefly: ignore[bad-argument-type]
+            sl.Identity.Config(),
+            sl.Identity.Config(),
+        ],
         combination=jax_utils.CombinationMode.ADD,
     )
     mlx_layer = combinators.Parallel.from_config(config)
@@ -232,11 +240,10 @@ class TransformerEndToEndTest(test_utils.SequenceLayerTest):
   """End-to-end test with a full Transformer config."""
 
   def test_decoder_transformer(self):
-    import sequence_layers.jax as sl
-    from sequence_layers.jax.attention import (
-        dot_product_self_attention as dpa,
-    )
     import jax
+
+    import sequence_layers.jax as sl
+    from sequence_layers.jax.attention import dot_product_self_attention as dpa
 
     # Attention outputs [b, t, num_heads, units_per_head].
     # A Dense layer after it projects back to model dim.

@@ -25,6 +25,7 @@
 # explicitly instead of using a star import.
 from . import backend
 from . import dense
+from . import projection_configs
 from . import simple
 from . import test_utils
 from . import types
@@ -58,6 +59,10 @@ from .normalization import RMSNormalization
 from .pooling import AveragePooling1D
 from .pooling import MaxPooling1D
 from .pooling import MinPooling1D
+from .projection_configs import CombinedQueryKeyValueProjection
+from .projection_configs import QueryAndKeyValueProjection
+from .projection_configs import QueryAndSharedKeyValueProjection
+from .projection_configs import SeparateQueryKeyValueProjection
 from .simple import Abs
 from .simple import Add
 from .simple import Cast
@@ -165,6 +170,10 @@ __all__ = [
     'DotProductAttention',
     'StreamingDotProductAttention',
     'LocalDotProductSelfAttention',
+    'CombinedQueryKeyValueProjection',
+    'QueryAndKeyValueProjection',
+    'QueryAndSharedKeyValueProjection',
+    'SeparateQueryKeyValueProjection',
     'Identity',
     'Relu',
     'Gelu',
