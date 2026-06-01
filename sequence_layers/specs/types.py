@@ -51,6 +51,21 @@ T = TypeVar('T')
 Shape = tuple[int, ...]
 ShapeLike = list[int] | tuple[int, ...]
 DType = Any  # Can be numpy, jax, or mlx dtype
+Sharding = Any  # JAX sharding spec
+
+
+@runtime_checkable
+class HashableArray(Protocol):
+  """Protocol for hashable multidimensional arrays."""
+
+  data: complex | tuple[Any, ...]
+  """The data as a tuple or complex scalar."""
+
+  dtype: Any
+  """The dtype of the array."""
+
+  def to_array(self) -> Any:
+    """Returns the array representation."""
 
 
 class ChannelSpec(Protocol):
@@ -63,6 +78,9 @@ class ChannelSpec(Protocol):
   @property
   def dtype(self) -> Any:
     """The dtype of the channel."""
+
+  def __init__(self, shape: Shape, dtype: Any):
+    ...
 
 
 State = Any
@@ -200,8 +218,14 @@ PaddingModeString = Literal[
 ]
 
 
-class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
-  """Abstract base class for Sequence."""
+class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
+  """A generic sequence container that preserves masking information.
+
+  Note: This class can hold non-backend-specific arrays (like `np.ndarray`) to
+  maintain consistency with JAX. Backend implementations should handle them
+  gracefully, for example by converting to backend-native arrays just-in-time
+  when backend-specific operations require it.
+  """
 
   values: ValuesT
   mask: MaskT
@@ -223,6 +247,11 @@ class Sequence(Generic[ValuesT, MaskT], metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def channel_shape(self) -> Shape:
     """The shape of the channels in the sequence."""
+
+  @property
+  @abc.abstractmethod
+  def channel_spec(self) -> ChannelSpec:
+    """The channel specification of the sequence."""
 
   @property
   @abc.abstractmethod
@@ -362,13 +391,16 @@ class MaskedSequence(Sequence[ValuesT, MaskT]):
 class SequenceLayerConfig(metaclass=abc.ABCMeta):
   """Configuration for a SequenceLayer."""
 
+  def __init__(self, *args: Any, **kwargs: Any):
+    pass
+
   @abc.abstractmethod
   def make(self) -> Any:
     """Creates the sequence layer."""
 
-  @abc.abstractmethod
   def copy(self, **kwargs: Any) -> Self:
     """Returns a copy of the config with updated fields."""
+    return dataclasses.replace(cast(Any, self), **kwargs)
 
 
 class Steppable(Generic[InputT, OutputT, ChannelSpecT], metaclass=abc.ABCMeta):
@@ -378,6 +410,11 @@ class Steppable(Generic[InputT, OutputT, ChannelSpecT], metaclass=abc.ABCMeta):
   - layer_with_emits
   - step_with_emits
   """
+
+  @property
+  def name(self) -> str | None:
+    """The name of this layer."""
+    return None
 
   @property
   @abc.abstractmethod
@@ -637,6 +674,15 @@ class SequenceLayer(
     Steppable[InputT, OutputT, ChannelSpecT], metaclass=abc.ABCMeta
 ):
   """Base class for Sequence Layers."""
+
+  @abc.abstractmethod
+  def get_output_shape_for_sequence(
+      self,
+      x: Sequence[Any, Any],
+      *,
+      constants: Constants | None = None,
+  ) -> Shape:
+    """Returns the output shape this layer produces for the provided Sequence."""
 
 
 # ---------------------------------------------------------------------------
@@ -909,6 +955,7 @@ class StatelessEmitting(Emitting[InputT, OutputT, ChannelSpecT]):
     ...
 
 
+_ChannelSpecType = ChannelSpec
 _SequenceType = Sequence
 _MaskedSequenceType = MaskedSequence
 _SequenceLayerType = SequenceLayer
@@ -916,59 +963,71 @@ _SequenceLayerConfigType = SequenceLayerConfig
 _SteppableType = Steppable
 
 
+# pylint: disable=invalid-name
+# pylint: disable=missing-function-docstring
 @runtime_checkable
 class ModuleSpec(Protocol):
   """Specification for sequence_layers.<backend>.types."""
 
-  # pylint: disable=invalid-name
+  @property
+  def ChannelSpec(self) -> type[_ChannelSpecType]:
+    ...
+
+  @property
+  def ShapeDType(self) -> type[_ChannelSpecType]:
+    ...
+
+  @property
+  def HashableArray(self) -> type[HashableArray]:
+    ...
 
   @property
   def Sequence(self) -> type[_SequenceType[Any, Any]]:
-    """The Sequence class for this backend."""
+    ...
 
   @property
   def MaskedSequence(self) -> type[_MaskedSequenceType[Any, Any]]:
-    """The MaskedSequence class for this backend."""
+    ...
 
   @property
   def SequenceLayer(self) -> type[_SequenceLayerType]:
-    """The SequenceLayer class for this backend."""
+    ...
 
   @property
   def SequenceLayerConfig(self) -> type[_SequenceLayerConfigType]:
-    """The SequenceLayerConfig class for this backend."""
+    ...
 
   @property
   def Steppable(self) -> type[_SteppableType[Any, Any, Any]]:
-    """The Steppable class for this backend."""
+    ...
 
   @property
   def PreservesShape(self) -> type[PreservesShape]:
-    """The PreservesShape class for this backend."""
+    ...
 
   @property
   def Stateless(self) -> type[Stateless]:
-    """The Stateless class for this backend."""
+    ...
 
   @property
   def StatelessPointwise(self) -> type[StatelessPointwise]:
-    """The StatelessPointwise class for this backend."""
+    ...
 
   @property
   def StatelessPointwiseFunctor(self) -> type[StatelessPointwiseFunctor]:
-    """The StatelessPointwiseFunctor class for this backend."""
+    ...
 
   @property
   def PreservesType(self) -> type[PreservesType]:
-    """The PreservesType class for this backend."""
+    ...
 
   @property
   def Emitting(self) -> type[Emitting]:
-    """The Emitting class for this backend."""
+    ...
 
   @property
   def StatelessEmitting(self) -> type[StatelessEmitting]:
-    """The StatelessEmitting class for this backend."""
+    ...
 
 
 __all__ = (

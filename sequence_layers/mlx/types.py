@@ -190,6 +190,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
     return tuple(self.values.shape[2:])
 
   @property
+  @override
   def channel_spec(self) -> ChannelSpec:
     """Returns a "spec" for this sequence (the channel shape and dtype)."""
     return ChannelSpec(self.channel_shape, self.dtype)
