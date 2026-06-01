@@ -203,7 +203,7 @@ class Scale(
 
     @override
     def make(self) -> 'Scale':
-      return Scale(config=self, name=self.name)
+      return Scale(self, name=self.name)
 
   config: Config
 
@@ -254,7 +254,7 @@ class Affine(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'Affine':
-      return Affine(config=self, name=self.name)
+      return Affine(self, name=self.name)
 
   @override
   def setup(self):
@@ -344,7 +344,7 @@ class Add(
 
     @override
     def make(self) -> 'Add':
-      return Add(config=self, name=self.name)
+      return Add(self, name=self.name)
 
   config: Config
 
@@ -393,7 +393,7 @@ class Maximum(StatelessPointwiseBroadcasting):
 
     @override
     def make(self) -> 'Maximum':
-      return Maximum(config=self, name=self.name)
+      return Maximum(self, name=self.name)
 
   config: Config
 
@@ -442,7 +442,7 @@ class Mod(StatelessPointwiseBroadcasting):
 
     @override
     def make(self) -> 'Mod':
-      return Mod(config=self, name=self.name)
+      return Mod(self, name=self.name)
 
   config: Config
 
@@ -493,7 +493,7 @@ class Minimum(StatelessPointwiseBroadcasting):
 
     @override
     def make(self) -> 'Minimum':
-      return Minimum(config=self, name=self.name)
+      return Minimum(self, name=self.name)
 
   config: Config
 
@@ -617,7 +617,7 @@ class Mean(_ReduceChannels):
 
     @override
     def make(self) -> 'Mean':
-      return Mean(config=self, name=self.name)
+      return Mean(self, name=self.name)
 
   @property
   @override
@@ -634,7 +634,7 @@ class Min(_ReduceChannels):
 
     @override
     def make(self) -> 'Min':
-      return Min(config=self, name=self.name)
+      return Min(self, name=self.name)
 
   @property
   @override
@@ -651,7 +651,7 @@ class Max(_ReduceChannels):
 
     @override
     def make(self) -> 'Max':
-      return Max(config=self, name=self.name)
+      return Max(self, name=self.name)
 
   @property
   @override
@@ -668,7 +668,7 @@ class Sum(_ReduceChannels):
 
     @override
     def make(self) -> 'Sum':
-      return Sum(config=self, name=self.name)
+      return Sum(self, name=self.name)
 
   @property
   @override
@@ -689,7 +689,7 @@ class Abs(
 
     @override
     def make(self) -> 'Abs':
-      return Abs(config=self, name=self.name)
+      return Abs(self, name=self.name)
 
   config: Config
 
@@ -740,7 +740,7 @@ class Cast(
 
     @override
     def make(self) -> 'Cast':
-      return Cast(config=self, name=self.name)
+      return Cast(self, name=self.name)
 
   config: Config
 
@@ -790,7 +790,7 @@ class GatedUnit(
 
     @override
     def make(self) -> 'GatedUnit':
-      return GatedUnit(config=self, name=self.name)
+      return GatedUnit(self, name=self.name)
 
   config: Config
 
@@ -892,7 +892,7 @@ class GradientClipping(types.PreservesType, types.StatelessPointwise):
     @override
     def make(self) -> 'GradientClipping':
       assert self.clip_value > 0
-      return GradientClipping(config=self, name=self.name)
+      return GradientClipping(self, name=self.name)
 
   config: Config
 
@@ -1001,7 +1001,7 @@ class ApplySharding(types.PreservesType, types.StatelessPointwise):
 
     @override
     def make(self) -> 'ApplySharding':
-      return ApplySharding(config=self, name=self.name)
+      return ApplySharding(self, name=self.name)
 
   config: Config
 
@@ -1042,7 +1042,7 @@ class OptimizationBarrier(types.PreservesType, types.StatelessPointwise):
 
     @override
     def make(self) -> 'OptimizationBarrier':
-      return OptimizationBarrier(config=self, name=self.name)
+      return OptimizationBarrier(self, name=self.name)
 
   config: Config
 
@@ -1245,7 +1245,7 @@ class CheckpointName(
 
     @override
     def make(self) -> 'CheckpointName':
-      return CheckpointName(config=self, name=self.name)
+      return CheckpointName(self, name=self.name)
 
   config: Config
 
@@ -1290,7 +1290,7 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
 
     @override
     def make(self) -> 'Snake':
-      return Snake(config=self, name=self.name)
+      return Snake(self, name=self.name)
 
   config: Config
 
@@ -1346,7 +1346,7 @@ class Tanh(
 
     @override
     def make(self) -> 'Tanh':
-      return Tanh(config=self, name=self.name)
+      return Tanh(self, name=self.name)
 
   config: Config
 
@@ -1382,7 +1382,7 @@ class Relu(
 
     @override
     def make(self) -> 'Relu':
-      return Relu(config=self, name=self.name)
+      return Relu(self, name=self.name)
 
   config: Config
 
@@ -1419,7 +1419,7 @@ class LeakyRelu(
 
     @override
     def make(self) -> 'LeakyRelu':
-      return LeakyRelu(config=self, name=self.name)
+      return LeakyRelu(self, name=self.name)
 
   config: Config
 
@@ -1453,7 +1453,7 @@ class PRelu(types.PreservesType, types.StatelessPointwiseFunctor):
 
     @override
     def make(self) -> 'PRelu':
-      return PRelu(config=self, name=self.name)
+      return PRelu(self, name=self.name)
 
   config: Config
 
@@ -1508,7 +1508,7 @@ class Elu(
 
     @override
     def make(self) -> 'Elu':
-      return Elu(config=self, name=self.name)
+      return Elu(self, name=self.name)
 
   config: Config
 
@@ -1544,7 +1544,7 @@ class Exp(
 
     @override
     def make(self) -> 'Exp':
-      return Exp(config=self, name=self.name)
+      return Exp(self, name=self.name)
 
   config: Config
 
@@ -1575,7 +1575,7 @@ class Log(
 
     @override
     def make(self) -> 'Log':
-      return Log(config=self, name=self.name)
+      return Log(self, name=self.name)
 
   config: Config
 
@@ -1603,7 +1603,7 @@ class Power(types.PreservesType, types.StatelessPointwiseFunctor):
 
     @override
     def make(self) -> 'Power':
-      return Power(config=self, name=self.name)
+      return Power(self, name=self.name)
 
   config: Config
 
@@ -1639,7 +1639,7 @@ class Sigmoid(
 
     @override
     def make(self) -> 'Sigmoid':
-      return Sigmoid(config=self, name=self.name)
+      return Sigmoid(self, name=self.name)
 
   config: Config
 
@@ -1670,7 +1670,7 @@ class Softplus(
 
     @override
     def make(self) -> 'Softplus':
-      return Softplus(config=self, name=self.name)
+      return Softplus(self, name=self.name)
 
   config: Config
 
@@ -1702,7 +1702,7 @@ class Softmax(
 
     @override
     def make(self) -> 'Softmax':
-      return Softmax(config=self, name=self.name)
+      return Softmax(self, name=self.name)
 
   config: Config
 
@@ -1774,7 +1774,7 @@ class Gelu(
 
     @override
     def make(self) -> 'Gelu':
-      return Gelu(config=self, name=self.name)
+      return Gelu(self, name=self.name)
 
   config: Config
 
@@ -1828,7 +1828,7 @@ class Slice(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'Slice':
-      return Slice(config=self, name=self.name)
+      return Slice(self, name=self.name)
 
   config: Config
 
@@ -1949,7 +1949,7 @@ class OneHot(types.Stateless, spec.OneHot[types.Sequence, types.ShapeDType]):
 
     @override
     def make(self) -> 'OneHot':
-      return OneHot(config=self, name=self.name)
+      return OneHot(self, name=self.name)
 
   config: Config
 
@@ -2031,7 +2031,7 @@ class Embedding(
 
     @override
     def make(self) -> 'Embedding':
-      return Embedding(config=self, name=self.name)
+      return Embedding(self, name=self.name)
 
   config: Config
 
@@ -2164,7 +2164,7 @@ class EmbeddingTranspose(types.Stateless):
 
     @override
     def make(self) -> 'EmbeddingTranspose':
-      return EmbeddingTranspose(config=self, name=self.name)
+      return EmbeddingTranspose(self, name=self.name)
 
   config: Config
 
@@ -2270,7 +2270,7 @@ class ExpandDims(
 
     @override
     def make(self) -> 'ExpandDims':
-      return ExpandDims(config=self, name=self.name)
+      return ExpandDims(self, name=self.name)
 
   config: Config
 
@@ -2347,7 +2347,7 @@ class Reshape(
 
     @override
     def make(self) -> 'Reshape':
-      return Reshape(config=self, name=self.name)
+      return Reshape(self, name=self.name)
 
   config: Config
 
@@ -2424,7 +2424,7 @@ class GlobalReshape(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'GlobalReshape':
-      return GlobalReshape(config=self, name=self.name)
+      return GlobalReshape(self, name=self.name)
 
   config: Config
 
@@ -2528,7 +2528,7 @@ class Transpose(
       if self.axes is not None and (0 in self.axes or 1 in self.axes):
         raise ValueError("Can't transpose batch or time dimension.")
 
-      return Transpose(config=self, name=self.name)
+      return Transpose(self, name=self.name)
 
   config: Config
 
@@ -2643,7 +2643,7 @@ class MoveAxis(Transpose):
             f' {len(destination)}'
         )
 
-      return MoveAxis(config=self, name=self.name)
+      return MoveAxis(self, name=self.name)
 
   # pyrefly: ignore[bad-override]
   config: Config
@@ -2675,7 +2675,7 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
 
     @override
     def make(self) -> 'Emit':
-      return Emit(config=self, name=self.name)
+      return Emit(self, name=self.name)
 
   config: Config
 
@@ -2704,7 +2704,7 @@ class NamedEmit(
 
     @override
     def make(self) -> 'NamedEmit':
-      return NamedEmit(config=self, name=self.name)
+      return NamedEmit(self, name=self.name)
 
   config: Config
 
@@ -2738,7 +2738,7 @@ class Dropout(
 
     @override
     def make(self) -> 'Dropout':
-      return Dropout(config=self, name=self.name)
+      return Dropout(self, name=self.name)
 
   config: Config
 
@@ -2928,7 +2928,7 @@ class Downsample1D(
 
     @override
     def make(self) -> 'Downsample1D':
-      return Downsample1D(config=self, name=self.name)
+      return Downsample1D(self, name=self.name)
 
   config: Config
 
@@ -2990,7 +2990,7 @@ class Upsample1D(
 
     @override
     def make(self) -> 'Upsample1D':
-      return Upsample1D(config=self, name=self.name)
+      return Upsample1D(self, name=self.name)
 
   config: Config
 
@@ -3047,7 +3047,7 @@ class Upsample2D(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'Upsample2D':
-      return Upsample2D(config=self, name=self.name)
+      return Upsample2D(self, name=self.name)
 
   config: Config
 
@@ -3116,7 +3116,7 @@ class MaskInvalid(
 
     @override
     def make(self) -> 'MaskInvalid':
-      return MaskInvalid(config=self, name=self.name)
+      return MaskInvalid(self, name=self.name)
 
   config: Config
 
@@ -3165,7 +3165,7 @@ class Logging(
 
     @override
     def make(self) -> 'Logging':
-      return Logging(config=self)
+      return Logging(self)
 
   config: Config
 
@@ -3265,7 +3265,7 @@ class Argmax(types.Stateless):
 
     @override
     def make(self) -> 'Argmax':
-      return Argmax(config=self, name=self.name)
+      return Argmax(self, name=self.name)
 
   config: Config
 
@@ -3331,7 +3331,7 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'EinopsRearrange':
-      return EinopsRearrange(config=self, name=self.name)
+      return EinopsRearrange(self, name=self.name)
 
   config: Config
 
@@ -3409,7 +3409,7 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
 
     @override
     def make(self) -> 'GlobalEinopsRearrange':
-      return GlobalEinopsRearrange(config=self, name=self.name)
+      return GlobalEinopsRearrange(self, name=self.name)
 
   config: Config
 
@@ -3509,7 +3509,7 @@ class Squeeze(
       elif axis is not None and (0 in axis or 1 in axis):
         raise ValueError('Batch and time (axis=0 or 1) cannot be squeezed.')
 
-      return Squeeze(config=self, name=self.name)
+      return Squeeze(self, name=self.name)
 
   config: Config
 
