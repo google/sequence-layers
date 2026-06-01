@@ -765,19 +765,24 @@ class AveragePooling2D(types.SequenceLayer):
     self.masked_average = masked_average
 
   @property
+  @override
   def supports_step(self):
     return conv_utils._supports_step(self.time_padding)
 
   @property
+  @override
   def block_size(self):
     return self.strides[0]
 
   @property
+  @override
   def output_ratio(self):
     return fractions.Fraction(1, self.strides[0])
 
   @property
+  @override
   def input_latency(self):
+
     ek = conv_utils._effective_kernel_size(
         self.pool_size[0], self.dilation_rate[0]
     )
@@ -794,6 +799,7 @@ class AveragePooling2D(types.SequenceLayer):
       return ek - 1
     return 0
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     if len(input_shape) != 2:
       raise ValueError(
@@ -816,10 +822,11 @@ class AveragePooling2D(types.SequenceLayer):
     out_freq = (freq_dim + sp_pad[0] + sp_pad[1] - ek_sp) // self.strides[1] + 1
     return (out_freq, input_shape[1])
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return input_dtype
 
-  def _pool(self, values, time_pad, spatial_pad):
+  def _pool(self, values, time_pad, spatial_pad) -> Any:
     """Apply 2D average pooling with explicit padding."""
     if (
         time_pad[0] > 0
@@ -935,8 +942,9 @@ class AveragePooling2D(types.SequenceLayer):
         self.dilation_rate[0],
     )
     if bw:
-      state = state.concatenate(x)
+      state = state.concatenate(x)  # pyrefly: ignore[missing-attribute]
     else:
+
       state = x
 
     if isinstance(self.spatial_padding, str):
@@ -997,7 +1005,8 @@ class Upsample2D(types.PreservesType, types.Stateless):
     def __post_init__(self):
       object.__setattr__(self, 'rate', _normalize_2tuple(self.rate))
 
-    def make(self) -> 'Upsample2D':
+    @override
+    def make(self) -> types.SequenceLayer:
       return Upsample2D.from_config(self)
 
   def __init__(self, *, rate):
@@ -1017,9 +1026,10 @@ class Upsample2D(types.PreservesType, types.Stateless):
       )
     return (input_shape[0] * self._rate[1], input_shape[1])
 
-  @override
   @types.check_layer
+  @override
   def layer(self, x, *, training: bool = False, constants=None):
+
     values = mx.repeat(x.values, self._rate[0], axis=1)
     values = mx.repeat(values, self._rate[1], axis=2)
     mask = mx.repeat(x.mask, self._rate[0], axis=1)
@@ -1049,13 +1059,13 @@ class ParallelChannels(types.Emitting):
 
   @dataclasses.dataclass(frozen=True)
   class Config(_SequenceLayerConfig):
-    child_layer: _SequenceLayerConfig = None
+    child_layer: _SequenceLayerConfig | None = None
     num_groups: int = 1
     combination: object = None  # CombinationMode enum value
     name: str | None = None
 
     @override
-    def make(self) -> 'ParallelChannels':
+    def make(self) -> types.SequenceLayer:
       return ParallelChannels.from_config(self)
 
   def __init__(self, *, child_layer, num_groups, combination=CONCAT):
@@ -1144,9 +1154,10 @@ class ParallelChannels(types.Emitting):
   def get_output_dtype(self, input_dtype, *, constants=None):
     return self.child.get_output_dtype(input_dtype, constants=constants)
 
-  @override
   @types.check_layer
+  @override
   def layer(self, x, *, training: bool = False, constants=None):
+
     groups = self._split(x)
     outputs = [
         self.child.layer(g, training=training, constants=constants)
@@ -1188,9 +1199,10 @@ class ParallelChannels(types.Emitting):
     )
     return (state,) * self._num_groups
 
-  @override
   @types.check_step
+  @override
   def step(self, x, state, *, training: bool = False, constants=None):
+
     groups = self._split(x)
     outputs = []
     new_states = []
