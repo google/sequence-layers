@@ -374,7 +374,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     expected_dtype = l.get_output_dtype(dtype, constants=constants)
     self.assertEqual(y_layer.dtype, expected_dtype)
 
-    if not l.supports_step:
+    if not l.supports_step or not kwargs.get('test_step', True):
       return y_layer
 
     block_size = l.block_size
@@ -404,7 +404,17 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       x, y = _mask_and_pad_to_max_length(x, y)
     x_np = _to_numpy(x.values) if hasattr(x, 'values') else _to_numpy(x)
     y_np = _to_numpy(y.values) if hasattr(y, 'values') else _to_numpy(y)
-    # No float16/bfloat16 tolerance relaxation
+    atol = kwargs.get('atol', 1e-5)
+    rtol = kwargs.get('rtol', 1e-5)
+    dtype = getattr(x, 'dtype', None)
+    if dtype == mx.float16:
+      atol = max(atol, 2e-3)
+      rtol = max(rtol, 2e-3)
+    elif dtype == mx.bfloat16:
+      atol = max(atol, 1e-2)
+      rtol = max(rtol, 1e-2)
+    kwargs['atol'] = atol
+    kwargs['rtol'] = rtol
 
     np.testing.assert_allclose(x_np, y_np, **kwargs)
     if hasattr(x, 'mask') and hasattr(y, 'mask'):

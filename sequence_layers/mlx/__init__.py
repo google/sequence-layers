@@ -14,11 +14,50 @@
 # limitations under the License.
 """Sequence layers in MLX."""
 
-from sequence_layers.mlx.types import *
-
-# pylint: disable=useless-import-alias
-# (re-export the names for typechecking)
-from . import backend as backend
-from . import test_utils as test_utils
-from . import types as types
+from . import backend
+from . import test_utils
+from . import types
 from .test_utils import SequenceLayerTest
+from .types import ChannelSpec
+from .types import Constants
+from .types import DType
+from .types import Emits
+from .types import Emitting
+from .types import MaskedSequence
+from .types import MaskT
+from .types import PreservesShape
+from .types import PreservesType
+from .types import Sequence
+from .types import SequenceLayer
+from .types import SequenceLayerConfig
+from .types import Shape
+from .types import ShapeDType
+from .types import ShapeLike
+from .types import State
+from .types import Stateless
+from .types import StatelessPointwise
+
+__all__ = [
+    'backend',
+    'types',
+    'test_utils',
+    'SequenceLayerTest',
+    'Constants',
+    'Sequence',
+    'MaskedSequence',
+    'SequenceLayer',
+    'SequenceLayerConfig',
+    'MaskT',
+    'Shape',
+    'ShapeDType',
+    'ShapeLike',
+    'DType',
+    'State',
+    'Emits',
+    'Emitting',
+    'ChannelSpec',
+    'Stateless',
+    'StatelessPointwise',
+    'PreservesShape',
+    'PreservesType',
+]
