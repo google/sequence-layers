@@ -15,6 +15,7 @@
 
 from typing import override
 
+import jax.nn as jnn
 import jax.numpy as jnp
 from sequence_layers.specs import backend as spec
 from sequence_layers.specs import types as types_spec
@@ -35,8 +36,86 @@ class BackendWrapper(spec.xp):
   def zeros(self, shape, dtype=None) -> types_spec.Array:
     return jnp.zeros(shape, dtype=dtype)
 
+  @override
   def concatenate(self, arrays, axis=0) -> types_spec.Array:
     return jnp.concatenate(arrays, axis=axis)
 
+  @override
+  def broadcast_to(self, array, shape) -> types_spec.Array:
+    return jnp.broadcast_to(array, shape)
+
+  @override
+  def abs(self, x) -> types_spec.Array:
+    return jnp.abs(x)
+
+  @override
+  def exp(self, x) -> types_spec.Array:
+    return jnp.exp(x)
+
+  @override
+  def log(self, x) -> types_spec.Array:
+    return jnp.log(x)
+
+  @override
+  def mean(
+      self,
+      x,
+      axis=None,
+      dtype=None,
+      keepdims=False,
+      where=None,
+  ) -> types_spec.Array:
+    return jnp.mean(x, axis=axis, dtype=dtype, keepdims=keepdims, where=where)
+
+  @override
+  def var(
+      self,
+      x,
+      axis=None,
+      dtype=None,
+      keepdims=False,
+      where=None,
+  ) -> types_spec.Array:
+    return jnp.var(x, axis=axis, dtype=dtype, keepdims=keepdims, where=where)
+
 
 xp: spec.xp = BackendWrapper()
+
+
+class NNWrapper(spec.nn):
+  """Wrapper around JAX activations to match backend protocol."""
+
+  @override
+  def relu(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.relu(x)
+
+  @override
+  def sigmoid(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.sigmoid(x)
+
+  @override
+  def tanh(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.tanh(x)
+
+  @override
+  def swish(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.swish(x)
+
+  @override
+  def gelu(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.gelu(x)
+
+  @override
+  def elu(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.elu(x)
+
+  @override
+  def softplus(self, x: types_spec.Array) -> types_spec.Array:
+    return jnn.softplus(x)
+
+  @override
+  def softmax(self, x: types_spec.Array, axis: int = -1) -> types_spec.Array:
+    return jnn.softmax(x, axis=axis)
+
+
+nn: spec.nn = NNWrapper()

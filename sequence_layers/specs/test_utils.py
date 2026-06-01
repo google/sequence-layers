@@ -21,6 +21,7 @@ from typing import Sequence as TypingSequence
 from typing import TypeVar
 
 from absl.testing import parameterized
+import numpy as np
 
 from sequence_layers import specs
 from sequence_layers.specs import backend as backend_spec
@@ -160,6 +161,15 @@ class SequenceLayerTest(
     """Returns the backend wrapper."""
     return self.sl.backend.xp
 
+  @property
+  def nn(self) -> backend_spec.nn:
+    """Returns the backend nn wrapper."""
+    return self.sl.backend.nn
+
+  def make_layer(self, config: types_spec.SequenceLayerConfig) -> Any:
+    """Instantiates a layer from its config, delegating to the backend."""
+    return config.make()
+
   # pylint: disable=invalid-name
 
   @abc.abstractmethod
@@ -174,6 +184,16 @@ class SequenceLayerTest(
 
   # pylint: enable=invalid-name
 
+  def assertNotAllEqual(self, x: Any, y: Any) -> None:  # pylint: disable=invalid-name
+    """Asserts that not all elements are equal."""
+    x_np = np.asarray(x)
+    y_np = np.asarray(y)
+    self.assertFalse(np.all(x_np == y_np))
+
+  @abc.abstractmethod
+  def get_variables(self, layer: types_spec.SequenceLayer) -> dict[str, Any]:
+    """Returns the variables or parameters of the layer."""
+
   @abc.abstractmethod
   def random_sequence(
       self,
@@ -187,6 +207,24 @@ class SequenceLayerTest(
       high_length: int | None = None,
   ) -> types_spec.Sequence:
     """Generates a random sequence."""
+
+  @abc.abstractmethod
+  def init_layer(
+      self,
+      layer: types_spec.SequenceLayer,
+      x: types_spec.Sequence,
+      bind_only: bool = False,
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.SequenceLayer:
+    """Initializes and binds a SequenceLayer for testing.
+
+    Args:
+      layer: Layer to initialize and bind.
+      x: Example input sequence to use for initialization.
+      bind_only: If True, skip initialization and only bind the layer (if
+        applicable to the backend).
+      constants: Optional constants for initialization.
+    """
 
   @abc.abstractmethod
   def _step_by_step(
@@ -219,6 +257,18 @@ class SequenceLayerTest(
   @abc.abstractmethod
   def assertSequencesClose(self, x: Any, y: Any, **kwargs) -> None:  # pylint: disable=invalid-name
     """Asserts that two sequences are close."""
+
+  def assertConfigDefaults(  # pylint: disable=invalid-name
+      self, config_cls: type[Any], expected_defaults: dict[str, Any], **kwargs
+  ) -> None:
+    """Helper to verify that a config class has the expected defaults."""
+    config = config_cls(**kwargs)
+    for field_name, expected_val in expected_defaults.items():
+      self.assertEqual(
+          getattr(config, field_name),
+          expected_val,
+          f'Default for {field_name} in {config_cls.__name__} does not match!',
+      )
 
 
 class ModuleSpecTest(SequenceLayerTest):

@@ -42,6 +42,10 @@ class ModuleSpec(Protocol):
   def SequenceLayerTest(self) -> type[Any]:  # pylint: disable=invalid-name,missing-function-docstring
     ...
 
+  @property
+  def NonSteppableLayer(self) -> type[Any]:  # pylint: disable=invalid-name,missing-function-docstring
+    ...
+
 
 __all__ = [
     name

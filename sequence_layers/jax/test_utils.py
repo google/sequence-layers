@@ -725,6 +725,10 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     random.seed(123456789)
     np.random.seed(123456789)
 
+  @override
+  def get_variables(self, layer):
+    return layer.variables
+
   def init_and_bind_layer(
       self,
       key: jax.Array,
@@ -774,10 +778,12 @@ class SequenceLayerTest(spec.SequenceLayerTest):
 
     return layer.bind(variables)
 
-  def init_layer(self, layer, x, **kwargs):
+  def init_layer(self, layer, x, bind_only=False, constants=None):
     """Initialize and bind variables for JAX."""
+    if bind_only:
+      return layer.bind({})
     key = jax.random.PRNGKey(1234)
-    return self.init_and_bind_layer(key, layer, x, **kwargs)
+    return self.init_and_bind_layer(key, layer, x, constants=constants)
 
   def verify_masked(self, x: types.Sequence):
     """Asserts all invalid timesteps in x have values masked to zero."""
