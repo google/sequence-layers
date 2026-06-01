@@ -1,5 +1,7 @@
 """2D Convolution, transpose convolution, pooling, and upsampling layers for MLX."""
 
+# pylint: disable=protected-access
+
 import dataclasses
 import fractions
 from typing import Any, Callable, override
@@ -142,6 +144,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
       self._ensure_initialized(in_features)
 
   def _ensure_initialized(self, in_features: int):
+    """Initializes the Conv2D layer weights and biases."""
     if self.kernel is not None:
       return
     self.in_features = in_features
@@ -190,7 +193,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
         PaddingMode.SEMICAUSAL.value,
     ):
       return 0
-    elif self.time_padding in (
+    if self.time_padding in (
         PaddingMode.REVERSE_CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL.value,
     ):
@@ -273,8 +276,6 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
     if not bw:
       return ()
     # State is a MaskedSequence of shape [B, bw, freq, channels].
-    freq_dim = input_spec.shape[0]
-    channels = input_spec.shape[1] if len(input_spec.shape) > 1 else 1
     if self.time_padding in (
         PaddingMode.CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL_VALID.value,
@@ -290,7 +291,9 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @types.check_step
   @override
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.channel_shape[-1])
     ek_time = conv_utils._effective_kernel_size(
         self.kernel_size[0], self.dilation_rate[0]
@@ -340,17 +343,19 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @types.check_layer
   @override
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
 
     self._ensure_initialized(x.channel_shape[-1])
-    L_out_time = conv_utils._compute_output_length(
+    l_out_time = conv_utils._compute_output_length(
         x.shape[1],
         self.kernel_size[0],
         self.strides[0],
         self.dilation_rate[0],
         self.time_padding,
     )
-    if L_out_time == 0:
+    if l_out_time == 0:
       output_spec = self.get_output_spec(x.channel_spec, constants=constants)
       empty_values = mx.zeros(
           (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
@@ -390,6 +395,7 @@ class Conv2D(types.SequenceLayer, spec.Conv2D[bt.Sequence, bt.ChannelSpec]):
 
   @classmethod
   def from_config(cls, config):
+    """Creates a Conv2D instance from its configuration object."""
     return cls(config)
 
 
@@ -488,6 +494,7 @@ class Conv2DTranspose(
       self._ensure_initialized(in_features)
 
   def _ensure_initialized(self, in_features: int):
+    """Initializes the Conv2DTranspose weights and biases."""
     if self.kernel is not None:
       return
     self.in_features = in_features
@@ -547,8 +554,7 @@ class Conv2DTranspose(
           self.dilation_rate[1],
           self.spatial_padding,
       )
-    else:
-      return self.spatial_padding
+    return self.spatial_padding
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -622,7 +628,9 @@ class Conv2DTranspose(
 
   @types.check_layer
   @override
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.channel_shape[-1])
     values = self._forward(x.values)
     mask = conv_utils._compute_conv_transpose_mask(
@@ -662,7 +670,9 @@ class Conv2DTranspose(
 
   @types.check_step
   @override
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool, constants=None
+  ):
 
     self._ensure_initialized(x.channel_shape[-1])
     x = x.mask_invalid()
@@ -716,6 +726,7 @@ class Conv2DTranspose(
 
   @classmethod
   def from_config(cls, config):
+    """Creates a Conv2DTranspose instance from its configuration object."""
     return cls(config)
 
 
@@ -729,6 +740,8 @@ class AveragePooling2D(types.SequenceLayer):
 
   @dataclasses.dataclass(frozen=True)
   class Config(_SequenceLayerConfig):
+    """Configuration for AveragePooling2D."""
+
     pool_size: tuple[int, int] = (1, 1)
     strides: tuple[int, int] = (1, 1)
     dilation_rate: tuple[int, int] = (1, 1)
@@ -794,7 +807,7 @@ class AveragePooling2D(types.SequenceLayer):
         PaddingMode.SEMICAUSAL.value,
     ):
       return 0
-    elif self.time_padding in (
+    if self.time_padding in (
         PaddingMode.REVERSE_CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL.value,
     ):
@@ -866,16 +879,18 @@ class AveragePooling2D(types.SequenceLayer):
 
   @types.check_layer
   @override
-  def layer(self, x, *, training: bool = False, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool = False, constants=None
+  ):
 
-    L_out_time = conv_utils._compute_output_length(
+    l_out_time = conv_utils._compute_output_length(
         x.shape[1],
         self.pool_size[0],
         self.strides[0],
         self.dilation_rate[0],
         self.time_padding,
     )
-    if L_out_time == 0:
+    if l_out_time == 0:
       output_spec = self.get_output_spec(x.channel_spec, constants=constants)
       empty_values = mx.zeros(
           (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
@@ -937,7 +952,9 @@ class AveragePooling2D(types.SequenceLayer):
 
   @types.check_step
   @override
-  def step(self, x, state, *, training: bool = False, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool = False, constants=None
+  ):
 
     bw = conv_utils._buffer_width(
         self.time_padding,
@@ -980,6 +997,7 @@ class AveragePooling2D(types.SequenceLayer):
 
   @classmethod
   def from_config(cls, config):
+    """Creates an AveragePooling2D instance from its configuration object."""
     pool_size = _normalize_2tuple(config.pool_size)
     strides = _normalize_2tuple(config.strides)
     dilation_rate = _normalize_2tuple(getattr(config, 'dilation_rate', (1, 1)))
@@ -1003,6 +1021,8 @@ class Upsample2D(types.PreservesType, types.Stateless):
 
   @dataclasses.dataclass(frozen=True)
   class Config(_SequenceLayerConfig):
+    """Configuration for Upsample2D."""
+
     rate: tuple[int, int] = (1, 1)
     name: str | None = None
 
@@ -1032,7 +1052,9 @@ class Upsample2D(types.PreservesType, types.Stateless):
 
   @types.check_layer
   @override
-  def layer(self, x, *, training: bool = False, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool = False, constants=None
+  ):
 
     values = mx.repeat(x.values, self._rate[0], axis=1)
     values = mx.repeat(values, self._rate[1], axis=2)
@@ -1041,6 +1063,7 @@ class Upsample2D(types.PreservesType, types.Stateless):
 
   @classmethod
   def from_config(cls, config):
+    """Creates an Upsample2D instance from its configuration object."""
     return cls(rate=_normalize_2tuple(config.rate))
 
 
@@ -1063,6 +1086,8 @@ class ParallelChannels(types.Emitting):
 
   @dataclasses.dataclass(frozen=True)
   class Config(_SequenceLayerConfig):
+    """Configuration for ParallelChannels."""
+
     child_layer: _SequenceLayerConfig | None = None
     num_groups: int = 1
     combination: object = None  # CombinationMode enum value
@@ -1126,12 +1151,11 @@ class ParallelChannels(types.Emitting):
       # Concatenate along last axis.
       combined_vals = mx.concatenate([o.values for o in outputs], axis=-1)
       return Sequence(combined_vals, outputs[0].mask)
-    elif self._combination == self.STACK:
+    if self._combination == self.STACK:
       # Stack along a new axis before the last.
       stacked = mx.stack([o.values for o in outputs], axis=-2)
       return Sequence(stacked, outputs[0].mask)
-    else:
-      raise ValueError(f'Unsupported combination mode: {self._combination}')
+    raise ValueError(f'Unsupported combination mode: {self._combination}')
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -1149,10 +1173,9 @@ class ParallelChannels(types.Emitting):
     )
     if self._combination == self.CONCAT:
       return child_shape[:-1] + (child_shape[-1] * self._num_groups,)
-    elif self._combination == self.STACK:
+    if self._combination == self.STACK:
       return child_shape[:-1] + (self._num_groups,) + (child_shape[-1],)
-    else:
-      raise ValueError(f'Unsupported combination mode: {self._combination}')
+    raise ValueError(f'Unsupported combination mode: {self._combination}')
 
   @override
   def get_output_dtype(self, input_dtype, *, constants=None):
@@ -1160,7 +1183,9 @@ class ParallelChannels(types.Emitting):
 
   @types.check_layer
   @override
-  def layer(self, x, *, training: bool = False, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool = False, constants=None
+  ):
 
     groups = self._split(x)
     outputs = [
@@ -1205,7 +1230,9 @@ class ParallelChannels(types.Emitting):
 
   @types.check_step
   @override
-  def step(self, x, state, *, training: bool = False, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool = False, constants=None
+  ):
 
     groups = self._split(x)
     outputs = []
@@ -1233,6 +1260,7 @@ class ParallelChannels(types.Emitting):
 
   @classmethod
   def from_config(cls, config, backend='mlx'):
+    """Creates a ParallelChannels instance from its configuration object."""
     child = mlx_utils.make_layer(config.child_layer, backend=backend)
     return cls(
         child_layer=child,

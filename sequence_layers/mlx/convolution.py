@@ -1,12 +1,13 @@
 """Convolution layers for MLX."""
 
+# pylint: disable=protected-access
+
 import dataclasses
 import fractions
-import math
-from typing import Any, Callable, override
+from typing import Any, Callable, cast, override
 
+from mlx import nn
 import mlx.core as mx
-import mlx.nn as nn
 
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
@@ -27,6 +28,7 @@ PaddingMode = bt.PaddingMode
 
 
 def _effective_kernel_size(kernel_size, dilation_rate):
+  """Returns the effective kernel size after dilation."""
   return (kernel_size - 1) * dilation_rate + 1
 
 
@@ -39,35 +41,34 @@ def _explicit_padding(padding, kernel_size, stride, dilation_rate):
 
   if padding in (PaddingMode.CAUSAL_VALID.value, PaddingMode.CAUSAL.value):
     return (ek - 1, 0)
-  elif padding == PaddingMode.SEMICAUSAL.value:
+  if padding == PaddingMode.SEMICAUSAL.value:
     pad_left = max(ek - stride, 0)
     return (pad_left, ek - 1 - pad_left)
-  elif padding in (
+  if padding in (
       PaddingMode.REVERSE_CAUSAL_VALID.value,
       PaddingMode.REVERSE_CAUSAL.value,
   ):
     return (0, ek - 1)
-  elif padding == PaddingMode.SAME.value:
+  if padding == PaddingMode.SAME.value:
     pad_amount = ek - 1
     pad_left = pad_amount // 2
     return (pad_left, pad_amount - pad_left)
-  elif padding == PaddingMode.VALID.value:
+  if padding == PaddingMode.VALID.value:
     return (0, 0)
-  elif padding == PaddingMode.SEMICAUSAL_FULL.value:
+  if padding == PaddingMode.SEMICAUSAL_FULL.value:
     return (ek - stride, ek - 1)
-  else:
-    raise ValueError(f'Unsupported padding mode: {padding}')
+  raise ValueError(f'Unsupported padding mode: {padding}')
 
 
-def _compute_output_length(L_in, kernel_size, stride, dilation_rate, padding):
+def _compute_output_length(l_in, kernel_size, stride, dilation_rate, padding):
   """Computes the expected output sequence length."""
   pad_left, pad_right = _explicit_padding(
       padding, kernel_size, stride, dilation_rate
   )
-  L_pad = L_in + pad_left + pad_right
-  K_eff = _effective_kernel_size(kernel_size, dilation_rate)
-  L_out = (L_pad - K_eff) // stride + 1
-  return max(L_out, 0)
+  l_pad = l_in + pad_left + pad_right
+  k_eff = _effective_kernel_size(kernel_size, dilation_rate)
+  l_out = (l_pad - k_eff) // stride + 1
+  return max(l_out, 0)
 
 
 def _buffer_width(padding, kernel_size, stride, dilation_rate):
@@ -76,18 +77,17 @@ def _buffer_width(padding, kernel_size, stride, dilation_rate):
 
   if padding == PaddingMode.SEMICAUSAL.value:
     return max(ek - stride, 0)
-  elif padding in (
+  if padding in (
       PaddingMode.REVERSE_CAUSAL.value,
       PaddingMode.REVERSE_CAUSAL_VALID.value,
   ):
     return (ek - 1) // stride * stride
-  elif padding in (
+  if padding in (
       PaddingMode.CAUSAL.value,
       PaddingMode.CAUSAL_VALID.value,
   ):
     return ek - 1
-  else:
-    raise ValueError(f'Unsupported step padding: {padding}')
+  raise ValueError(f'Unsupported step padding: {padding}')
 
 
 def _supports_step(padding):
@@ -104,14 +104,13 @@ def _supports_step(padding):
 def _compute_conv_mask(
     mask, kernel_size, stride, dilation_rate, padding, is_step
 ):
+  """Computes the mask for convolution layers."""
   if not is_step:
-    L_out = _compute_output_length(
+    l_out = _compute_output_length(
         mask.shape[1], kernel_size, stride, dilation_rate, padding
     )
-    if L_out == 0:
+    if l_out == 0:
       return mx.zeros((mask.shape[0], 0), dtype=mx.bool_)
-
-  ek = _effective_kernel_size(kernel_size, dilation_rate)
 
   if is_step:
     if isinstance(padding, str) and padding in (
@@ -129,7 +128,7 @@ def _compute_conv_mask(
       mask_f = mask[:, :, None].astype(mx.float32)
       mask_conv = mx.conv1d(mask_f, kernel, stride=stride)
       return mx.squeeze(mask_conv, axis=-1).astype(mx.bool_)
-    elif not isinstance(padding, str) or padding in (
+    if not isinstance(padding, str) or padding in (
         PaddingMode.VALID.value,
         PaddingMode.CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL_VALID.value,
@@ -137,10 +136,7 @@ def _compute_conv_mask(
       return _compute_conv_mask_logical(
           mask, kernel_size, stride, dilation_rate
       )
-    else:
-      return _compute_conv_mask_logical(
-          mask, kernel_size, stride, dilation_rate
-      )
+    return _compute_conv_mask_logical(mask, kernel_size, stride, dilation_rate)
 
   # Layer mode.
   if isinstance(padding, str) and padding in (
@@ -213,8 +209,7 @@ def _compute_conv_mask_logical(
 
   if use_logical_or:
     return result > 0.0
-  else:
-    return result >= float(kernel_size)
+  return result >= float(kernel_size)
 
 
 def _compute_initial_state(batch_size, input_spec, buf_width, padding):
@@ -326,11 +321,12 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
     )
     self._param_dtype = init_mapping._to_mx_dtype(self.config.param_dtype)
 
-    self._conv = None
+    self._conv: Any = None
     if in_features is not None:
       self._ensure_initialized(in_features)
 
   def _ensure_initialized(self, in_features: int):
+    """Initializes the convolution layer weight and bias."""
     if self._conv is not None:
       return
     self.in_features = in_features
@@ -373,7 +369,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
         PaddingMode.SEMICAUSAL.value,
     ):
       return 0
-    elif self.padding in (
+    if self.padding in (
         PaddingMode.REVERSE_CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL.value,
         PaddingMode.SEMICAUSAL_FULL.value,
@@ -429,7 +425,9 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
 
   @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.shape[-1])
     ek = _effective_kernel_size(self.kernel_size, self.dilation_rate)
     if ek > 1:
@@ -443,7 +441,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
     )
 
     if bw:
-      state = state.concatenate(x)
+      state = state.concatenate(x)  # pyrefly: ignore[missing-attribute]
     else:
       state = x
 
@@ -467,17 +465,19 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
 
   @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
 
     self._ensure_initialized(x.shape[-1])
-    L_out = _compute_output_length(
+    l_out = _compute_output_length(
         x.shape[1],
         self.kernel_size,
         self.strides,
         self.dilation_rate,
         self.padding,
     )
-    if L_out == 0:
+    if l_out == 0:
       output_spec = self.get_output_spec(x.channel_spec, constants=constants)
       empty_values = mx.zeros(
           (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
@@ -507,6 +507,7 @@ class Conv1D(types.SequenceLayer, spec.Conv1D[bt.Sequence, bt.ChannelSpec]):
 
   @classmethod
   def from_config(cls, config):
+    """Creates a Conv1D instance from its configuration object."""
     return cls(config)
 
 
@@ -596,6 +597,7 @@ class DepthwiseConv1D(
       self._ensure_initialized(in_features)
 
   def _ensure_initialized(self, in_features: int):
+    """Initializes the depthwise convolution weights."""
     if self._conv is not None:
       return
     self.in_features = in_features
@@ -636,7 +638,7 @@ class DepthwiseConv1D(
         PaddingMode.SEMICAUSAL.value,
     ):
       return 0
-    elif self.padding in (
+    if self.padding in (
         PaddingMode.REVERSE_CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL.value,
         PaddingMode.SEMICAUSAL_FULL.value,
@@ -659,6 +661,7 @@ class DepthwiseConv1D(
     return self.compute_dtype or self._param_dtype
 
   def _forward(self, values, pad_left, pad_right):
+    """Applies the depthwise convolution with explicit padding."""
     if pad_left > 0 or pad_right > 0:
       values = mx.pad(
           values,
@@ -693,7 +696,9 @@ class DepthwiseConv1D(
 
   @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.shape[-1])
     ek = _effective_kernel_size(self.kernel_size, self.dilation_rate)
     if ek > 1:
@@ -707,7 +712,7 @@ class DepthwiseConv1D(
     )
 
     if bw:
-      state = state.concatenate(x)
+      state = state.concatenate(x)  # pyrefly: ignore[missing-attribute]
     else:
       state = x
 
@@ -730,17 +735,19 @@ class DepthwiseConv1D(
 
   @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
 
     self._ensure_initialized(x.shape[-1])
-    L_out = _compute_output_length(
+    l_out = _compute_output_length(
         x.shape[1],
         self.kernel_size,
         self.strides,
         self.dilation_rate,
         self.padding,
     )
-    if L_out == 0:
+    if l_out == 0:
       output_spec = self.get_output_spec(x.channel_spec, constants=constants)
       empty_values = mx.zeros(
           (x.shape[0], 0, *output_spec.shape), dtype=x.values.dtype
@@ -770,6 +777,7 @@ class DepthwiseConv1D(
 
   @classmethod
   def from_config(cls, config):
+    """Creates a DepthwiseConv1D instance from its configuration object."""
     return cls(config)
 
 
@@ -791,20 +799,20 @@ def _transpose_conv_output_trim(kernel_size, stride, dilation_rate, padding):
 
   if padding == PaddingMode.CAUSAL.value:
     return (0, total_trim)
-  elif padding == PaddingMode.SAME.value:
+  if padding == PaddingMode.SAME.value:
     trim_left = total_trim // 2
     return (trim_left, total_trim - trim_left)
-  elif padding == PaddingMode.VALID.value:
+  if padding == PaddingMode.VALID.value:
     return (0, 0)
-  elif padding == PaddingMode.SEMICAUSAL_FULL.value:
+  if padding == PaddingMode.SEMICAUSAL_FULL.value:
     return (0, 0)
-  else:
-    raise ValueError(f'Unsupported padding: {padding}')
+  raise ValueError(f'Unsupported padding: {padding}')
 
 
 def _compute_conv_transpose_output_length(
     time, kernel_size, stride, dilation_rate, padding
 ):
+  """Computes the expected output length for transpose convolution."""
   ek = _effective_kernel_size(kernel_size, dilation_rate)
   if padding in (
       PaddingMode.SAME.value,
@@ -812,10 +820,9 @@ def _compute_conv_transpose_output_length(
       PaddingMode.SEMICAUSAL_FULL.value,
   ):
     return time * stride
-  elif padding == PaddingMode.VALID.value:
+  if padding == PaddingMode.VALID.value:
     return time * stride + max(ek - stride, 0)
-  else:
-    raise ValueError(f'Unsupported padding: {padding}')
+  raise ValueError(f'Unsupported padding: {padding}')
 
 
 def _compute_conv_transpose_mask(
@@ -840,10 +847,15 @@ def _compute_conv_transpose_mask(
 
   if padding == PaddingMode.SEMICAUSAL_FULL.value:
     test_signal = mask
-    test_fn = lambda m: m > 0.0
+
+    def test_fn(m):
+      return m > 0.0
+
   else:
     test_signal = mx.logical_not(mask)
-    test_fn = lambda m: m == 0.0
+
+    def test_fn(m):
+      return m == 0.0
 
   kernel = mx.ones((1, kernel_size, 1), dtype=mx.float32)
   signal = test_signal.astype(mx.float32)[:, :, None]
@@ -951,6 +963,7 @@ class Conv1DTranspose(
       self._ensure_initialized(in_features)
 
   def _ensure_initialized(self, in_features: int):
+    """Initializes the transpose convolution weights and biases."""
     if self.kernel is not None:
       return
     self.in_features = in_features
@@ -1035,6 +1048,7 @@ class Conv1DTranspose(
 
   @property
   def _ola_buffer_width(self):
+    """Returns the buffer width required for overlap-add step mode."""
     return max(
         0,
         _effective_kernel_size(self.kernel_size, self.dilation_rate)
@@ -1059,7 +1073,9 @@ class Conv1DTranspose(
 
   @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.shape[-1])
     # Use raw conv (no trimming) for overlap-add.
     values = self._raw_conv_transpose(x.values)
@@ -1069,7 +1085,7 @@ class Conv1DTranspose(
     bw = self._ola_buffer_width
     if bw:
       # Overlap-add: the first bw samples overlap with buffer.
-      overlap = values[:, :bw] + state
+      overlap = values[:, :bw] + cast(Any, state)
       rest = values[:, bw:]
       values = mx.concatenate([overlap, rest], axis=1)
 
@@ -1089,7 +1105,9 @@ class Conv1DTranspose(
 
   @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
 
     self._ensure_initialized(x.shape[-1])
     if self.padding == PaddingMode.CAUSAL.value:
@@ -1128,4 +1146,5 @@ class Conv1DTranspose(
 
   @classmethod
   def from_config(cls, config):
+    """Creates a Conv1DTranspose instance from its configuration object."""
     return cls(config)
