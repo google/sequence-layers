@@ -4,11 +4,12 @@ import dataclasses
 from typing import Any, override
 from typing import Sequence as _Sequence
 
+from mlx import nn
 import mlx.core as mx
-import mlx.nn as nn
 
 from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
+from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.specs import normalization as spec
 
 Sequence = types.Sequence
@@ -119,12 +120,11 @@ class RMSNormalization(
           compute_dtype=compute_dtype,
           param_dtype=param_dtype,
       )
-    from sequence_layers.mlx.init_mapping import _to_mx_dtype
-
     self._param_dtype = _to_mx_dtype(self.config.param_dtype)
     self._scale_init = init_mapping.map_initializer(self.config.scale_init)
     # mlx.nn.RMSNorm created lazily since we need input shape.
     self._rms_norm = None
+    self._scale = None
     self._use_builtin = False
 
   def _ensure_initialized(self, input_shape):
@@ -168,7 +168,7 @@ class RMSNormalization(
     normed = normed.astype(values.dtype)
 
     # Apply learned scale.
-    if self.config.use_scale:
+    if self.config.use_scale and self._scale is not None:
       scale = self._scale.astype(normed.dtype)
       shape = [1] * len(values.shape)
       for i, a in enumerate(axes):
@@ -210,8 +210,6 @@ class LayerNormalization(
   def __init__(self, config: Config):
     super().__init__()
     self.config = config
-    from sequence_layers.mlx.init_mapping import _to_mx_dtype
-
     self._param_dtype = _to_mx_dtype(config.param_dtype)
     self._layer_norm = None
     self._use_builtin = False
@@ -219,6 +217,7 @@ class LayerNormalization(
     self._manual_bias = None
 
   def _ensure_initialized(self, input_shape):
+    """Create internal LayerNorm on first call."""
     if self._layer_norm is not None or self._manual_scale is not None:
       return
     if not self.config.use_scale and not self.config.use_bias:
@@ -314,8 +313,6 @@ class BatchNormalization(
   def __init__(self, config: Config):
     super().__init__()
     self.config = config
-    from sequence_layers.mlx.init_mapping import _to_mx_dtype
-
     self._param_dtype = _to_mx_dtype(config.param_dtype)
     self._running_mean = None
     self._running_var = None
@@ -323,6 +320,7 @@ class BatchNormalization(
     self._bias = None
 
   def _ensure_initialized(self, input_shape):
+    """Create internal running statistics on first call."""
     if self._running_mean is not None:
       return
     axes = _normalize_axes(self.config.axis, input_shape)
@@ -403,13 +401,12 @@ class GroupNormalization(
   def __init__(self, config: Config):
     super().__init__()
     self.config = config
-    from sequence_layers.mlx.init_mapping import _to_mx_dtype
-
     self._param_dtype = _to_mx_dtype(config.param_dtype)
     self._scale = None
     self._bias = None
 
   def _ensure_initialized(self, input_shape):
+    """Create internal GroupNorm components on first call."""
     if self._scale is not None or self._bias is not None:
       return
     axes = _normalize_axes(self.config.axis, input_shape)

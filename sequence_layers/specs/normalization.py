@@ -5,7 +5,7 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import Any, Sequence, override
+from typing import Any, override, Sequence
 
 from sequence_layers.specs import types as types_spec
 

@@ -1,5 +1,7 @@
 """Tests for normalization MLX sequence layers."""
 
+# pylint: disable=import-outside-toplevel,protected-access
+
 from absl.testing import absltest
 import mlx.core as mx
 import numpy as np
