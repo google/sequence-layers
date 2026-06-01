@@ -1,14 +1,12 @@
 """Mapping JAX/Flax initializers and activations to MLX equivalents."""
 
-import functools
 import math
 
 import jax
 import jax.numpy as jnp
+from mlx import nn
 import mlx.core as mx
-import mlx.nn as nn
 import numpy as np
-from flax.linen import initializers as flax_init
 
 
 def _variance_scaling(key, shape, dtype, mode, distribution, fan_in, fan_out):
@@ -32,15 +30,15 @@ def _variance_scaling(key, shape, dtype, mode, distribution, fan_in, fan_out):
         )
         * stddev
     )
-  elif distribution == 'normal':
+  if distribution == 'normal':
     return mx.random.normal(shape=shape, key=key).astype(dtype) * math.sqrt(
         variance
     )
-  elif distribution == 'uniform':
+  if distribution == 'uniform':
     limit = math.sqrt(3.0 * variance)
     return mx.random.uniform(-limit, limit, shape=shape, key=key).astype(dtype)
-  else:
-    raise ValueError(f'Unknown distribution: {distribution}')
+
+  raise ValueError(f'Unknown distribution: {distribution}')
 
 
 def _compute_fans(shape):
@@ -100,16 +98,20 @@ def _to_mx_dtype(dtype):
 
 
 def _zeros_init(key, shape, dtype=mx.float32):
+  """Initializer that generates tensors initialized with 0."""
   del key
   return mx.zeros(shape, dtype=_to_mx_dtype(dtype))
 
 
 def _ones_init(key, shape, dtype=mx.float32):
+  """Initializer that generates tensors initialized with 1."""
   del key
   return mx.ones(shape, dtype=_to_mx_dtype(dtype))
 
 
 def _normal_init(stddev=0.01):
+  """Initializer that generates tensors with a normal distribution."""
+
   def init_fn(key, shape, dtype=mx.float32):
     dtype = _to_mx_dtype(dtype)
     return mx.random.normal(shape=shape, key=key).astype(dtype) * stddev
@@ -145,7 +147,7 @@ def map_initializer(jax_init):
     # Check if it's ones.
     if np.allclose(test_np, 1.0):
       return _ones_init
-  except Exception:
+  except Exception:  # pylint: disable=broad-exception-caught
     pass
 
   # Try to identify by function name or attributes.
