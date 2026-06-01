@@ -1,6 +1,6 @@
 """Convolution layers for MLX."""
 
-# pylint: disable=protected-access
+# pylint: disable=protected-access,abstract-method
 
 import dataclasses
 import fractions

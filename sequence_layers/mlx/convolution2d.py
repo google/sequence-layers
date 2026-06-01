@@ -1,6 +1,6 @@
 """2D Convolution, transpose convolution, pooling, and upsampling layers for MLX."""
 
-# pylint: disable=protected-access
+# pylint: disable=protected-access,abstract-method
 
 import dataclasses
 import fractions

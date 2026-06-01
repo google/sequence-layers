@@ -31,8 +31,11 @@ from . import types
 from .convolution import Conv1D
 from .convolution import Conv1DTranspose
 from .convolution import DepthwiseConv1D
+from .convolution2d import AveragePooling2D
 from .convolution2d import Conv2D
 from .convolution2d import Conv2DTranspose
+from .convolution2d import ParallelChannels
+from .convolution2d import Upsample2D
 from .dense import Dense
 from .dense import EinsumDense
 from .normalization import BatchNormalization
@@ -129,6 +132,9 @@ __all__ = [
     'Conv1DTranspose',
     'Conv2D',
     'Conv2DTranspose',
+    'AveragePooling2D',
+    'Upsample2D',
+    'ParallelChannels',
     'Identity',
     'Relu',
     'Gelu',
