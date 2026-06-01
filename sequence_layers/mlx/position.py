@@ -15,15 +15,16 @@
 
 import dataclasses
 import math
-from typing import Any, Callable, override
+from typing import Any, cast, override
 
 import mlx.core as mx
-import mlx.nn as nn
 import numpy as np
 
-from . import types as bt
 from sequence_layers.mlx import types
+from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.specs import position as position_spec
+
+from . import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence
@@ -135,9 +136,10 @@ class AddTimingSignal(
     if self.trainable_scale:
       self.scale = mx.ones((), dtype=self.param_dtype)
     else:
-      self.scale = None
+      self.scale = cast(Any, None)
 
   def _check_inputs(self, input_spec):
+    """Validates the input specification."""
     if input_spec.dtype not in (
         mx.float16,
         mx.bfloat16,
@@ -147,23 +149,28 @@ class AddTimingSignal(
           f'{type(self).__name__} requires floating point argument.'
       )
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     return tuple(input_shape)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return input_dtype
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
     self._check_inputs(input_spec)
     if self.only_advance_position_for_valid_timesteps:
       return mx.full((batch_size, 1), -1, dtype=mx.int32)
-    else:
-      return mx.zeros((batch_size, 1), dtype=mx.int32)
+    return mx.zeros((batch_size, 1), dtype=mx.int32)
 
+  @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state: Any, *, training: bool, constants=None
+  ):
     self._check_inputs(x.channel_spec)
     time = x.shape[1]
     target_shape = _match_shape_along_axes(x.channel_shape, axes=self.axes)
@@ -191,15 +198,18 @@ class AddTimingSignal(
     x = x.apply_values(lambda v: v + timing_signal.astype(v.dtype))
     return x, state
 
+  @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
     self._check_inputs(x.channel_spec)
     target_shape = _match_shape_along_axes(x.channel_shape, axes=self.axes)
 
     if self.only_advance_position_for_valid_timesteps:
       position = mx.maximum(0, mx.cumsum(x.mask.astype(mx.int32), axis=1) - 1)
     else:
-      position = mx.arange(x.shape[1], dtype=mx.int32)[None, :]
+      position = mx.expand_dims(mx.arange(x.shape[1], dtype=mx.int32), axis=0)
 
     timing_signal = _get_timing_signal_1d_pos(
         position,
@@ -218,8 +228,7 @@ class AddTimingSignal(
 
   @classmethod
   def from_config(cls, config):
-    from sequence_layers.mlx.init_mapping import _to_mx_dtype
-
+    """Instantiates the layer from config."""
     mlx_config = cls.Config(
         min_timescale=config.min_timescale,
         max_timescale=config.max_timescale,
@@ -293,6 +302,7 @@ class ApplyRotaryPositionalEncoding(
     self.positions_name = self.config.positions_name
 
   def _validate(self):
+    """Validates the configuration properties."""
     if self.only_advance_position_for_valid_timesteps and self.positions_name:
       raise ValueError(
           'only_advance_position_for_valid_timesteps is incompatible with'
@@ -300,6 +310,7 @@ class ApplyRotaryPositionalEncoding(
       )
 
   def _check_inputs(self, input_spec):
+    """Validates input specifications and shape constraints."""
     self._validate()
     if input_spec.dtype not in (
         mx.float16,
@@ -323,9 +334,11 @@ class ApplyRotaryPositionalEncoding(
           ' be even.'
       )
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     return tuple(input_shape)
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     return input_dtype
 
@@ -360,7 +373,9 @@ class ApplyRotaryPositionalEncoding(
         positions = offset_or_positions
       else:
         offset = offset_or_positions
-        positions = mx.arange(x.shape[1])[None, :] + offset[:, None]
+        positions = mx.expand_dims(
+            mx.arange(x.shape[1]), axis=0
+        ) + mx.expand_dims(offset, axis=1)
 
       positions_f = positions.astype(mx.float32)
       radians = positions_f.reshape(
@@ -406,6 +421,7 @@ class ApplyRotaryPositionalEncoding(
       y = y_t
     return y.astype(x.dtype)
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -413,13 +429,15 @@ class ApplyRotaryPositionalEncoding(
     self._check_inputs(input_spec)
     if self.positions_name:
       return ()
-    elif self.only_advance_position_for_valid_timesteps:
+    if self.only_advance_position_for_valid_timesteps:
       return mx.full((batch_size, 1), -1, dtype=mx.int32)
-    else:
-      return mx.zeros((batch_size, 1), dtype=mx.int32)
+    return mx.zeros((batch_size, 1), dtype=mx.int32)
 
+  @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state: Any, *, training: bool, constants=None
+  ):
     self._check_inputs(x.channel_spec)
     x_time = x.shape[1]
 
@@ -446,8 +464,11 @@ class ApplyRotaryPositionalEncoding(
     y = x.apply_values(self._apply_rope, offset_or_positions)
     return y, state
 
+  @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
     self._check_inputs(x.channel_spec)
     if self.positions_name:
       if constants is None or self.positions_name not in constants:
@@ -476,6 +497,7 @@ class ApplyRotaryPositionalEncoding(
 
   @classmethod
   def from_config(cls, config):
+    """Instantiates the layer from config."""
     mlx_config = cls.Config(
         max_wavelength=config.max_wavelength,
         axis=config.axis,
