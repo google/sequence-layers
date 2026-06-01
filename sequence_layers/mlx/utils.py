@@ -7,7 +7,11 @@ from typing import Any
 from mlx import nn
 import mlx.core as mx
 import numpy as np
+
+from sequence_layers.specs import combinators as spec_combinators
 from sequence_layers.specs import types as specs_types
+
+CombinationMode = spec_combinators.CombinationMode
 
 
 def get_output_latency(config, accumulated_output_latency=0):
@@ -32,13 +36,6 @@ def _get_accumulated_output_latency(layer, output_latency):
   """Computes accumulated output latency for a layer.
 
   Mirrors SequenceLayer.get_accumulated_output_latency from JAX types.
-
-  Args:
-    layer: The layer to compute latency for.
-    output_latency: The accumulated output latency of preceding layers.
-
-  Returns:
-    The accumulated output latency.
   """
   # Check for Serial-like combinators that chain layers.
   if hasattr(layer, 'layers') and isinstance(layer.layers, (list, tuple)):
@@ -82,57 +79,6 @@ def get_required_stepwise_delay(output_ratio, input_latency):
         f' downsampling, got {output_ratio=}'
     )
   return int(-input_latency % (1 / output_ratio))
-
-
-def call_layer_with_emits(
-    layer, x, *, training=False, constants=None, **kwargs
-):
-  """Calls layer_with_emits safely, handling signature mismatches in non-abstractified layers."""
-
-  sig = inspect.signature(layer.layer_with_emits)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.layer_with_emits(x, **call_kwargs)
-
-
-def call_step_with_emits(
-    layer, x, state, *, training=False, constants=None, **kwargs
-):
-  """Calls step_with_emits safely, handling signature mismatches in non-abstractified layers."""
-
-  sig = inspect.signature(layer.step_with_emits)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.step_with_emits(x, state, **call_kwargs)
-
-
-def call_get_initial_state(
-    layer, batch_size, input_spec, *, training=False, constants=None, **kwargs
-):
-  """Calls get_initial_state safely, handling signature mismatches in non-abstractified layers."""
-
-  sig = inspect.signature(layer.get_initial_state)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.get_initial_state(batch_size, input_spec, **call_kwargs)
 
 
 def _to_mx_dtype(dtype: Any) -> Any:
@@ -203,8 +149,7 @@ def make_layer(config, backend='mlx') -> Any:
       layer = config.make(backend=backend)
       if layer is not None:
         return layer
-    # If it's an MLX-specific config, it might have no-arg make() returning
-    # MLX layer.
+    # If it's an MLX-specific config, it might have no-arg make() returning MLX layer.
     config_module = config.__class__.__module__
     if 'mlx' in config_module:
       layer = config.make()
@@ -221,7 +166,7 @@ def make_layer(config, backend='mlx') -> Any:
     if class_name.endswith('Config'):
       class_name = class_name[:-6]
 
-  import sequence_layers.mlx as mlx_module  # pylint: disable=import-outside-toplevel,g-import-not-at-top
+  import sequence_layers.mlx as mlx_module  # pylint: disable=import-outside-toplevel
 
   if not hasattr(mlx_module, class_name):
     raise AttributeError(
@@ -277,7 +222,7 @@ def make_layer(config, backend='mlx') -> Any:
 
     try:
       mlx_config = mlx_config_class(**kwargs)
-      return mlx_config.make()
+      return mlx_class(mlx_config)
     except Exception as e:  # pylint: disable=broad-exception-caught
       raise AttributeError(
           f"Concrete MLX class '{class_name}' does not implement from_config "
@@ -291,3 +236,112 @@ def make_layer(config, backend='mlx') -> Any:
 
 
 # pylint: enable=too-many-nested-blocks
+
+
+def call_layer_with_emits(
+    layer, x, *, training=False, constants=None, **kwargs
+):
+  """Calls layer_with_emits safely, handling signature mismatches in non-abstractified layers."""
+  sig = inspect.signature(layer.layer_with_emits)
+  call_kwargs = {}
+  if 'training' in sig.parameters:
+    call_kwargs['training'] = training
+  if 'constants' in sig.parameters:
+    call_kwargs['constants'] = constants
+  for k, v in kwargs.items():
+    if k in sig.parameters:
+      call_kwargs[k] = v
+  return layer.layer_with_emits(x, **call_kwargs)
+
+
+def call_step_with_emits(
+    layer, x, state, *, training=False, constants=None, **kwargs
+):
+  """Calls step_with_emits safely, handling signature mismatches in non-abstractified layers."""
+  sig = inspect.signature(layer.step_with_emits)
+  call_kwargs = {}
+  if 'training' in sig.parameters:
+    call_kwargs['training'] = training
+  if 'constants' in sig.parameters:
+    call_kwargs['constants'] = constants
+  for k, v in kwargs.items():
+    if k in sig.parameters:
+      call_kwargs[k] = v
+  return layer.step_with_emits(x, state, **call_kwargs)
+
+
+def call_get_initial_state(
+    layer, batch_size, input_spec, *, training=False, constants=None, **kwargs
+):
+  """Calls get_initial_state safely, handling signature mismatches in non-abstractified layers."""
+  sig = inspect.signature(layer.get_initial_state)
+  call_kwargs = {}
+  if 'training' in sig.parameters:
+    call_kwargs['training'] = training
+  if 'constants' in sig.parameters:
+    call_kwargs['constants'] = constants
+  for k, v in kwargs.items():
+    if k in sig.parameters:
+      call_kwargs[k] = v
+  return layer.get_initial_state(batch_size, input_spec, **call_kwargs)
+
+
+def _patch_spec_configs():
+  # pylint: disable=import-outside-toplevel,missing-function-docstring,reimported
+  def _make(self):
+    return make_layer(self)
+
+  # Patch the base class
+  specs_types.SequenceLayerConfig.make = _make
+
+  # Patch all spec modules dynamically
+  modules: list[Any] = []
+  try:
+    from sequence_layers.specs import combinators as spec_comb
+
+    modules.append(spec_comb)
+  except ImportError:
+    pass
+  try:
+    from sequence_layers.specs import convolution as spec_conv
+
+    modules.append(spec_conv)
+  except ImportError:
+    pass
+  try:
+    from sequence_layers.specs import dense as spec_dense
+
+    modules.append(spec_dense)
+  except ImportError:
+    pass
+  try:
+    from sequence_layers.specs import normalization as spec_norm
+
+    modules.append(spec_norm)
+  except ImportError:
+    pass
+  try:
+    from sequence_layers.specs import pooling as spec_pool
+
+    modules.append(spec_pool)
+  except ImportError:
+    pass
+  try:
+    from sequence_layers.specs import simple as spec_simple
+
+    modules.append(spec_simple)
+  except ImportError:
+    pass
+
+  for mod in modules:
+    for name in dir(mod):
+      attr = getattr(mod, name)
+      if isinstance(attr, type) and hasattr(attr, 'Config'):
+        config_cls = getattr(attr, 'Config')
+        if isinstance(config_cls, type) and issubclass(
+            config_cls, specs_types.SequenceLayerConfig
+        ):
+          config_cls.make = _make
+
+
+_patch_spec_configs()

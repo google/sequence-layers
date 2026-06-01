@@ -21,16 +21,20 @@ import operator
 import pprint
 import re
 import typing
-from typing import Any, Callable, Protocol, Self, Sequence as TypingSequence, TypeVar
+from typing import Any, Callable, Protocol, Self
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 import flax.core.scope
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
+from sequence_layers.specs import combinators as spec_combinators
 
 
 @jt.typed
@@ -637,49 +641,7 @@ def sequence_broadcast_affine(
   return types.Sequence(values, mask)
 
 
-@enum.unique
-class CombinationMode(enum.Enum):
-  """The type of combination to perform."""
-
-  # Broadcasts inputs together and stacks them on the first channel axis:
-  #
-  # Examples:
-  # x=() y=() -> (2)
-  # x=() y=(2) -> (2, 2)
-  # x=(3) y=(3) -> (2, 3)
-  # x=(5) y=(3, 5) -> (2, 3, 5)
-  STACK = 1
-
-  # Broadcasts inputs together and concatenates them on the final channel axis:
-  #
-  # Examples:
-  # x=() y=() -> (2)
-  # x=() y=(2) -> (3)
-  # x=(3) y=(3) -> (6)
-  # x=(5) y=(3, 5) -> (3, 10)
-  CONCAT = 2
-  # Broadcasts inputs together and adds them.
-  #
-  # Examples:
-  # x=() y=() -> ()
-  # x=() y=(2) -> (2)
-  # x=(3) y=(3) -> (3)
-  # x=(5) y=(3, 5) -> (3, 5)
-  ADD = 3
-  # Broadcasts inputs together and averages them.
-  #
-  # Examples:
-  # x=() y=() -> ()
-  # x=() y=(2) -> (2)
-  # x=(3) y=(3) -> (3)
-  # x=(5) y=(3, 5) -> (3, 5)
-  MEAN = 4
-  # Examples:
-  # x=() y=() -> ()
-  # x=() y=(2) -> (2)
-  # x=(3) y=(3) -> (3)
-  # x=(5) y=(3, 5) -> (3, 5)
-  PRODUCT = 5
+CombinationMode = spec_combinators.CombinationMode
 
 
 def sequence_broadcast_combine(
@@ -2233,6 +2195,7 @@ def layer_with_emits_spec(
       values_spec,
       types.ShapeDType(values_spec.shape[:2], dtype=types.MASK_DTYPE),
   )
+
   def layer_fn(
       layer: types.SequenceLayer,
       x: types.Sequence,

@@ -18,18 +18,20 @@ import dataclasses
 import fractions
 import math
 import typing
-from typing import Callable, Protocol, Sequence as TypingSequence
+from typing import Callable, Protocol
+from typing import Sequence as TypingSequence
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import meta
 from sequence_layers.jax import normalization
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-
+from sequence_layers.specs import convolution as spec
 
 __all__ = (
     # go/keep-sorted start
@@ -493,7 +495,11 @@ def compute_conv_transpose_mask(
   return jnp.squeeze(test_fn(mask, 0.0), -1)
 
 
-class BaseConv(types.SequenceLayer, metaclass=abc.ABCMeta):
+class BaseConv(
+    spec.BaseConv[types.Sequence, types.ChannelSpec],
+    types.SequenceLayer,
+    metaclass=abc.ABCMeta,
+):
   """Shared base logic for convolution layers."""
 
   @property
@@ -806,11 +812,11 @@ def _apply_kernel_weight_constraints(
   return kernel
 
 
-class Conv1D(BaseConv):
+class Conv1D(spec.Conv1D[types.Sequence, types.ChannelSpec], BaseConv):
   """A 1D strided or dilated convolution layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Conv1D.Config, types.SequenceLayerConfig):
     """Config for Conv1D."""
 
     filters: int
@@ -960,11 +966,13 @@ class Conv1D(BaseConv):
     return y
 
 
-class DepthwiseConv1D(BaseConv):
+class DepthwiseConv1D(
+    spec.DepthwiseConv1D[types.Sequence, types.ChannelSpec], BaseConv
+):
   """A 1D depthwise strided or dilated convolution layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.DepthwiseConv1D.Config, types.SequenceLayerConfig):
     """Config for DepthwiseConv1D."""
 
     kernel_size: int
@@ -1122,11 +1130,11 @@ class DepthwiseConv1D(BaseConv):
     return y
 
 
-class Conv2D(BaseConv):
+class Conv2D(spec.Conv2D[types.Sequence, types.ChannelSpec], BaseConv):
   """A 2D strided or dilated convolution layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Conv2D.Config, types.SequenceLayerConfig):
     """Config for Conv2D."""
 
     filters: int
@@ -1597,11 +1605,13 @@ class Conv3D(BaseConv):
     return y
 
 
-class Conv1DTranspose(types.SequenceLayer):
+class Conv1DTranspose(
+    spec.Conv1DTranspose[types.Sequence, types.ChannelSpec], types.SequenceLayer
+):
   """A 1D transpose convolution layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Conv1DTranspose.Config, types.SequenceLayerConfig):
     """Config for Conv1DTranspose."""
 
     filters: int
@@ -1885,11 +1895,13 @@ class Conv1DTranspose(types.SequenceLayer):
     return types.Sequence(values, mask), state
 
 
-class Conv2DTranspose(types.SequenceLayer):
+class Conv2DTranspose(
+    spec.Conv2DTranspose[types.Sequence, types.ChannelSpec], types.SequenceLayer
+):
   """A 2D transpose convolution layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Conv2DTranspose.Config, types.SequenceLayerConfig):
     """Configuration for Conv2DTranspose."""
 
     filters: int

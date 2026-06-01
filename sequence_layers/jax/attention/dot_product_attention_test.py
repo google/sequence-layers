@@ -26,6 +26,7 @@ from sequence_layers.jax.attention import dot_product_attention
 from sequence_layers.jax.attention import shaw_relative_position_embedding
 from sequence_layers.jax.attention import t5_relative_position_embedding
 from sequence_layers.jax.attention import test_utils as attention_test_utils
+from sequence_layers.specs import attention_behaviors as attention_spec_behaviors
 
 
 # Custom init function so that position bias decreases as absolute
@@ -50,7 +51,10 @@ def _t5_position_bias_mat_init(
   return bias_matrix
 
 
-class DotProductAttentionTest(test_utils.SequenceLayerTest):
+class DotProductAttentionTest(
+    test_utils.SequenceLayerTest,
+    attention_spec_behaviors.DotProductAttentionTest,
+):
 
   @parameterized.parameters(
       (1, 2, 0, False),

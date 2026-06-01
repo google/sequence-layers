@@ -844,3 +844,59 @@ class StatelessPointwiseFunctorTest(SequenceLayerTest):
             else:
               mock_apply_masked.assert_called_once()
               mock_apply.assert_not_called()
+
+  def test_mask_required_default(self) -> None:
+    """Tests that mask_required defaults to True."""
+    backend_sl = self.sl
+
+    class DefaultLayer(
+        DefaultTestLayer, backend_sl.types.StatelessPointwiseFunctor
+    ):
+      """Mock layer for testing defaults."""
+
+      def fn(self, values: Any, mask: Any) -> tuple[Any, Any]:
+        """Pointwise function."""
+        return values, mask
+
+      @override
+      def layer(self, *args, **kwargs):
+        """Calls base layer."""
+        return backend_sl.types.StatelessPointwiseFunctor.layer(
+            self, *args, **kwargs
+        )
+
+      @override
+      def get_output_shape(self, *args, **kwargs):
+        """Calls base get_output_shape."""
+        return backend_sl.types.StatelessPointwiseFunctor.get_output_shape(
+            self, *args, **kwargs
+        )
+
+    layer = DefaultLayer()
+    self.assertTrue(layer.mask_required)
+
+
+class HashableArrayTest(SequenceLayerTest):
+  """Tests for HashableArray."""
+
+  def test_hashable_array(self) -> None:
+    # We need to get HashableArray from the backend types!
+    HashableArray = self.sl.types.HashableArray
+
+    # Create a numpy array
+    x = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    # Create HashableArray
+    ha = HashableArray.from_array(x)
+
+    # Check properties
+    self.assertEqual(ha.dtype, x.dtype)
+
+    # Check to_array
+    x_back = ha.to_array()
+    np.testing.assert_array_equal(x, x_back)
+
+    # Check hashability
+    h = hash(ha)
+    self.assertIsInstance(h, int)
+

@@ -18,6 +18,8 @@ import dataclasses
 import functools
 from typing import Any, Callable, Mapping, Protocol
 
+from sequence_layers.specs import attention as attention_spec
+
 from flax import linen as nn
 from flax import struct
 import jax
@@ -32,20 +34,6 @@ from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 
-# These are the ones which also get exposed in __init__.py. Import other members
-# via sequence_layers.jax.attention.common.
-__all__ = [
-    # go/keep-sorted start
-    'CombinedQueryKeyValueProjection',
-    'CrossAttentionEmits',
-    'InputProjectionModule',
-    'QueryAndKeyValueProjection',
-    'QueryAndSharedKeyValueProjection',
-    'RelativePositionEmbedding',
-    'SelfAttentionEmits',
-    'SeparateQueryKeyValueProjection',
-    # go/keep-sorted end
-]
 
 
 # A negative enough value such that it underflows to a hard zero in softmax.
@@ -172,8 +160,7 @@ def get_source(
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryKeyValueProjectionConfig:
-  """Configuration for QueryKeyValueProjection."""
+class QueryKeyValueProjectionConfig(attention_spec.QueryKeyValueProjectionConfig):
 
   # Optional callable that returns a jnp.einsum-compatible function to use
   # instead of jnp.einsum for the query, key and value projections.
@@ -305,7 +292,10 @@ class CombinedQueryKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class CombinedQueryKeyValueProjection(QueryKeyValueProjectionConfig):
+class CombinedQueryKeyValueProjection(
+    attention_spec.CombinedQueryKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use a single projection matrix for query/key/value projection.
 
   * Incompatible with Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -447,7 +437,10 @@ class SeparateQueryKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class SeparateQueryKeyValueProjection(QueryKeyValueProjectionConfig):
+class SeparateQueryKeyValueProjection(
+    attention_spec.SeparateQueryKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate projection matrices for query/key/value projection.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -578,7 +571,10 @@ class QueryAndKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryAndKeyValueProjection(QueryKeyValueProjectionConfig):
+class QueryAndKeyValueProjection(
+    attention_spec.QueryAndKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate query and key/value projection matrices.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -710,7 +706,10 @@ class QueryAndSharedKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
+class QueryAndSharedKeyValueProjection(
+    attention_spec.QueryAndSharedKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate query and shared key/value projection matrices.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -764,6 +763,299 @@ class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
         allow_combined_qkv=allow_combined_qkv,
         name=name,
     )
+
+
+class AttentionInputProjectionHelper:
+  """Helper class for shared attention input projection logic."""
+
+  def _setup_projection_layers(
+      self,
+      config: QueryKeyValueProjectionConfig,
+      num_query_heads: int,
+      num_kv_heads: int,
+      units_per_head: int,
+      use_bias: bool,
+      precision: jax.lax.PrecisionLike,
+      compute_dtype: types.DType,
+      param_dtype: types.DType,
+      allow_combined_qkv: bool = True,
+  ) -> None:
+    """Creates submodules, must be called from nn.Module.setup in subclasses."""
+    match config:
+      case CombinedQueryKeyValueProjection():
+        if not allow_combined_qkv:
+          raise ValueError(
+              'CombinedQueryKeyValueProjection is not supported. Use'
+              ' SeparateQueryKeyValueProjection or'
+              ' QueryAndSharedKeyValueProjection.'
+          )
+        if num_query_heads != num_kv_heads:
+          raise ValueError(
+              f'num_query_heads={num_query_heads} !='
+              f' num_kv_heads={num_kv_heads}'
+          )
+        num_stacked = 2 if config.share_kv_projection else 3
+        self._qkv = utils.FlaxEinsumDense(
+            equation='...a,abcd->...bcd',
+            output_shape=(num_stacked, num_query_heads, units_per_head),
+            bias_axes='bcd' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.qkv_kernel_init,
+                config.qkv_kernel_sharding,
+                projectable=True,
+                axes_types=(
+                    meta.AxisType.FANIN,
+                    meta.AxisType.STACKED,
+                    None,
+                    None,
+                ),
+            ),
+            bias_init=utils.shard_initializer(
+                config.bias_init, config.bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='query_key_value_projection',
+        )
+      case SeparateQueryKeyValueProjection():
+        self._q = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_query_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.q_kernel_init,
+                config.q_kernel_sharding,
+                projectable=True,
+                axes_types=(meta.AxisType.FANIN, None, None),
+            ),
+            bias_init=utils.shard_initializer(
+                config.bias_init, config.bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='query_projection',
+        )
+        self._k = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_kv_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.k_kernel_init,
+                config.k_kernel_sharding,
+                projectable=True,
+                axes_types=(meta.AxisType.FANIN, None, None),
+            ),
+            bias_init=utils.shard_initializer(
+                config.bias_init, config.bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='key_projection',
+        )
+        self._v = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_kv_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.v_kernel_init,
+                config.v_kernel_sharding,
+                projectable=True,
+                axes_types=(meta.AxisType.FANIN, None, None),
+            ),
+            bias_init=utils.shard_initializer(
+                config.bias_init, config.bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='value_projection',
+        )
+      case QueryAndKeyValueProjection():
+        self._q = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_query_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.q_kernel_init,
+                config.q_kernel_sharding,
+                projectable=True,
+                axes_types=(meta.AxisType.FANIN, None, None),
+            ),
+            bias_init=utils.shard_initializer(
+                config.q_bias_init, config.q_bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='query_projection',
+        )
+        self._kv = utils.FlaxEinsumDense(
+            equation='...a,abcd->...bcd',
+            output_shape=(2, num_kv_heads, units_per_head),
+            bias_axes='bcd' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.kv_kernel_init,
+                config.kv_kernel_sharding,
+                projectable=True,
+                axes_types=(
+                    meta.AxisType.FANIN,
+                    meta.AxisType.STACKED,
+                    None,
+                    None,
+                ),
+            ),
+            bias_init=utils.shard_initializer(
+                config.kv_bias_init, config.kv_bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='key_value_projection',
+        )
+      case QueryAndSharedKeyValueProjection():
+        self._q = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_query_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.q_kernel_init,
+                config.q_kernel_sharding,
+                projectable=True,
+                axes_types=(meta.AxisType.FANIN, None, None),
+            ),
+            bias_init=utils.shard_initializer(
+                config.q_bias_init, config.q_bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='query_projection',
+        )
+        self._shared_kv = utils.FlaxEinsumDense(
+            equation='...a,abc->...bc',
+            output_shape=(num_kv_heads, units_per_head),
+            bias_axes='bc' if use_bias else None,
+            kernel_init=utils.shard_initializer(
+                config.kv_kernel_init,
+                config.kv_kernel_sharding,
+                projectable=True,
+                axes_types=(
+                    meta.AxisType.FANIN,
+                    None,
+                    None,
+                ),
+            ),
+            bias_init=utils.shard_initializer(
+                config.kv_bias_init, config.kv_bias_sharding
+            ),
+            precision=precision,
+            compute_dtype=compute_dtype,
+            param_dtype=param_dtype,
+            einsum_factory=config.einsum_factory,
+            quantization_provider=config.quantization_provider,
+            name='shared_key_value_projection',
+        )
+
+  def get_input_projection_output_dtype(
+      self,
+      config: QueryKeyValueProjectionConfig,
+      input_dtype: types.DType,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    """Returns the output dtype of the QKV projection."""
+    match config:
+      case CombinedQueryKeyValueProjection():
+        return self._qkv.get_output_dtype(input_dtype, constants=constants)
+      case (
+          SeparateQueryKeyValueProjection()
+          | QueryAndKeyValueProjection()
+          | QueryAndSharedKeyValueProjection()
+      ):
+        return self._q.get_output_dtype(input_dtype, constants=constants)
+      case _:
+        raise NotImplementedError(config)
+
+  def get_qkv(
+      self, config: QueryKeyValueProjectionConfig, x: types.Sequence
+  ) -> tuple[types.Sequence, types.Sequence, types.Sequence]:
+    """Project input to query/key/value sequences."""
+    match config:
+      case CombinedQueryKeyValueProjection():
+        projection = utils.sequence_unstack(
+            self._qkv.project_sequence(x), axis=2
+        )
+
+        if len(projection) == 2:
+          # Shared K and V.
+          queries, keys = projection
+          values = keys
+        else:
+          queries, keys, values = projection
+      case SeparateQueryKeyValueProjection():
+        queries = self._q.project_sequence(x)
+        keys = self._k.project_sequence(x)
+        values = self._v.project_sequence(x)
+      case QueryAndKeyValueProjection():
+        queries = self._q.project_sequence(x)
+        keys, values = utils.sequence_unstack(
+            self._kv.project_sequence(x), axis=2
+        )
+      case QueryAndSharedKeyValueProjection():
+        queries = self._q.project_sequence(x)
+        keys = values = self._shared_kv.project_sequence(x)
+      case _:
+        raise NotImplementedError(config)
+    return queries, keys, values
+
+  def get_q(
+      self, config: QueryKeyValueProjectionConfig, x: types.Sequence
+  ) -> types.Sequence:
+    """Project input to query sequence."""
+    match config:
+      case SeparateQueryKeyValueProjection():
+        queries = self._q.project_sequence(x)
+      case QueryAndKeyValueProjection():
+        queries = self._q.project_sequence(x)
+      case QueryAndSharedKeyValueProjection():
+        queries = self._q.project_sequence(x)
+      case _:
+        raise NotImplementedError(config)
+    return queries
+
+  def get_kv(
+      self, config: QueryKeyValueProjectionConfig, x: types.Sequence
+  ) -> tuple[types.Sequence, types.Sequence]:
+    """Project input to key/value sequences."""
+    match config:
+      case SeparateQueryKeyValueProjection():
+        keys = self._k.project_sequence(x)
+        values = self._v.project_sequence(x)
+      case QueryAndKeyValueProjection():
+        keys, values = utils.sequence_unstack(
+            self._kv.project_sequence(x), axis=2
+        )
+      case QueryAndSharedKeyValueProjection():
+        keys = values = self._shared_kv.project_sequence(x)
+      case _:
+        raise NotImplementedError(config)
+    return keys, values
 
 
 class SelfAttentionEmits(struct.PyTreeNode):

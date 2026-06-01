@@ -14,17 +14,18 @@
 """Normalization layers."""
 
 import dataclasses
-from typing import Callable
+from typing import Callable, override
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import meta
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-
+from sequence_layers.specs import normalization as spec
 
 __all__ = (
     # go/keep-sorted start
@@ -131,11 +132,15 @@ def _zero_gradient_helper(
   return forward_fn_custom_gradient(*args)
 
 
-class L2Normalize(types.PreservesType, types.StatelessPointwise):
+class L2Normalize(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.L2Normalize[types.Sequence, types.ShapeDType],
+):
   """L2 normalization over the specified channel axes."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.L2Normalize.Config):
     """Config for L2Normalize."""
 
     axis: int | types.ShapeLike = -1
@@ -147,6 +152,7 @@ class L2Normalize(types.PreservesType, types.StatelessPointwise):
       if not isinstance(self.axis, int):
         object.__setattr__(self, 'axis', tuple(self.axis))
 
+    @override
     def make(self) -> 'L2Normalize':
       return L2Normalize(self, name=self.name)
 
@@ -184,11 +190,15 @@ class L2Normalize(types.PreservesType, types.StatelessPointwise):
     return types.Sequence(y, x.mask)
 
 
-class LayerNormalization(types.PreservesType, types.StatelessPointwise):
+class LayerNormalization(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.LayerNormalization[types.Sequence, types.ShapeDType],
+):
   """Applies layer normalization to input sequences."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.LayerNormalization.Config):
     """Config for LayerNormalization."""
 
     axis: int | types.ShapeLike = -1
@@ -211,6 +221,7 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
       if not isinstance(self.axis, int):
         object.__setattr__(self, 'axis', tuple(self.axis))
 
+    @override
     def make(self) -> 'LayerNormalization':
       return LayerNormalization(self, name=self.name)
 
@@ -292,7 +303,11 @@ class LayerNormalization(types.PreservesType, types.StatelessPointwise):
     return types.Sequence(y, x.mask)
 
 
-class RMSNormalization(types.PreservesType, types.StatelessPointwise):
+class RMSNormalization(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.RMSNormalization[types.Sequence, types.ShapeDType],
+):
   """A simplified version of LayerNormalization used in T5.
 
   No mean statistics or offset terms are included.
@@ -307,7 +322,7 @@ class RMSNormalization(types.PreservesType, types.StatelessPointwise):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.RMSNormalization.Config):
     """Config for RMSNormalization."""
 
     axis: int | types.ShapeLike = -1
@@ -328,6 +343,7 @@ class RMSNormalization(types.PreservesType, types.StatelessPointwise):
       if not isinstance(self.axis, int):
         object.__setattr__(self, 'axis', tuple(self.axis))
 
+    @override
     def make(self) -> 'RMSNormalization':
       return RMSNormalization(self, name=self.name)
 
@@ -398,7 +414,11 @@ class RMSNormalization(types.PreservesType, types.StatelessPointwise):
     return types.Sequence(y, x.mask)
 
 
-class BatchNormalization(types.PreservesType, types.StatelessPointwise):
+class BatchNormalization(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.BatchNormalization[types.Sequence, types.ShapeDType],
+):
   """Applies batch normalization to the channels dimensions of input sequences.
 
   In training mode this layer computes statistics from valid sequence timesteps
@@ -411,7 +431,7 @@ class BatchNormalization(types.PreservesType, types.StatelessPointwise):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.BatchNormalization.Config):
     """Batch normalization config."""
 
     axis: int = -1
@@ -430,11 +450,13 @@ class BatchNormalization(types.PreservesType, types.StatelessPointwise):
     guard_against_excess_precision: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> 'BatchNormalization':
       return BatchNormalization(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_step
   def step(
       self,
@@ -638,14 +660,18 @@ def _masked_moments(
   return mean, variance
 
 
-class GroupNormalization(types.PreservesType, types.StatelessPointwise):
+class GroupNormalization(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.GroupNormalization[types.Sequence, types.ShapeDType],
+):
   """Applies group normalization to input sequences.
 
   https://arxiv.org/abs/1803.08494
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.GroupNormalization.Config):
     """Config for GroupNormalization."""
 
     num_groups: int
@@ -664,6 +690,7 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
     guard_against_excess_precision: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> 'GroupNormalization':
       if self.num_groups <= 0:
         raise ValueError(f'{self.num_groups=} must be positive.')
@@ -672,13 +699,16 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
   config: Config
 
   @property
+  @override
   def supports_step(self) -> bool:
     return self.config.cumulative
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     return {0: (-np.inf, 0 if self.config.cumulative else np.inf)}
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -791,6 +821,7 @@ class GroupNormalization(types.PreservesType, types.StatelessPointwise):
 
     return values
 
+  @override
   @types.check_step
   def step(
       self,

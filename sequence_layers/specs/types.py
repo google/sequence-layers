@@ -956,6 +956,7 @@ class StatelessEmitting(Emitting[InputT, OutputT, ChannelSpecT]):
 
 
 _ChannelSpecType = ChannelSpec
+_HashableArrayType = HashableArray
 _SequenceType = Sequence
 _MaskedSequenceType = MaskedSequence
 _SequenceLayerType = SequenceLayer
@@ -975,6 +976,10 @@ class ModuleSpec(Protocol):
 
   @property
   def ShapeDType(self) -> type[_ChannelSpecType]:
+    ...
+
+  @property
+  def HashableArray(self) -> type[_HashableArrayType]:
     ...
 
   @property
