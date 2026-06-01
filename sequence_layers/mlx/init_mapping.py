@@ -232,3 +232,8 @@ def map_activation(jax_activation):
     return None
   _build_activation_map()
   return _ACTIVATION_MAP.get(jax_activation, jax_activation)
+
+
+to_mx_dtype = _to_mx_dtype
+zeros_init = _zeros_init
+make_variance_scaling_init = _make_variance_scaling_init
