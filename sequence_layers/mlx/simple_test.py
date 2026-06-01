@@ -1,5 +1,7 @@
 """Tests for simple MLX sequence layers."""
 
+from typing import Any, override
+
 from absl.testing import absltest
 import numpy as np
 
@@ -23,7 +25,15 @@ class IdentityTest(test_utils.SequenceLayerTest, spec.IdentityTest):
 
 
 class PointwiseMathTest(test_utils.SequenceLayerTest, spec.PointwiseMathTest):
-  pass
+
+  @override
+  def make_layer(  # pyrefly: ignore[bad-override-param-name]
+      self, config: Any
+  ) -> Any:
+    if isinstance(config, str):
+      layer_cls = getattr(self.sl, config)
+      return layer_cls(layer_cls.Config())
+    return super().make_layer(config)
 
 
 class CastTest(test_utils.SequenceLayerTest, spec.CastTest):
