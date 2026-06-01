@@ -4,7 +4,7 @@ Backend-specific test files should inherit from these tests.
 """
 
 # pylint: disable=abstract-method
-# pyrefly: disable=bad-instantiation
+# pyrefly: disable=bad-instantiation,unexpected-keyword,missing-argument
 
 from fractions import Fraction
 from typing import Any, override
@@ -53,7 +53,7 @@ class PointwiseMathTest(test_utils.SequenceLayerTest):
       with self.subTest(layer=layer_cls.__name__):
         self.assertConfigDefaults(layer_cls.Config, {'name': None})
 
-  def make_layer(self, layer_name):
+  def _make_layer_by_name(self, layer_name):
     """Helper to create a layer by name."""
     layer_cls = getattr(self.sl, layer_name)
     return layer_cls.Config(name=layer_name.lower()).make()
@@ -75,7 +75,7 @@ class PointwiseMathTest(test_utils.SequenceLayerTest):
     for layer_name, method_name, is_xp in params:
       with self.subTest(layer=layer_name):
         x = self.random_sequence(2, 10, 4)
-        l = self.make_layer(layer_name)
+        l = self._make_layer_by_name(layer_name)
         l = self.init_layer(l, x)
 
         self.assertEqual(l.block_size, 1)
@@ -263,6 +263,7 @@ class ReshapeTest(test_utils.SequenceLayerTest):
   )
   def test_reshape(self, shape, output_shape):
     x = self.random_sequence(*shape)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Reshape.Config(output_shape, name='reshape').make()
     l = self.init_layer(l, x)
 
@@ -287,6 +288,7 @@ class ExpandDimsTest(test_utils.SequenceLayerTest):
 
   def test_basic(self):
     x = self.random_sequence(2, 3, 4)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.ExpandDims.Config(axis=-1, name='expand_dims').make()
     l = self.init_layer(l, x)
 
@@ -297,6 +299,7 @@ class ExpandDimsTest(test_utils.SequenceLayerTest):
     self.assertEqual(y.values.shape, (2, 3, 4, 1))
 
   def test_output_shape(self):
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.ExpandDims.Config(axis=0, name='expand_dims').make()
     self.assertEqual(l.get_output_shape((4, 8)), (1, 4, 8))
 
@@ -328,6 +331,7 @@ class SqueezeTest(test_utils.SequenceLayerTest):
   )
   def test_squeeze(self, input_array, expected_output):
     x = self.sl.Sequence.from_values(input_array)
+    # pyrefly: ignore [bad-instantiation, missing-argument, unexpected-keyword]
     l = self.sl.Squeeze.Config(name='squeeze').make()
     l = self.init_layer(l, x)
 
@@ -356,6 +360,7 @@ class ScaleTest(test_utils.SequenceLayerTest):
   @parameterized.parameters(((2, 13, 5),), ((2, 13, 5, 9),))
   def test_basic(self, shape):
     x = self.random_sequence(*shape)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Scale.Config(scale=2.0, name='scale').make()
     l = self.init_layer(l, x)
 
@@ -373,8 +378,12 @@ class ScaleTest(test_utils.SequenceLayerTest):
   @parameterized.parameters(((2, 13, 5),), ((2, 13, 9, 5),))
   def test_ndarray(self, shape):
     x = self.random_sequence(*shape)
+    # pyrefly: ignore [bad-instantiation]
     l = self.sl.Scale.Config(
-        scale=np.arange(5, dtype=np.float32), name='scale'
+        # pyrefly: ignore [unexpected-keyword]
+        scale=np.arange(5, dtype=np.float32),
+        # pyrefly: ignore [unexpected-keyword]
+        name='scale',
     ).make()
     l = self.init_layer(l, x)
 
@@ -391,6 +400,7 @@ class ScaleTest(test_utils.SequenceLayerTest):
 
   def test_broadcast(self):
     x = self.random_sequence(2, 3, 5, 1)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Scale.Config(scale=np.ones((5, 9))).make()
     l = self.init_layer(l, x)
 
@@ -401,6 +411,7 @@ class ScaleTest(test_utils.SequenceLayerTest):
 
   def test_too_many_dims(self):
     x = self.random_sequence(2, 3, 5, 1)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Scale.Config(scale=np.ones((5, 5, 5))).make()
     l = self.init_layer(l, x, bind_only=True)
     with self.assertRaises(ValueError):
@@ -410,6 +421,7 @@ class ScaleTest(test_utils.SequenceLayerTest):
 
   def test_broadcast_failure(self):
     x = self.random_sequence(2, 3, 5, 9)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Scale.Config(scale=np.ones((5,))).make()
     l = self.init_layer(l, x, bind_only=True)
     with self.assertRaises(ValueError):
@@ -424,6 +436,7 @@ class AddTest(test_utils.SequenceLayerTest):
   @parameterized.parameters((((2, 13, 5)),), (((2, 13, 5, 9)),))
   def test_add(self, shape):
     x = self.random_sequence(*shape)
+    # pyrefly: ignore [bad-argument-count, bad-instantiation, unexpected-keyword]
     l = self.sl.Add.Config(-2.0, name='add').make()
     l = self.init_layer(l, x)
 
@@ -441,8 +454,12 @@ class AddTest(test_utils.SequenceLayerTest):
   @parameterized.parameters(((2, 13, 5),), ((2, 13, 9, 5),))
   def test_ndarray(self, shape):
     x = self.random_sequence(*shape)
+    # pyrefly: ignore [bad-instantiation]
     l = self.sl.Add.Config(
-        shift=np.arange(5, dtype=np.float32), name='add'
+        # pyrefly: ignore [unexpected-keyword]
+        shift=np.arange(5, dtype=np.float32),
+        # pyrefly: ignore [unexpected-keyword]
+        name='add',
     ).make()
     l = self.init_layer(l, x)
 
@@ -461,6 +478,7 @@ class AddTest(test_utils.SequenceLayerTest):
 
   def test_broadcast(self):
     x = self.random_sequence(2, 3, 5, 1)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Add.Config(shift=np.ones((5, 9))).make()
     l = self.init_layer(l, x)
 
@@ -471,6 +489,7 @@ class AddTest(test_utils.SequenceLayerTest):
 
   def test_too_many_dims(self):
     x = self.random_sequence(2, 3, 5, 1)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Add.Config(shift=np.ones((5, 5, 5))).make()
     l = self.init_layer(l, x, bind_only=True)
     with self.assertRaises(ValueError):
@@ -480,6 +499,7 @@ class AddTest(test_utils.SequenceLayerTest):
 
   def test_broadcast_failure(self):
     x = self.random_sequence(2, 3, 5, 9)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.Add.Config(shift=np.ones((5,))).make()
     l = self.init_layer(l, x, bind_only=True)
     with self.assertRaises(ValueError):
@@ -497,6 +517,7 @@ class CastTest(test_utils.SequenceLayerTest):
   )
   def test_cast(self, shape, target_dtype):
     x = self.random_sequence(*shape, dtype=np.float32)
+    # pyrefly: ignore [bad-argument-count, bad-instantiation, unexpected-keyword]
     l = self.sl.Cast.Config(target_dtype, name='cast').make()
     l = self.init_layer(l, x)
 
@@ -525,6 +546,7 @@ class MaskInvalidTest(test_utils.SequenceLayerTest):
 
   def test_basic(self):
     x = self.random_sequence(2, 15, 5)
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.MaskInvalid.Config(name='mask_invalid').make()
     l = self.init_layer(l, x)
 
@@ -553,12 +575,19 @@ class GatedUnitTest(test_utils.SequenceLayerTest):
     shapes = ((2, 13, 6), (2, 13, 5, 10))
 
     configs = [
+        # pyrefly: ignore [bad-instantiation]
         self.sl.GatedUnit.Config(None, None),  # Bilinear
+        # pyrefly: ignore [bad-instantiation]
         self.sl.GatedUnit.Config(None, self.nn.swish),  # SwiGLU
+        # pyrefly: ignore [bad-instantiation]
         self.sl.GatedUnit.Config(None, self.nn.gelu),  # GeGLU
+        # pyrefly: ignore [bad-instantiation]
         self.sl.GatedUnit.Config(lambda x: x, None),  # Bilinear
+        # pyrefly: ignore [bad-instantiation]
         self.sl.GatedUnit.Config(self.nn.swish, self.nn.tanh),
+        # pyrefly: ignore [bad-instantiation, missing-argument]
         self.sl.GatedTanhUnit.Config(),
+        # pyrefly: ignore [bad-instantiation, missing-argument]
         self.sl.GatedLinearUnit.Config(),
     ]
 
@@ -584,6 +613,7 @@ class OneHotTest(test_utils.SequenceLayerTest):
   @parameterized.parameters(((1, 2, 3),), ((2, 3, 5, 9),), ((2, 3, 5, 9, 2),))
   def test_one_hot(self, shape):
     depth = 4
+    # pyrefly: ignore [bad-instantiation, unexpected-keyword]
     l = self.sl.OneHot.Config(depth, name='one_hot').make()
     x = self.random_sequence(*shape, dtype=self.xp.int32, low=0, high=depth - 1)
     self.assertEqual(l.block_size, 1)
@@ -627,8 +657,12 @@ class EmbeddingTest(test_utils.SequenceLayerTest):
 
     for shape in shapes:
       with self.subTest(shape=shape):
+        # pyrefly: ignore [bad-instantiation]
         l = self.sl.Embedding.Config(
-            dimension=dimension, num_embeddings=num_embeddings, name='embedding'
+            dimension=dimension,
+            num_embeddings=num_embeddings,
+            # pyrefly: ignore [unexpected-keyword]
+            name='embedding',
         ).make()
         x = self.random_sequence(
             *shape, dtype=self.xp.int32, low=0, high=num_embeddings - 1
@@ -662,10 +696,14 @@ class LambdaTest(test_utils.SequenceLayerTest):
         v = v + 1.0
       return v.reshape(v.shape + (1,)) > 0.5
 
+    # pyrefly: ignore [bad-instantiation]
     l = self.sl.simple.Lambda.Config(
         fn,
+        # pyrefly: ignore [unexpected-keyword]
         mask_required=mask_required,
+        # pyrefly: ignore [unexpected-keyword]
         expected_input_spec=self.sl.types.ChannelSpec((5,), self.xp.float32),
+        # pyrefly: ignore [unexpected-keyword]
         name='lambda',
     ).make()
 
@@ -697,10 +735,14 @@ class LambdaTest(test_utils.SequenceLayerTest):
         x = x.apply_values(lambda v: v + 1.0)
       return x.apply_values_masked(lambda v: v.reshape(v.shape + (1,)) > 0.5)
 
+    # pyrefly: ignore [bad-instantiation]
     l = self.sl.simple.Lambda.Config(
         fn,
+        # pyrefly: ignore [unexpected-keyword]
         sequence_input=True,
+        # pyrefly: ignore [unexpected-keyword]
         expected_input_spec=self.sl.types.ChannelSpec((5,), self.xp.float32),
+        # pyrefly: ignore [unexpected-keyword]
         name='lambda',
     ).make()
 
@@ -730,8 +772,11 @@ class CheckpointNameTest(test_utils.SequenceLayerTest):
 
   def test_basic(self):
     x = self.random_sequence(2, 3, 5)
+    # pyrefly: ignore [bad-instantiation]
     l = self.sl.simple.CheckpointName.Config(
-        checkpoint_name='test', name='checkpoint_name'
+        checkpoint_name='test',
+        # pyrefly: ignore [unexpected-keyword]
+        name='checkpoint_name',
     ).make()
     l = self.init_layer(l, x)
 
@@ -789,6 +834,7 @@ class LoggingTest(test_utils.SequenceLayerTest):
     training = False
 
     with self.subTest('prefix'):
+      # pyrefly: ignore [bad-instantiation]
       l = self.sl.simple.Logging.Config(prefix='test string').make()
       l = self.init_layer(l, x, bind_only=True)
       l.layer(x, training=training)
