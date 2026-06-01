@@ -23,8 +23,10 @@
 # Explicit imports (e.g., `from .simple import Relu`) DO NOT trigger this issue.
 # If you need to expose specific layers at the package level, import them
 # explicitly instead of using a star import.
+from . import attention
 from . import backend
 from . import dense
+from . import dsp
 from . import projection_configs
 from . import simple
 from . import test_utils
@@ -53,6 +55,18 @@ from .convolution2d import ParallelChannels
 from .convolution2d import Upsample2D
 from .dense import Dense
 from .dense import EinsumDense
+from .dsp import Delay
+from .dsp import FFT
+from .dsp import Frame
+from .dsp import IFFT
+from .dsp import InverseSTFT
+from .dsp import IRFFT
+from .dsp import LinearToMelSpectrogram
+from .dsp import Lookahead
+from .dsp import OverlapAdd
+from .dsp import RFFT
+from .dsp import STFT
+from .dsp import Window
 from .normalization import BatchNormalization
 from .normalization import GroupNormalization
 from .normalization import L2Normalize
@@ -220,4 +234,17 @@ __all__ = [
     'LayerNormalization',
     'BatchNormalization',
     'GroupNormalization',
+    'dsp',
+    'Delay',
+    'FFT',
+    'Frame',
+    'IFFT',
+    'IRFFT',
+    'InverseSTFT',
+    'LinearToMelSpectrogram',
+    'Lookahead',
+    'OverlapAdd',
+    'RFFT',
+    'STFT',
+    'Window',
 ]

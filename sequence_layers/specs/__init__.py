@@ -4,13 +4,14 @@
 
 from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
+from . import attention as _attention
 from . import backend as _backend
 from . import combinators as _combinators
 from . import conditioning as _conditioning
 from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
-from . import attention as _attention
+from . import dsp as _dsp
 from . import pooling as _pooling
 from . import position as _position
 from . import simple as _simple
@@ -58,6 +59,10 @@ class ModuleSpec(Protocol):
 
   @property
   def attention(self) -> _attention.ModuleSpec:
+    ...
+
+  @property
+  def dsp(self) -> _dsp.ModuleSpec:
     ...
 
   @property
@@ -315,4 +320,53 @@ class ModuleSpec(Protocol):
 
   @property
   def Parallel(self) -> type[_combinators.Parallel]:
+    ...
+
+  # DSP layers
+  @property
+  def Delay(self) -> type[_dsp.Delay]:
+    ...
+
+  @property
+  def Lookahead(self) -> type[_dsp.Lookahead]:
+    ...
+
+  @property
+  def Window(self) -> type[_dsp.Window]:
+    ...
+
+  @property
+  def Frame(self) -> type[_dsp.Frame]:
+    ...
+
+  @property
+  def OverlapAdd(self) -> type[_dsp.OverlapAdd]:
+    ...
+
+  @property
+  def FFT(self) -> type[_dsp.FFT]:
+    ...
+
+  @property
+  def IFFT(self) -> type[_dsp.IFFT]:
+    ...
+
+  @property
+  def RFFT(self) -> type[_dsp.RFFT]:
+    ...
+
+  @property
+  def IRFFT(self) -> type[_dsp.IRFFT]:
+    ...
+
+  @property
+  def STFT(self) -> type[_dsp.STFT]:
+    ...
+
+  @property
+  def InverseSTFT(self) -> type[_dsp.InverseSTFT]:
+    ...
+
+  @property
+  def LinearToMelSpectrogram(self) -> type[_dsp.LinearToMelSpectrogram]:
     ...
