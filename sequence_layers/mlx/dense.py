@@ -6,6 +6,7 @@ from typing import Callable, override
 from mlx import nn
 import mlx.core as mx
 
+from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
 from sequence_layers.mlx.simple import _to_mx_dtype
 from sequence_layers.specs import dense as spec
@@ -37,7 +38,7 @@ class Dense(types.Stateless, spec.Dense):
     mlx_config = cls.Config(
         features=config.features,
         use_bias=config.use_bias,
-        activation=config.activation,
+        activation=init_mapping.map_activation(config.activation),
         compute_dtype=config.compute_dtype,
         param_dtype=config.param_dtype or mx.float32,
         name=config.name,
@@ -49,6 +50,7 @@ class Dense(types.Stateless, spec.Dense):
       config: Config | None = None,
       *,
       features: int | None = None,
+      in_features: int | None = None,
       use_bias: bool = True,
       activation=None,
       compute_dtype=None,
@@ -71,6 +73,8 @@ class Dense(types.Stateless, spec.Dense):
     self._compute_dtype = _to_mx_dtype(self.config.compute_dtype)
     self._param_dtype = _to_mx_dtype(self.config.param_dtype) or mx.float32
     self._linear = None
+    if in_features is not None:
+      self._ensure_initialized(in_features)
 
   @property
   @override
@@ -152,7 +156,7 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
         equation=config.equation,
         output_shape=tuple(config.output_shape),
         bias_axes=config.bias_axes,
-        activation=config.activation,
+        activation=init_mapping.map_activation(config.activation),
         compute_dtype=config.compute_dtype,
         param_dtype=config.param_dtype or mx.float32,
         name=config.name,
