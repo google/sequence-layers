@@ -54,8 +54,7 @@ def _get_accumulated_output_latency(layer, output_latency):
     return _get_accumulated_output_latency(layer.child, output_latency)
 
   # Single layer: compute latency.
-  output_ratio = layer.output_ratio
-  return int(output_latency * output_ratio) + layer.output_latency
+  return layer.get_accumulated_output_latency(output_latency)
 
 
 def get_required_stepwise_delay(output_ratio, input_latency):
@@ -222,6 +221,11 @@ def make_layer(config, backend='mlx') -> Any:
 
     try:
       mlx_config = mlx_config_class(**kwargs)
+      if (
+          hasattr(mlx_config, 'make')
+          and type(mlx_config).make != specs_types.SequenceLayerConfig.make
+      ):
+        return mlx_config.make()
       return mlx_class(mlx_config)
     except Exception as e:  # pylint: disable=broad-exception-caught
       raise AttributeError(

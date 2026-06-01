@@ -64,6 +64,7 @@ def _get_conditioning(
 
 class BaseConditioning(
     types.PreservesType,
+    types.SequenceLayer,
     conditioning_spec.BaseConditioning[types.Sequence, types.ChannelSpec],
     metaclass=abc.ABCMeta,
 ):
