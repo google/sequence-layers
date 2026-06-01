@@ -6,119 +6,39 @@ from typing import Callable, override
 from mlx import nn
 import mlx.core as mx
 
-from sequence_layers.mlx import init_mapping
-from sequence_layers.mlx import types as mlx_types
-from sequence_layers.mlx.init_mapping import _to_mx_dtype
+from sequence_layers.mlx import types
+from sequence_layers.mlx.simple import _to_mx_dtype
 from sequence_layers.specs import dense as spec
 
 
-class _DenseEager(mlx_types.Stateless):
-  """A basic dense layer backed by mlx.nn.Linear.
-
-  Requires in_features at initialization.
-  """
-
-  def __init__(
-      self,
-      *,
-      in_features: int,
-      features: int,
-      use_bias: bool = True,
-      activation=None,
-      compute_dtype=None,
-      param_dtype=mx.float32,
-      name: str | None = None,
-  ):
-    """Initialize _DenseEager."""
-    super().__init__()
-    self.features = features
-    self.activation = activation
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
-    self.name = name
-    self._linear = nn.Linear(in_features, features, bias=use_bias)
-
-  @property
-  def use_bias(self):
-    """Return whether bias is used."""
-    return 'bias' in self._linear
-
-  @property
-  @override
-  def receptive_field(self) -> tuple[int, int]:
-    return (0, 0)
-
-  @override
-  def get_output_shape(self, input_shape, *, constants=None):
-    """Get output shape."""
-    if not input_shape:
-      raise ValueError(
-          f'Dense requires at least rank 3 input. Got: {input_shape=}'
-      )
-    return tuple(input_shape[:-1]) + (self.features,)
-
-  @override
-  def get_output_dtype(self, input_dtype, *, constants=None):
-    if self.compute_dtype is not None:
-      return self.compute_dtype
-    return self._param_dtype
-
-  @override
-  @mlx_types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
-    compute_dtype = self.get_output_dtype(x.dtype)
-
-    def dense_fn(v):
-      y = self._linear(v.astype(compute_dtype))
-      if self.activation is not None:
-        y = self.activation(y)
-      return y
-
-    if self.use_bias or self.activation is not None:
-      return x.apply_values(dense_fn)
-    return x.apply_values_masked(dense_fn)
-
-
-class Dense(mlx_types.Stateless, spec.Dense):
+class Dense(types.Stateless, spec.Dense):
   """A basic dense layer with deferred initialization.
 
-  Matches JAX interface where in_features is inferred.
+  Matches JAX interface where in_features is inferred on first call.
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(mlx_types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Dense.Config):
     """Dense config."""
 
     features: int
     use_bias: bool = True
     activation: Callable | None = None
-    compute_dtype: mlx_types.DType | None = None
-    param_dtype: mlx_types.DType = mx.float32
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
     name: str | None = None
 
     @override
     def make(self) -> 'Dense':
-      return Dense.from_config(self)
+      return Dense(self)
 
-  def __init__(
-      self,
-      *,
-      features: int,
-      use_bias: bool = True,
-      activation=None,
-      compute_dtype=None,
-      param_dtype=mx.float32,
-      name: str | None = None,
-  ):
+  def __init__(self, config: Config):
     """Initialize Dense."""
     super().__init__()
-    self.features = features
-    self._use_bias = use_bias
-    self.activation = activation
-    self.compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
-    self.name = name
-    self.inner = None
+    self.config = config
+    self._compute_dtype = _to_mx_dtype(config.compute_dtype)
+    self._param_dtype = _to_mx_dtype(config.param_dtype)
+    self._linear = None
 
   @property
   @override
@@ -126,17 +46,11 @@ class Dense(mlx_types.Stateless, spec.Dense):
     return (0, 0)
 
   def _ensure_initialized(self, in_features: int):
-    """Ensure inner _DenseEager is initialized."""
-    if self.inner is not None:
+    """Ensure nn.Linear is initialized on first call."""
+    if self._linear is not None:
       return
-    self.inner = _DenseEager(
-        in_features=in_features,
-        features=self.features,
-        use_bias=self._use_bias,
-        activation=self.activation,
-        compute_dtype=self.compute_dtype,
-        param_dtype=self._param_dtype,
-        name=self.name,
+    self._linear = nn.Linear(
+        in_features, self.config.features, bias=self.config.use_bias
     )
 
   @override
@@ -146,51 +60,51 @@ class Dense(mlx_types.Stateless, spec.Dense):
       raise ValueError(
           f'Dense requires at least rank 3 input. Got: {input_shape=}'
       )
-    return tuple(input_shape[:-1]) + (self.features,)
+    return tuple(input_shape[:-1]) + (self.config.features,)
 
   @override
   def get_output_dtype(self, input_dtype, *, constants=None):
-    if self.compute_dtype is not None:
-      return self.compute_dtype
+    if self._compute_dtype is not None:
+      return self._compute_dtype
+    assert self._param_dtype is not None
     return self._param_dtype
 
   @override
-  @mlx_types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  @types.check_layer
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
+    if x.ndim < 3:
+      raise ValueError(f'Dense requires at least rank 3 input. Got: {x.shape=}')
     self._ensure_initialized(x.shape[-1])
-    assert self.inner is not None
-    return self.inner.layer(x, training=training, constants=constants)
+    assert self._linear is not None
+    activation = self.config.activation
+    compute_dtype = self.get_output_dtype(x.dtype)
 
-  @classmethod
-  def from_config(cls, config):
-    """Create Dense from config."""
-    compute_dtype = getattr(config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = _to_mx_dtype(compute_dtype)
-    return cls(
-        features=config.features,
-        use_bias=config.use_bias,
-        activation=init_mapping.map_activation(config.activation),
-        compute_dtype=compute_dtype,
-        param_dtype=_to_mx_dtype(config.param_dtype),
-        name=config.name,
-    )
+    def dense_fn(v):
+      y = self._linear(v.astype(compute_dtype))
+      if activation is not None:
+        y = activation(y)
+      return y
+
+    if self.config.use_bias or activation is not None:
+      return x.apply_values(dense_fn)
+    return x.apply_values_masked(dense_fn)
 
 
-# pylint: disable=too-many-instance-attributes
-class EinsumDense(mlx_types.Stateless, spec.EinsumDense):
+class EinsumDense(types.Stateless, spec.EinsumDense):
   """Dense layer using Einstein summation notation."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(mlx_types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.EinsumDense.Config):
     """MLX-native configuration for EinsumDense."""
 
     equation: str = ''
     output_shape: tuple[int | None, ...] = ()
     bias_axes: str = ''
     activation: Callable | None = None
-    compute_dtype: mlx_types.DType | None = None
-    param_dtype: mlx_types.DType = mx.float32
+    compute_dtype: types.DType | None = None
+    param_dtype: types.DType = mx.float32
     name: str | None = None
 
     def __post_init__(self):
@@ -198,28 +112,14 @@ class EinsumDense(mlx_types.Stateless, spec.EinsumDense):
 
     @override
     def make(self) -> 'EinsumDense':
-      return EinsumDense.from_config(self)
+      return EinsumDense(self)
 
-  def __init__(
-      self,
-      *,
-      equation,
-      output_shape,
-      bias_axes='',
-      activation=None,
-      compute_dtype=None,
-      param_dtype=mx.float32,
-      name: str | None = None,
-  ):
+  def __init__(self, config: Config):
     """Initialize EinsumDense."""
     super().__init__()
-    self._equation = equation
-    self._output_shape_spec = tuple(output_shape)
-    self._bias_axes = bias_axes
-    self._activation = activation
-    self._compute_dtype = compute_dtype
-    self._param_dtype = param_dtype
-    self.name = name
+    self.config = config
+    self._compute_dtype = _to_mx_dtype(config.compute_dtype)
+    self._param_dtype = _to_mx_dtype(config.param_dtype)
     self.kernel = None
     self.bias = None
     self._initialized = False
@@ -235,7 +135,10 @@ class EinsumDense(mlx_types.Stateless, spec.EinsumDense):
     if self._initialized:
       return
     output_shape, kernel_shape, bias_shape = _compute_shapes(
-        self._equation, input_shape, self._output_shape_spec, self._bias_axes
+        self.config.equation,
+        input_shape,
+        self.config.output_shape,
+        self.config.bias_axes,
     )
     self._resolved_output_shape = output_shape
     self.kernel = mx.zeros(kernel_shape, dtype=self._param_dtype)
@@ -247,7 +150,10 @@ class EinsumDense(mlx_types.Stateless, spec.EinsumDense):
   def get_output_shape(self, input_shape, *, constants=None):
     """Get output shape."""
     output_shape, _, _ = _compute_shapes(
-        self._equation, input_shape, self._output_shape_spec, self._bias_axes
+        self.config.equation,
+        input_shape,
+        self.config.output_shape,
+        self.config.bias_axes,
     )
     return output_shape
 
@@ -255,41 +161,29 @@ class EinsumDense(mlx_types.Stateless, spec.EinsumDense):
   def get_output_dtype(self, input_dtype, *, constants=None):
     if self._compute_dtype is not None:
       return self._compute_dtype
+    assert self._param_dtype is not None
     return self._param_dtype
 
   @override
-  @mlx_types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  @types.check_layer
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
     self._ensure_initialized(x.channel_shape)
     compute_dtype = self.get_output_dtype(x.dtype)
+    activation = self.config.activation
 
     def einsum_fn(v):
-      y = mx.einsum(self._equation, v.astype(compute_dtype), self.kernel)
+      y = mx.einsum(self.config.equation, v.astype(compute_dtype), self.kernel)
       if self.bias is not None:
         y = y + self.bias
-      if self._activation is not None:
-        y = self._activation(y)
+      if activation is not None:
+        y = activation(y)
       return y
 
-    if self.bias is not None or self._activation is not None:
+    if self.bias is not None or activation is not None:
       return x.apply_values(einsum_fn)
     return x.apply_values_masked(einsum_fn)
-
-  @classmethod
-  def from_config(cls, config):
-    """Create EinsumDense from config."""
-    compute_dtype = getattr(config, 'compute_dtype', None)
-    if compute_dtype is not None:
-      compute_dtype = _to_mx_dtype(compute_dtype)
-    return cls(
-        equation=config.equation,
-        output_shape=config.output_shape,
-        bias_axes=config.bias_axes,
-        activation=init_mapping.map_activation(config.activation),
-        compute_dtype=compute_dtype,
-        param_dtype=_to_mx_dtype(config.param_dtype),
-        name=config.name,
-    )
 
 
 def _parse_equation(equation):

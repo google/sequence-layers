@@ -24,9 +24,12 @@
 # If you need to expose specific layers at the package level, import them
 # explicitly instead of using a star import.
 from . import backend
+from . import dense
 from . import simple
 from . import test_utils
 from . import types
+from .dense import Dense
+from .dense import EinsumDense
 from .simple import Abs
 from .simple import Add
 from .simple import Cast
@@ -83,6 +86,7 @@ from .types import Stateless
 from .types import StatelessPointwise
 
 __all__ = [
+    'dense',
     'backend',
     'simple',
     'types',
@@ -108,6 +112,8 @@ __all__ = [
     'Emits',
     'Emitting',
     'ChannelSpec',
+    'Dense',
+    'EinsumDense',
     'Identity',
     'Relu',
     'Gelu',
