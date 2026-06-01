@@ -12,7 +12,7 @@ from sequence_layers.mlx.simple import _to_mx_dtype
 from sequence_layers.specs import dense as spec
 
 
-class Dense(types.Stateless, spec.Dense):
+class Dense(types.Stateless, spec.Dense[types.Sequence, types.ShapeDType]):
   """A basic dense layer with deferred initialization.
 
   Matches JAX interface where in_features is inferred on first call.
@@ -35,6 +35,7 @@ class Dense(types.Stateless, spec.Dense):
 
   @classmethod
   def from_config(cls, config: spec.Dense.Config) -> 'Dense':
+    """Creates a Dense layer from a spec Config."""
     mlx_config = cls.Config(
         features=config.features,
         use_bias=config.use_bias,
@@ -72,6 +73,7 @@ class Dense(types.Stateless, spec.Dense):
       )
     self._compute_dtype = _to_mx_dtype(self.config.compute_dtype)
     self._param_dtype = _to_mx_dtype(self.config.param_dtype) or mx.float32
+    self.activation = init_mapping.map_activation(self.config.activation)
     self._linear = None
     if in_features is not None:
       self._ensure_initialized(in_features)
@@ -114,7 +116,7 @@ class Dense(types.Stateless, spec.Dense):
       raise ValueError(f'Dense requires at least rank 3 input. Got: {x.shape=}')
     self._ensure_initialized(x.shape[-1])
     assert self._linear is not None
-    activation = self.config.activation
+    activation = self.activation
     compute_dtype = self.get_output_dtype(x.dtype)
 
     def dense_fn(v):
@@ -128,7 +130,9 @@ class Dense(types.Stateless, spec.Dense):
     return x.apply_values_masked(dense_fn)
 
 
-class EinsumDense(types.Stateless, spec.EinsumDense):
+class EinsumDense(
+    types.Stateless, spec.EinsumDense[types.Sequence, types.ShapeDType]
+):
   """Dense layer using Einstein summation notation."""
 
   @dataclasses.dataclass(frozen=True)
@@ -152,6 +156,7 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
 
   @classmethod
   def from_config(cls, config: spec.EinsumDense.Config) -> 'EinsumDense':
+    """Creates an EinsumDense layer from a spec Config."""
     mlx_config = cls.Config(
         equation=config.equation,
         output_shape=tuple(config.output_shape),
@@ -191,6 +196,7 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
       )
     self._compute_dtype = _to_mx_dtype(self.config.compute_dtype)
     self._param_dtype = _to_mx_dtype(self.config.param_dtype) or mx.float32
+    self.activation = init_mapping.map_activation(self.config.activation)
     self.kernel = None
     self.bias = None
     self._initialized = False
@@ -242,7 +248,7 @@ class EinsumDense(types.Stateless, spec.EinsumDense):
   ):
     self._ensure_initialized(x.channel_shape)
     compute_dtype = self.get_output_dtype(x.dtype)
-    activation = self.config.activation
+    activation = self.activation
 
     def einsum_fn(v):
       y = mx.einsum(self.config.equation, v.astype(compute_dtype), self.kernel)

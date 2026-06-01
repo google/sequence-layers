@@ -15,8 +15,9 @@ class DenseTest(test_utils.SequenceLayerTest, spec.DenseTest):
     """Test activation in Dense."""
     layer = dense.Dense.Config(features=8, activation=nn.relu).make()
     x = self.random_sequence(2, 3, 4)
+    # pyrefly: ignore[bad-argument-type]
     layer = self.init_layer(layer, x)
-    self.verify_contract(layer, x)
+    self.verify_contract(layer, x)  # pyrefly: ignore[bad-argument-type]
 
 
 class EinsumDenseTest(test_utils.SequenceLayerTest, spec.EinsumDenseTest):

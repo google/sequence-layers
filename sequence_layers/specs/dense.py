@@ -5,12 +5,18 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, override, Sequence
 
 from sequence_layers.specs import types as types_spec
 
 
-class Dense(types_spec.Stateless, metaclass=abc.ABCMeta):
+class Dense[
+    SequenceT: types_spec.Sequence = types_spec.Sequence,
+    ShapeDTypeT: types_spec.ChannelSpec = types_spec.ChannelSpec,
+](
+    types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
+    metaclass=abc.ABCMeta,
+):
   """Specification for Dense layer."""
 
   @dataclasses.dataclass(frozen=True)
@@ -24,11 +30,18 @@ class Dense(types_spec.Stateless, metaclass=abc.ABCMeta):
     param_dtype: types_spec.DType | None = None
     name: str | None = None
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
 
 
-class EinsumDense(types_spec.Stateless, metaclass=abc.ABCMeta):
+class EinsumDense[
+    SequenceT: types_spec.Sequence = types_spec.Sequence,
+    ShapeDTypeT: types_spec.ChannelSpec = types_spec.ChannelSpec,
+](
+    types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
+    metaclass=abc.ABCMeta,
+):
   """Specification for EinsumDense layer."""
 
   @dataclasses.dataclass(frozen=True)
@@ -43,5 +56,6 @@ class EinsumDense(types_spec.Stateless, metaclass=abc.ABCMeta):
     param_dtype: types_spec.DType | None = None
     name: str | None = None
 
+    @override
     def make(self) -> Any:
       """Dummy make to satisfy Pyrefly."""
