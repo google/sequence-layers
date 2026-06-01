@@ -31,11 +31,11 @@ from typing import (
     Iterable,
     Literal,
     MutableMapping,
+    override,
     Protocol,
+    runtime_checkable,
     Self,
     TypeVar,
-    override,
-    runtime_checkable,
 )
 from typing import cast  # pylint: disable=unused-import
 

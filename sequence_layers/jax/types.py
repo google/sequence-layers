@@ -28,11 +28,11 @@ from typing import (
     ParamSpec,
     Protocol,
     Self,
-    Sequence as TypingSequence,
-    TypeVar,
     cast,
     override,
 )
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 from absl import logging
 from flax import linen as nn
@@ -574,7 +574,9 @@ class MaskedSequence(
   ) -> 'MaskedSequence[NewValuesT, MaskT]':
     return cast(
         MaskedSequence,
-        super().apply_values_masked(values_fn, *args, **kwargs),  # pytype: disable=wrong-arg-types
+        super().apply_values_masked(
+            values_fn, *args, **kwargs
+        ),  # pytype: disable=wrong-arg-types
     )
 
   @override
@@ -585,7 +587,10 @@ class MaskedSequence(
       **kwargs: ApplyMaskedParams.kwargs,
   ) -> 'MaskedSequence[NewValuesT, NewMaskT]':
     return cast(
-        MaskedSequence, super().apply_masked(apply_fn, *args, **kwargs)  # pytype: disable=wrong-arg-types
+        MaskedSequence,
+        super().apply_masked(
+            apply_fn, *args, **kwargs
+        ),  # pytype: disable=wrong-arg-types
     )
 
   @override
@@ -1342,7 +1347,9 @@ class PreservesShape(spec.PreservesShape):
     return tuple(input_shape)
 
 
-class Emitting(SequenceLayer, spec.Emitting[Sequence, Sequence, ChannelSpec]):  # pytype: disable=ignored-abstractmethod
+class Emitting(
+    SequenceLayer, spec.Emitting[Sequence, Sequence, ChannelSpec]
+):  # pytype: disable=ignored-abstractmethod
   """A SequenceLayer that emits auxiliary arrays.
 
   This is a convenience subclass that implements step and layer in terms of
@@ -1401,7 +1408,9 @@ class Emitting(SequenceLayer, spec.Emitting[Sequence, Sequence, ChannelSpec]):  
     pass
 
 
-class Stateless(SequenceLayer, spec.Stateless[Sequence, Sequence, ChannelSpec]):  # pytype: disable=ignored-abstractmethod
+class Stateless(
+    SequenceLayer, spec.Stateless[Sequence, Sequence, ChannelSpec]
+):  # pytype: disable=ignored-abstractmethod
   """A SequenceLayer with no state over time required for step-wise processing.
 
   Sub-classes must only implement:

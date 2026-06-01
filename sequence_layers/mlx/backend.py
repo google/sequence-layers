@@ -37,7 +37,7 @@ class BackendWrapper(spec.xp):
 
   @override
   def concatenate(self, arrays, axis=0) -> types_spec.Array:
-    return mx.concatenate(arrays, axis=axis)  # pyrefly: ignore[bad-argument-type]
+    return mx.concatenate(list(arrays), axis=axis)
 
 
 xp: spec.xp = BackendWrapper()

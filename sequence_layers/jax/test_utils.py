@@ -20,7 +20,9 @@ import dataclasses
 import functools
 import logging
 import random
-from typing import Any, Callable, Iterable, Mapping, Sequence as TypingSequence, TypeVar, override
+from typing import Any, Callable, Iterable, Mapping, override
+from typing import Sequence as TypingSequence
+from typing import TypeVar
 
 from absl.testing import absltest
 import chex

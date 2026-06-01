@@ -21,6 +21,7 @@ from typing import Sequence as TypingSequence
 from typing import TypeVar
 
 from absl.testing import parameterized
+
 from sequence_layers import specs
 from sequence_layers.specs import backend as backend_spec
 from sequence_layers.specs import test_utils_spec

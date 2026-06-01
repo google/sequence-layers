@@ -99,6 +99,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
   @property
   @override
   def sl(self) -> Any:  # pyrefly: ignore[bad-override]
+    """Returns the MLX sequence_layers module."""
     return mlx_sl
 
   @override

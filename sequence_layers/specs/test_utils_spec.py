@@ -39,7 +39,7 @@ class ModuleSpec(Protocol):
     """Creates a named product."""
 
   @property
-  def SequenceLayerTest(self) -> type[Any]:  # pylint: disable=invalid-name
+  def SequenceLayerTest(self) -> type[Any]:  # pylint: disable=invalid-name,missing-function-docstring
     ...
 
 

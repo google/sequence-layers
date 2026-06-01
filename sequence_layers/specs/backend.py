@@ -13,7 +13,8 @@
 # limitations under the License.
 """Specification for backend-specific helpers."""
 
-from typing import Any, Protocol, Sequence as TypingSequence, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+from typing import Sequence as TypingSequence
 
 from sequence_layers.specs import types as types_spec
 
