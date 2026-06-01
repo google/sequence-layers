@@ -168,8 +168,8 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
   mask: MaskT
 
   def __init__(self, values: ValuesT, mask: MaskT):
-    self.values = values
-    self.mask = mask
+    self.values = mx.array(values) if not isinstance(values, mx.array) else values
+    self.mask = mx.array(mask) if not isinstance(mask, mx.array) else mask
 
   @property
   @override

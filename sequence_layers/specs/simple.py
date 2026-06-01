@@ -25,7 +25,7 @@ from sequence_layers.specs.types import (  # pylint: disable=unused-import
 class Identity[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -37,7 +37,7 @@ class Identity[
 
 
 class Relu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -49,7 +49,7 @@ class Relu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 
 
 class Gelu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -61,7 +61,7 @@ class Gelu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 
 
 class Abs[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -73,7 +73,7 @@ class Abs[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 
 
 class Exp[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -85,7 +85,7 @@ class Exp[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 
 
 class Log[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -99,7 +99,7 @@ class Log[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 class Swish[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -111,7 +111,7 @@ class Swish[
 
 
 class Tanh[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -125,7 +125,7 @@ class Tanh[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 class Sigmoid[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -139,7 +139,7 @@ class Sigmoid[
 class LeakyRelu[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -151,7 +151,7 @@ class LeakyRelu[
 
 
 class Elu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -165,7 +165,7 @@ class Elu[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 class Softmax[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -179,7 +179,7 @@ class Softmax[
 class Softplus[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -209,7 +209,7 @@ class Cast[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 class Scale[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -221,7 +221,7 @@ class Scale[
 
 
 class Add[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -235,7 +235,7 @@ class Add[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 class MaskInvalid[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -257,7 +257,7 @@ T = TypeVar('T')
 class GatedUnit[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -299,7 +299,7 @@ class GatedTanhUnit[
 class Flatten[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -309,7 +309,7 @@ class Flatten[
 class Reshape[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -325,7 +325,7 @@ class Reshape[
 class ExpandDims[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -341,7 +341,7 @@ class ExpandDims[
 class Squeeze[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -357,7 +357,7 @@ class Squeeze[
 class Transpose[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -409,7 +409,7 @@ class Embedding[
 class Dropout[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -425,7 +425,7 @@ class Dropout[
 class Downsample1D[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -441,7 +441,7 @@ class Downsample1D[
 class Upsample1D[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -457,7 +457,7 @@ class Upsample1D[
 class CheckpointName[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwiseFunctor[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -488,7 +488,7 @@ class Lambda[
 class Logging[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.StatelessPointwise[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):

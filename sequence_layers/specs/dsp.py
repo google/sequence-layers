@@ -26,8 +26,8 @@ from sequence_layers.specs import types as types_spec
 class Delay[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesShape[SequenceT, SequenceT, ShapeDTypeT],
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesShape,
+    types_spec.PreservesType,
     types_spec.SequenceLayer[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -49,8 +49,8 @@ class Delay[
 class Lookahead[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesShape[SequenceT, SequenceT, ShapeDTypeT],
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesShape,
+    types_spec.PreservesType,
     types_spec.SequenceLayer[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -72,8 +72,8 @@ class Lookahead[
 class Window[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesShape[SequenceT, SequenceT, ShapeDTypeT],
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesShape,
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -95,7 +95,7 @@ class Window[
 class Frame[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.SequenceLayer[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -121,7 +121,7 @@ class Frame[
 class OverlapAdd[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.SequenceLayer[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -142,7 +142,7 @@ class OverlapAdd[
 
 
 class FFT[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -163,7 +163,7 @@ class FFT[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
 
 
 class IFFT[SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
@@ -279,7 +279,7 @@ class InverseSTFT[
 class LinearToMelSpectrogram[
     SequenceT: types_spec.Sequence, ShapeDTypeT: types_spec.ChannelSpec
 ](
-    types_spec.PreservesType[SequenceT, SequenceT, ShapeDTypeT],
+    types_spec.PreservesType,
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
 ):
