@@ -12,6 +12,7 @@ import numpy as np
 from sequence_layers import specs
 from sequence_layers.mlx import types
 from sequence_layers.specs import test_utils as spec
+from sequence_layers.specs import types as specs_types
 
 Sequence = types.Sequence
 MaskedSequence = types.MaskedSequence
@@ -251,6 +252,13 @@ class SequenceLayerTest(spec.SequenceLayerTest):
     return layer
 
   @override
+  def make_layer(self, config: specs_types.SequenceLayerConfig) -> Any:
+    """Resolves concrete MLX layer class and instantiates via from_config."""
+    from sequence_layers.mlx import utils as mlx_utils
+
+    return mlx_utils.make_layer(config)
+
+  @override
   def random_sequence(
       self,
       *dims: int,
@@ -324,6 +332,7 @@ class SequenceLayerTest(spec.SequenceLayerTest):
         stream_constants=stream_constants,
         stream_constants_list=stream_constants_list,
     )
+
 
   @override
   # pyrefly: ignore[bad-override]
@@ -400,7 +409,6 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       rtol = max(rtol, 1e-2)
     kwargs['atol'] = atol
     kwargs['rtol'] = rtol
-
     np.testing.assert_allclose(x_np, y_np, **kwargs)
     if hasattr(x, 'mask') and hasattr(y, 'mask'):
       mask_x = _to_numpy(x.mask)
@@ -408,7 +416,9 @@ class SequenceLayerTest(spec.SequenceLayerTest):
       np.testing.assert_array_equal(mask_x, mask_y)
 
 
-class ModuleSpecTest(SequenceLayerTest, spec.ModuleSpecTest):
+class ModuleSpecTest(
+    SequenceLayerTest, spec.ModuleSpecTest
+):
 
   @override
   def module_spec_pairs(self, backend_sl: specs.ModuleSpec):
@@ -430,12 +440,10 @@ class NonSteppableLayer(types.PreservesType, types.StatelessPointwise):
     def make(self) -> 'NonSteppableLayer':
       return NonSteppableLayer(self, name=self.name)
 
-  config: Config
-
   def __init__(self, config: Config, *, name: str | None = None):
-    # pylint: disable=unused-argument
     super().__init__()
     self.config = config
+    del name
 
   @property
   @override
