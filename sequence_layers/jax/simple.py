@@ -836,13 +836,13 @@ class GatedLinearUnit(
   """Computes a Gated Linear Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(GatedUnit.Config, spec.GatedLinearUnit.Config):
+  class Config(spec.GatedLinearUnit.Config):
     name: str | None = None
 
     @override
     def make(self) -> 'GatedLinearUnit':
       return GatedLinearUnit(
-          config=GatedUnit.Config(
+          GatedUnit.Config(
               None,
               typing.cast(
                   typing.Callable[[types.ArrayLike], types.ArrayLike],
@@ -860,13 +860,13 @@ class GatedTanhUnit(
   """Computes a Gated Tanh Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(GatedUnit.Config, spec.GatedTanhUnit.Config):
+  class Config(spec.GatedTanhUnit.Config):
     name: str | None = None
 
     @override
     def make(self) -> 'GatedTanhUnit':
       return GatedTanhUnit(
-          config=GatedUnit.Config(
+          GatedUnit.Config(
               typing.cast(
                   typing.Callable[[types.ArrayLike], types.ArrayLike],
                   jax.nn.tanh,

@@ -277,7 +277,7 @@ class GatedLinearUnit[
   """Specification for GatedLinearUnit layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config[T](GatedUnit.Config[T]):
+  class Config(types_spec.SequenceLayerConfig):
     """Configuration for GatedLinearUnit layer."""
 
 
@@ -287,7 +287,7 @@ class GatedTanhUnit[
   """Specification for GatedTanhUnit layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config[T](GatedUnit.Config[T]):
+  class Config(types_spec.SequenceLayerConfig):
     """Configuration for GatedTanhUnit layer."""
 
 

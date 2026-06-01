@@ -752,7 +752,7 @@ class GatedLinearUnit(
   """Computes a Gated Linear Unit, reducing input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(GatedUnit.Config, spec.GatedLinearUnit.Config):
+  class Config(spec.GatedLinearUnit.Config):
     """Configuration for GatedLinearUnit layer."""
 
     name: str | None = None
@@ -775,7 +775,7 @@ class GatedTanhUnit(
   """Computes a Gated Tanh Unit, reducing input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(GatedUnit.Config, spec.GatedTanhUnit.Config):
+  class Config(spec.GatedTanhUnit.Config):
     """Configuration for GatedTanhUnit layer."""
 
     name: str | None = None
