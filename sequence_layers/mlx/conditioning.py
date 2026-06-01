@@ -1,15 +1,12 @@
 """Conditioning layers for MLX."""
 
+# pylint: disable=protected-access
+
 import dataclasses
-import enum
-import math
-from typing import Any, override
+from typing import Any, cast, override
 
 import mlx.core as mx
-import mlx.nn as nn
-import numpy as np
 
-from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
 from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.specs import conditioning as conditioning_spec
@@ -163,7 +160,9 @@ class Conditioning(
   Combination = conditioning_spec.Combination
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig, conditioning_spec.Conditioning.Config):
+  class Config(
+      types.SequenceLayerConfig, conditioning_spec.Conditioning.Config
+  ):
     """Configuration for Conditioning."""
 
     conditioning_name: str
@@ -199,7 +198,8 @@ class Conditioning(
     else:
       if conditioning_name is None or projection is None or combination is None:
         raise ValueError(
-            'Must provide either config or conditioning_name, projection, and combination'
+            'Must provide either config or conditioning_name, projection, and'
+            ' combination'
         )
       self.config = self.Config(
           conditioning_name=conditioning_name,
@@ -232,6 +232,7 @@ class Conditioning(
     self._proj_initialized = False
 
   def _validate(self):
+    """Validates the configuration parameters for consistency."""
     if (
         self._combination == self.Combination.AFFINE
         and self._projection != self.Projection.LINEAR_AFFINE
@@ -300,13 +301,13 @@ class Conditioning(
       proj_shape = input_shape
     if self._projection == self.Projection.IDENTITY:
       return condition_shape
-    elif self._projection == self.Projection.LINEAR:
+    if self._projection == self.Projection.LINEAR:
       return tuple(proj_shape)
-    elif self._projection == self.Projection.LINEAR_AFFINE:
+    if self._projection == self.Projection.LINEAR_AFFINE:
       return (2,) + tuple(proj_shape)
-    else:
-      raise ValueError(f'Unsupported projection: {self._projection}')
+    raise ValueError(f'Unsupported projection: {self._projection}')
 
+  @override
   def get_output_shape(self, input_shape, *, constants=None):
     self._validate()
     cond = _get_conditioning(self, self._conditioning_name, constants)
@@ -323,7 +324,7 @@ class Conditioning(
         self.Combination.AFFINE_SCALE,
     ):
       return _broadcast_shapes(input_shape, proj_shape)
-    elif self._combination in (
+    if self._combination in (
         self.Combination.CONCAT,
         self.Combination.CONCAT_BEFORE,
     ):
@@ -331,12 +332,12 @@ class Conditioning(
       proj_inner = proj_shape[-1] if proj_shape else 1
       outer = _broadcast_shapes(input_shape[:-1], proj_shape[:-1])
       return outer + (input_inner + proj_inner,)
-    elif self._combination == self.Combination.AFFINE:
+    if self._combination == self.Combination.AFFINE:
       proj_shape = proj_shape[1:]  # Remove the '2' dim.
       return _broadcast_shapes(input_shape, proj_shape)
-    else:
-      raise ValueError(f'Unsupported combination: {self._combination}')
+    raise ValueError(f'Unsupported combination: {self._combination}')
 
+  @override
   def get_output_dtype(self, input_dtype, *, constants=None):
     if self._compute_dtype is not None:
       return self._compute_dtype
@@ -354,8 +355,10 @@ class Conditioning(
     compute_dtype = self._compute_dtype or self._param_dtype
 
     def project_fn(v):
-      y = mx.einsum(self._equation, v.astype(compute_dtype), self.kernel)
-      y = y + self.bias
+      y = mx.einsum(
+          cast(str, self._equation), v.astype(compute_dtype), self.kernel
+      )
+      y = y + cast(Any, self.bias)
       return y
 
     return conditioning.apply_values(project_fn)
@@ -365,38 +368,41 @@ class Conditioning(
     self._validate()
     if self._combination == self.Combination.ADD:
       return _sequence_broadcast_add(x, conditioning)
-    elif self._combination == self.Combination.CONCAT:
+    if self._combination == self.Combination.CONCAT:
       return _sequence_broadcast_concat(x, conditioning)
-    elif self._combination == self.Combination.CONCAT_BEFORE:
+    if self._combination == self.Combination.CONCAT_BEFORE:
       return _sequence_broadcast_concat(conditioning, x)
-    elif self._combination == self.Combination.AFFINE:
+    if self._combination == self.Combination.AFFINE:
       scale, shift = _sequence_unstack(conditioning, axis=2)
       scale = scale.apply_values(lambda v: v + self._affine_scale_offset)
       x_s, scale_s = _reshape_for_broadcast(x, scale)
-      x_s2, shift_s = _reshape_for_broadcast(x, shift)
+      _, shift_s = _reshape_for_broadcast(x, shift)
       values = x_s.values * scale_s.values + shift_s.values
       mask = _combine_mask(x.mask, scale.mask, shift.mask)
       return Sequence(values, mask)
-    elif self._combination == self.Combination.AFFINE_SHIFT:
+    if self._combination == self.Combination.AFFINE_SHIFT:
       return _sequence_broadcast_add(x, conditioning)
-    elif self._combination == self.Combination.AFFINE_SCALE:
+    if self._combination == self.Combination.AFFINE_SCALE:
       conditioning = conditioning.apply_values(
           lambda v: v + self._affine_scale_offset
       )
       return _sequence_broadcast_product(x, conditioning)
-    elif self._combination == self.Combination.MUL:
+    if self._combination == self.Combination.MUL:
       return _sequence_broadcast_product(x, conditioning)
-    else:
-      raise ValueError(f'Unsupported combination: {self._combination}')
+    raise ValueError(f'Unsupported combination: {self._combination}')
 
+  @override
   @types.check_layer
-  def layer(self, x, *, training: bool, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool, constants=None
+  ):
     conditioning = _get_conditioning(self, self._conditioning_name, constants)
     if not isinstance(conditioning, (Sequence, MaskedSequence)):
       conditioning = _tensor_to_fake_sequence(conditioning)
     projected = self._project(x, conditioning)
     return self._combine(x, projected)
 
+  @override
   def get_initial_state(
       self, batch_size, input_spec, *, training: bool, constants=None
   ):
@@ -406,8 +412,11 @@ class Conditioning(
         return mx.zeros((batch_size,), mx.int32)
     return ()
 
+  @override
   @types.check_step
-  def step(self, x, state, *, training: bool, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state: Any, *, training: bool, constants=None
+  ):
     conditioning = _get_conditioning(self, self._conditioning_name, constants)
     if not isinstance(conditioning, (Sequence, MaskedSequence)):
       conditioning = _tensor_to_fake_sequence(conditioning)
