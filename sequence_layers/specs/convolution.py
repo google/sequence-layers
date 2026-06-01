@@ -18,14 +18,8 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import (
-    Any,
-    Callable,
-    override,
-    Protocol,
-    runtime_checkable,
-    Sequence,
-)
+from typing import (Any, Callable, override, Protocol, runtime_checkable,
+                    Sequence)
 
 from sequence_layers.specs import types as types_spec
 
