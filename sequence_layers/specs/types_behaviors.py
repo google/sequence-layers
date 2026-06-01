@@ -165,6 +165,15 @@ class DefaultTestLayer(types_spec.SequenceLayer):
     return tuple(input_shape) + (1,)
 
   @override
+  def get_output_shape_for_sequence(
+      self,
+      x: types_spec.Sequence,
+      *,
+      constants: types_spec.Constants | None = None,
+  ) -> types_spec.Shape:
+    return self.get_output_shape(x.channel_shape, constants=constants)
+
+  @override
   def get_output_dtype(
       self,
       input_dtype: types_spec.DType,

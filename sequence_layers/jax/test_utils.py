@@ -35,7 +35,6 @@ from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 from sequence_layers.specs import test_utils as spec
 
-
 _SequenceLayerT = TypeVar('_SequenceLayerT', bound=types.SequenceLayer)
 _T = TypeVar('_T')
 _TestFnT = Callable[..., None]

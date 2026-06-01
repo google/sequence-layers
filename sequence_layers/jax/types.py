@@ -13,6 +13,10 @@
 # limitations under the License.
 """Basic sequence types."""
 
+# pytype: disable=override-error
+# pytype: disable=ignored-abstractmethod
+# pytype: disable=bad-return-type
+
 import abc
 import dataclasses
 import fractions
@@ -1374,7 +1378,6 @@ class Emitting(
     )
     return output, state
 
-  @abc.abstractmethod
   def step_with_emits(
       self,
       x: Sequence,
@@ -1383,7 +1386,7 @@ class Emitting(
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, State, Emits]:
-    pass
+    raise NotImplementedError()
 
   @override
   def layer(
@@ -1398,7 +1401,6 @@ class Emitting(
     )
     return outputs
 
-  @abc.abstractmethod
   def layer_with_emits(
       self,
       x: Sequence,
@@ -1406,7 +1408,7 @@ class Emitting(
       training: bool,
       constants: Constants | None = None,
   ) -> tuple[Sequence, Emits]:
-    pass
+    raise NotImplementedError()
 
 
 class Stateless(
@@ -1558,8 +1560,11 @@ class StatelessPointwiseFunctor(  # pytype: disable=ignored-abstractmethod
 
   @abc.abstractmethod
   @override
-  def fn(self, values: ValuesT, mask: MaskT) -> tuple[ValuesT, MaskT]:
+  def fn(
+      self, values: ValuesT, mask: MaskT
+  ) -> tuple[ValuesT, MaskT]:  # pytype: disable=override-error
     """Transforms each scalar in values independently."""
+    raise NotImplementedError()
 
   @property
   @override
@@ -1589,7 +1594,9 @@ class StatelessPointwiseFunctor(  # pytype: disable=ignored-abstractmethod
     return y
 
 
-class SequenceLayerConfig(spec.SequenceLayerConfig):
+class SequenceLayerConfig(
+    spec.SequenceLayerConfig
+):  # pytype: disable=ignored-abstractmethod
   """Base class for SequenceLayer configuration objects.
 
   Requires a no-argument make() method which returns a SequenceLayer.
@@ -1603,6 +1610,7 @@ class SequenceLayerConfig(spec.SequenceLayerConfig):
   @abc.abstractmethod
   def make(self) -> SequenceLayer:
     """Builds a SequenceLayer from this config."""
+    raise NotImplementedError()
 
   def copy(self, **kwargs) -> Self:
     """Create a copy of this config.

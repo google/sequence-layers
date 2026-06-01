@@ -98,6 +98,8 @@ def _expected_conv_mask(
       )[:, :, 0]
       # All timesteps where the kernel overlaps with the mask.
       return mask_golden > 0
+    case _:
+      raise ValueError(f'Unsupported padding mode: {padding}')
 
 
 class ComputeConvMaskTest(test_utils.SequenceLayerTest):
@@ -563,6 +565,7 @@ class ComputeConvMaskTest(test_utils.SequenceLayerTest):
             False,
         ]],
     )
+
 
 if __name__ == '__main__':
   test_utils.main()

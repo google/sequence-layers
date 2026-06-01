@@ -978,10 +978,6 @@ class ModuleSpec(Protocol):
     ...
 
   @property
-  def HashableArray(self) -> type[HashableArray]:
-    ...
-
-  @property
   def Sequence(self) -> type[_SequenceType[Any, Any]]:
     ...
 
