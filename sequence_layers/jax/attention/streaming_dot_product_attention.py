@@ -26,7 +26,6 @@ from sequence_layers.specs import attention as attention_spec
 
 class StreamingDotProductAttention(
     types.Emitting,
-    common.AttentionInputProjectionHelper,
     attention_spec.StreamingDotProductAttention[types.Sequence, types.ChannelSpec],
 ):
   """A multi-headed streaming dot-product attention layer.

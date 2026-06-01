@@ -28,7 +28,6 @@ from sequence_layers.specs import attention as attention_spec
 
 class DotProductAttention(
     types.Emitting,
-    common.AttentionInputProjectionHelper,
     attention_spec.DotProductAttention[types.Sequence, types.ChannelSpec],
 ):
   """Dot product attention."""

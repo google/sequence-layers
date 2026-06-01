@@ -27,7 +27,6 @@ from sequence_layers.specs import attention as attention_spec
 
 class LocalDotProductSelfAttention(
     types.Emitting,
-    common.AttentionInputProjectionHelper,
     attention_spec.LocalDotProductSelfAttention[types.Sequence, types.ChannelSpec],
 ):
   """A multi-headed dot-product self attention layer."""
