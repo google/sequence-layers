@@ -26,4 +26,6 @@ class ModuleSpecTest(test_utils_spec.ModuleSpecTest):
 
   @override
   def module_spec_pairs(self, backend_sl: specs.ModuleSpec):
-    return {backend_sl.backend: backend_spec.ModuleSpec}
+    import importlib  # pylint: disable=g-import-not-at-top
+    backend = importlib.import_module(backend_sl.__name__ + '.backend')
+    return {backend: backend_spec.ModuleSpec}

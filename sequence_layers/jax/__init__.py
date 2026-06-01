@@ -30,7 +30,4 @@ from sequence_layers.jax.types import *
 
 # (re-export the names for typechecking)
 # pylint: disable=useless-import-alias
-from . import backend as backend
-from . import test_utils as test_utils
-from . import types as types
-from .test_utils import SequenceLayerTest
+from sequence_layers.jax import types as types

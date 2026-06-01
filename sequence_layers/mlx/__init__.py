@@ -20,131 +20,125 @@
 # Pyrefly fails to resolve the concrete method implementations in `mlx/types.py`
 # and flags all instances as abstract (`bad-instantiation` false positives).
 #
-# Explicit imports (e.g., `from .simple import Relu`) DO NOT trigger this issue.
+# Explicit imports (e.g., `from sequence_layers.mlx.simple import Relu`) DO NOT trigger this issue.
 # If you need to expose specific layers at the package level, import them
 # explicitly instead of using a star import.
-from . import attention
-from . import backend
-from . import dense
-from . import dsp
-from . import projection_configs
-from . import simple
-from . import test_utils
-from . import types
-from . import types as basic_types
-from . import utils
-from .attention import DotProductAttention
+from sequence_layers.mlx import attention
+from sequence_layers.mlx import dense
+from sequence_layers.mlx import dsp
+from sequence_layers.mlx import projection_configs
+from sequence_layers.mlx import simple
+from sequence_layers.mlx import types
+from sequence_layers.mlx import types as basic_types
+from sequence_layers.mlx import utils
+from sequence_layers.mlx.attention import DotProductAttention
 from .attention import DotProductSelfAttention
-from .attention import LocalDotProductSelfAttention
+from sequence_layers.mlx.attention import LocalDotProductSelfAttention
 from .attention import StreamingDotProductAttention
-from .attention import StreamingLocalDotProductAttention
+from sequence_layers.mlx.attention import StreamingLocalDotProductAttention
 from .combinators import CombinationMode
-from .combinators import Parallel
+from sequence_layers.mlx.combinators import Parallel
 from .combinators import Repeat
-from .combinators import Residual
+from sequence_layers.mlx.combinators import Residual
 from .combinators import Serial
-from .combinators import SerialCombinatorMixin
+from sequence_layers.mlx.combinators import SerialCombinatorMixin
 from .combinators import SerialModules
-from .conditioning import Conditioning
+from sequence_layers.mlx.conditioning import Conditioning
 from .convolution import Conv1D
-from .convolution import Conv1DTranspose
+from sequence_layers.mlx.convolution import Conv1DTranspose
 from .convolution import DepthwiseConv1D
-from .convolution2d import AveragePooling2D
+from sequence_layers.mlx.convolution2d import AveragePooling2D
 from .convolution2d import Conv2D
-from .convolution2d import Conv2DTranspose
+from sequence_layers.mlx.convolution2d import Conv2DTranspose
 from .convolution2d import ParallelChannels
-from .convolution2d import Upsample2D
+from sequence_layers.mlx.convolution2d import Upsample2D
 from .dense import Dense
-from .dense import EinsumDense
+from sequence_layers.mlx.dense import EinsumDense
 from .dsp import Delay
-from .dsp import FFT
+from sequence_layers.mlx.dsp import FFT
 from .dsp import Frame
-from .dsp import IFFT
+from sequence_layers.mlx.dsp import IFFT
 from .dsp import InverseSTFT
-from .dsp import IRFFT
+from sequence_layers.mlx.dsp import IRFFT
 from .dsp import LinearToMelSpectrogram
-from .dsp import Lookahead
+from sequence_layers.mlx.dsp import Lookahead
 from .dsp import OverlapAdd
-from .dsp import RFFT
+from sequence_layers.mlx.dsp import RFFT
 from .dsp import STFT
-from .dsp import Window
+from sequence_layers.mlx.dsp import Window
 from .normalization import BatchNormalization
-from .normalization import GroupNormalization
+from sequence_layers.mlx.normalization import GroupNormalization
 from .normalization import L2Normalize
-from .normalization import LayerNormalization
+from sequence_layers.mlx.normalization import LayerNormalization
 from .normalization import RMSNormalization
-from .pooling import AveragePooling1D
+from sequence_layers.mlx.pooling import AveragePooling1D
 from .pooling import MaxPooling1D
-from .pooling import MinPooling1D
+from sequence_layers.mlx.pooling import MinPooling1D
 from .position import AddTimingSignal
-from .position import ApplyRotaryPositionalEncoding
+from sequence_layers.mlx.position import ApplyRotaryPositionalEncoding
 from .projection_configs import CombinedQueryKeyValueProjection
-from .projection_configs import QueryAndKeyValueProjection
+from sequence_layers.mlx.projection_configs import QueryAndKeyValueProjection
 from .projection_configs import QueryAndSharedKeyValueProjection
-from .projection_configs import SeparateQueryKeyValueProjection
+from sequence_layers.mlx.projection_configs import SeparateQueryKeyValueProjection
 from .simple import Abs
-from .simple import Add
+from sequence_layers.mlx.simple import Add
 from .simple import Cast
-from .simple import CheckpointName
+from sequence_layers.mlx.simple import CheckpointName
 from .simple import Downsample1D
-from .simple import Dropout
+from sequence_layers.mlx.simple import Dropout
 from .simple import Elu
-from .simple import Embedding
+from sequence_layers.mlx.simple import Embedding
 from .simple import Exp
-from .simple import ExpandDims
+from sequence_layers.mlx.simple import ExpandDims
 from .simple import Flatten
-from .simple import GatedLinearUnit
+from sequence_layers.mlx.simple import GatedLinearUnit
 from .simple import GatedTanhUnit
-from .simple import GatedUnit
+from sequence_layers.mlx.simple import GatedUnit
 from .simple import Gelu
-from .simple import Identity
+from sequence_layers.mlx.simple import Identity
 from .simple import Lambda
-from .simple import LeakyRelu
+from sequence_layers.mlx.simple import LeakyRelu
 from .simple import Log
-from .simple import Logging
+from sequence_layers.mlx.simple import Logging
 from .simple import MaskInvalid
-from .simple import OneHot
+from sequence_layers.mlx.simple import OneHot
 from .simple import Relu
-from .simple import Reshape
+from sequence_layers.mlx.simple import Reshape
 from .simple import Scale
-from .simple import Sigmoid
+from sequence_layers.mlx.simple import Sigmoid
 from .simple import Softmax
-from .simple import Softplus
+from sequence_layers.mlx.simple import Softplus
 from .simple import Squeeze
-from .simple import Swish
+from sequence_layers.mlx.simple import Swish
 from .simple import Tanh
-from .simple import Transpose
+from sequence_layers.mlx.simple import Transpose
 from .simple import Upsample1D
-from .test_utils import SequenceLayerTest
-from .types import ChannelSpec
+from sequence_layers.mlx.types import ChannelSpec
 from .types import check_layer
-from .types import check_step
+from sequence_layers.mlx.types import check_step
 from .types import Constants
-from .types import DType
+from sequence_layers.mlx.types import DType
 from .types import Emits
-from .types import Emitting
+from sequence_layers.mlx.types import Emitting
 from .types import MaskedSequence
-from .types import MaskT
+from sequence_layers.mlx.types import MaskT
 from .types import PreservesShape
-from .types import PreservesType
+from sequence_layers.mlx.types import PreservesType
 from .types import Sequence
-from .types import SequenceLayer
+from sequence_layers.mlx.types import SequenceLayer
 from .types import SequenceLayerConfig
-from .types import Shape
+from sequence_layers.mlx.types import Shape
 from .types import ShapeDType
-from .types import ShapeLike
+from sequence_layers.mlx.types import ShapeLike
 from .types import State
-from .types import Stateless
+from sequence_layers.mlx.types import Stateless
 from .types import StatelessPointwise
 
 __all__ = [
     'basic_types',
     'dense',
-    'backend',
     'simple',
     'types',
-    'test_utils',
-    'SequenceLayerTest',
     'Constants',
     'Sequence',
     'MaskedSequence',

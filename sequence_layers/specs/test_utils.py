@@ -159,12 +159,16 @@ class SequenceLayerTest(
   @property
   def xp(self) -> backend_spec.xp:
     """Returns the backend wrapper."""
-    return self.sl.backend.xp
+    import importlib  # pylint: disable=g-import-not-at-top
+    backend = importlib.import_module(self.sl.__name__ + '.backend')
+    return backend.xp
 
   @property
   def nn(self) -> backend_spec.nn:
     """Returns the backend nn wrapper."""
-    return self.sl.backend.nn
+    import importlib  # pylint: disable=g-import-not-at-top
+    backend = importlib.import_module(self.sl.__name__ + '.backend')
+    return backend.nn
 
   def make_layer(self, config: types_spec.SequenceLayerConfig) -> Any:
     """Instantiates a layer from its config, delegating to the backend."""

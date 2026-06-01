@@ -18,8 +18,8 @@ https://typing.python.org/en/latest/spec/protocol.html#modules-as-implementation
 
 from typing import Any, Protocol, runtime_checkable
 
-from . import test_utils_spec as _test_utils_spec
-from . import types as _types
+from sequence_layers.specs import test_utils_spec as _test_utils_spec
+from sequence_layers.specs import types as _types
 
 
 @runtime_checkable
@@ -29,15 +29,7 @@ class ModuleSpec(Protocol):
   # pylint: disable=missing-function-docstring
 
   @property
-  def backend(self) -> Any:
-    ...
-
-  @property
   def types(self) -> _types.ModuleSpec:
-    ...
-
-  @property
-  def test_utils(self) -> _test_utils_spec.ModuleSpec:
     ...
 
   # pylint: disable=invalid-name
@@ -62,6 +54,3 @@ class ModuleSpec(Protocol):
   def SequenceLayerConfig(self) -> type[_types.SequenceLayerConfig]:
     ...
 
-  @property
-  def SequenceLayerTest(self) -> type[Any]:
-    ...
