@@ -8,6 +8,7 @@ from . import backend as _backend
 from . import convolution as _convolution
 from . import dense as _dense
 from . import normalization as _normalization
+from . import pooling as _pooling
 from . import simple as _simple
 from . import types as _types
 
@@ -150,6 +151,42 @@ class ModuleSpec(Protocol):
 
   @property
   def Conv2DTranspose(self) -> type[_convolution.Conv2DTranspose]:
+    ...
+
+  @property
+  def MinPooling1D(self) -> type[_pooling.MinPooling1D]:
+    ...
+
+  @property
+  def MaxPooling1D(self) -> type[_pooling.MaxPooling1D]:
+    ...
+
+  @property
+  def AveragePooling1D(self) -> type[_pooling.AveragePooling1D]:
+    ...
+
+  @property
+  def MinPooling2D(self) -> type[_pooling.MinPooling2D]:
+    ...
+
+  @property
+  def MaxPooling2D(self) -> type[_pooling.MaxPooling2D]:
+    ...
+
+  @property
+  def AveragePooling2D(self) -> type[_pooling.AveragePooling2D]:
+    ...
+
+  @property
+  def MinPooling3D(self) -> type[_pooling.MinPooling3D]:
+    ...
+
+  @property
+  def MaxPooling3D(self) -> type[_pooling.MaxPooling3D]:
+    ...
+
+  @property
+  def AveragePooling3D(self) -> type[_pooling.AveragePooling3D]:
     ...
 
   @property

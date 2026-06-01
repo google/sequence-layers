@@ -18,7 +18,7 @@ See the corresponding _behaviors module for behaviors.
 
 import abc
 import dataclasses
-from typing import Any, Sequence, override
+from typing import Any, override, Sequence
 
 from sequence_layers.specs import types as types_spec
 
@@ -117,7 +117,9 @@ class MinPooling2D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
     spatial_padding: types_spec.PaddingModeString | tuple[int, int] = (
         types_spec.PaddingMode.SAME.value
     )
@@ -143,7 +145,9 @@ class MaxPooling2D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
     spatial_padding: types_spec.PaddingModeString | tuple[int, int] = (
         types_spec.PaddingMode.SAME.value
     )
@@ -169,7 +173,9 @@ class AveragePooling2D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
     spatial_padding: types_spec.PaddingModeString | tuple[int, int] = (
         types_spec.PaddingMode.SAME.value
     )
@@ -196,8 +202,12 @@ class MinPooling3D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
-    spatial_padding: Sequence[types_spec.PaddingModeString | tuple[int, int]] = (
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
+    spatial_padding: Sequence[
+        types_spec.PaddingModeString | tuple[int, int]
+    ] = (
         types_spec.PaddingMode.SAME.value,
         types_spec.PaddingMode.SAME.value,
     )
@@ -223,8 +233,12 @@ class MaxPooling3D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
-    spatial_padding: Sequence[types_spec.PaddingModeString | tuple[int, int]] = (
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
+    spatial_padding: Sequence[
+        types_spec.PaddingModeString | tuple[int, int]
+    ] = (
         types_spec.PaddingMode.SAME.value,
         types_spec.PaddingMode.SAME.value,
     )
@@ -250,8 +264,12 @@ class AveragePooling3D[
     pool_size: int | Sequence[int]
     strides: int | Sequence[int] = 1
     dilation_rate: int | Sequence[int] = 1
-    time_padding: types_spec.PaddingModeString = types_spec.PaddingMode.VALID.value
-    spatial_padding: Sequence[types_spec.PaddingModeString | tuple[int, int]] = (
+    time_padding: types_spec.PaddingModeString = (
+        types_spec.PaddingMode.VALID.value
+    )
+    spatial_padding: Sequence[
+        types_spec.PaddingModeString | tuple[int, int]
+    ] = (
         types_spec.PaddingMode.SAME.value,
         types_spec.PaddingMode.SAME.value,
     )

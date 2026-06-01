@@ -14,7 +14,6 @@
 """Tests for pooling MLX sequence layers."""
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import mlx.core as mx
 import numpy as np
 

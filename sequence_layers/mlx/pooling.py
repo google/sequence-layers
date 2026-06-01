@@ -26,35 +26,41 @@ from sequence_layers.specs import pooling as spec
 
 
 def _is_floating(dtype):
-  return np.issubdtype(np.dtype(str(dtype).split('.')[-1]), np.floating)
+  """Returns True if the given MLX/numpy dtype is a floating type."""
+  return np.issubdtype(
+      np.dtype(str(dtype).rsplit('.', maxsplit=1)[-1]), np.floating
+  )
 
 
 def _is_integer(dtype):
-  return np.issubdtype(np.dtype(str(dtype).split('.')[-1]), np.integer)
+  """Returns True if the given MLX/numpy dtype is an integer type."""
+  return np.issubdtype(
+      np.dtype(str(dtype).rsplit('.', maxsplit=1)[-1]), np.integer
+  )
 
 
 def _max_pool_init_value(dtype) -> Any:
+  """Returns the initial value for MaxPooling1D for a given dtype."""
   if _is_floating(dtype):
     return float('-inf')
-  elif _is_integer(dtype):
-    np_dt = np.dtype(str(dtype).split('.')[-1])
+  if _is_integer(dtype):
+    np_dt = np.dtype(str(dtype).rsplit('.', maxsplit=1)[-1])
     return int(np.iinfo(np_dt).min)
-  elif str(dtype) == 'mlx.core.bool':
+  if str(dtype) == 'mlx.core.bool':
     return False
-  else:
-    raise ValueError(f'Unsupported dtype for max pool: {dtype}')
+  raise ValueError(f'Unsupported dtype for max pool: {dtype}')
 
 
 def _min_pool_init_value(dtype) -> Any:
+  """Returns the initial value for MinPooling1D for a given dtype."""
   if _is_floating(dtype):
     return float('inf')
-  elif _is_integer(dtype):
-    np_dt = np.dtype(str(dtype).split('.')[-1])
+  if _is_integer(dtype):
+    np_dt = np.dtype(str(dtype).rsplit('.', maxsplit=1)[-1])
     return int(np.iinfo(np_dt).max)
-  elif str(dtype) == 'mlx.core.bool':
+  if str(dtype) == 'mlx.core.bool':
     return True
-  else:
-    raise ValueError(f'Unsupported dtype for min pool: {dtype}')
+  raise ValueError(f'Unsupported dtype for min pool: {dtype}')
 
 
 bt = types
@@ -65,10 +71,12 @@ MaskedSequence = bt.MaskedSequence
 PaddingMode = bt.PaddingMode
 
 # Reuse convolution utilities.
+# pylint: disable=protected-access
 _effective_kernel_size = conv_utils._effective_kernel_size
 _explicit_padding = conv_utils._explicit_padding
 _buffer_width = conv_utils._buffer_width
 _compute_conv_mask = conv_utils._compute_conv_mask
+# pylint: enable=protected-access
 
 # Pooling supports fewer step modes than convolution (no causal_valid).
 _STEP_PADDINGS = frozenset({
@@ -77,28 +85,6 @@ _STEP_PADDINGS = frozenset({
     PaddingMode.REVERSE_CAUSAL.value,
     PaddingMode.SEMICAUSAL.value,
 })
-
-
-def _max_pool_init_value(dtype):
-  if mx.issubdtype(dtype, mx.floating):
-    return float('-inf')
-  elif mx.issubdtype(dtype, mx.integer):
-    return mx.iinfo(dtype).min
-  elif dtype == mx.bool_:
-    return False
-  else:
-    raise ValueError(f'Unsupported dtype: {dtype}')
-
-
-def _min_pool_init_value(dtype):
-  if mx.issubdtype(dtype, mx.floating):
-    return float('inf')
-  elif mx.issubdtype(dtype, mx.integer):
-    return mx.iinfo(dtype).max
-  elif dtype == mx.bool_:
-    return True
-  else:
-    raise ValueError(f'Unsupported dtype: {dtype}')
 
 
 def _reduce_window_1d(values, pool_size, stride, dilation_rate, reduce_fn):
@@ -170,14 +156,14 @@ def _reduce_window_masked_avg_1d(
     for _ in range(values.ndim - 2):
       count = mx.expand_dims(count, axis=-1)
     return v_sum // count
-  else:
-    gathered_mask = mask[:, indices].astype(mx.float32)
-    count = mx.sum(gathered_mask, axis=2)  # [b, n]
-    count = mx.maximum(count, 1.0)
-    # Expand to broadcast over channel dims.
-    for _ in range(values.ndim - 2):
-      count = mx.expand_dims(count, axis=-1)
-    return v_sum / count
+
+  gathered_mask = mask[:, indices].astype(mx.float32)
+  count = mx.sum(gathered_mask, axis=2)  # [b, n]
+  count = mx.maximum(count, 1.0)
+  # Expand to broadcast over channel dims.
+  for _ in range(values.ndim - 2):
+    count = mx.expand_dims(count, axis=-1)
+  return v_sum / count
 
 
 def _compute_initial_state_pooling(
@@ -223,9 +209,11 @@ class _Pooling1D(
     self._padding = padding
 
   def _pad_value(self, dtype):
+    """Returns the pad value for the given dtype."""
     raise NotImplementedError
 
   def _reduce(self, gathered, axis):
+    """Reduces gathered windows along the specified axis."""
     raise NotImplementedError
 
   @override
@@ -253,12 +241,17 @@ class _Pooling1D(
         PaddingMode.SEMICAUSAL.value,
     ):
       return 0
-    elif self._padding in (
+    if self._padding in (
         PaddingMode.REVERSE_CAUSAL_VALID.value,
         PaddingMode.REVERSE_CAUSAL.value,
     ):
       return ek - 1
     return 0
+
+  @property
+  @override
+  def receptive_field(self) -> types.ReceptiveField:
+    return super().receptive_field
 
   @override
   def get_output_shape(self, input_shape, *, constants=None):
@@ -291,16 +284,20 @@ class _Pooling1D(
 
   @override
   @types.check_layer
-  def layer(self, x, *, training: bool = False, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool = False, constants=None
+  ):
     pad_value = self._pad_value(x.dtype)
-    L_out = conv_utils._compute_output_length(
+    # pylint: disable=protected-access
+    output_length = conv_utils._compute_output_length(
         x.shape[1],
         self._pool_size,
         self._strides,
         self._dilation_rate,
         self._padding,
     )
-    if L_out == 0:
+    # pylint: enable=protected-access
+    if output_length == 0:
       empty_values = mx.zeros(
           (x.shape[0], 0, x.shape[-1]), dtype=x.values.dtype
       )
@@ -342,7 +339,9 @@ class _Pooling1D(
 
   @override
   @types.check_step
-  def step(self, x, state, *, training: bool = False, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool = False, constants=None
+  ):
     pad_value = self._pad_value(x.dtype)
     ek = _effective_kernel_size(self._pool_size, self._dilation_rate)
     if ek > 1:
@@ -356,7 +355,7 @@ class _Pooling1D(
     )
 
     if bw:
-      state = state.concatenate(x)
+      state = state.concatenate(x)  # pyrefly: ignore[missing-attribute]
     else:
       state = x
 
@@ -410,7 +409,7 @@ class MaxPooling1D(
       pool_size: int | None = None,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: types.PaddingModeString = 'valid',
   ):
     if config is not None:
       super().__init__(
@@ -436,14 +435,17 @@ class MaxPooling1D(
           padding=padding,
       )
 
+  @override
   def _pad_value(self, dtype):
     return _max_pool_init_value(dtype)
 
+  @override
   def _reduce(self, gathered, axis):
     return mx.max(gathered, axis=axis)
 
   @classmethod
   def from_config(cls, config):
+    """Creates a MaxPooling1D instance from config."""
     return cls(config)
 
 
@@ -473,7 +475,7 @@ class MinPooling1D(
       pool_size: int | None = None,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: types.PaddingModeString = 'valid',
   ):
     if config is not None:
       super().__init__(
@@ -499,14 +501,17 @@ class MinPooling1D(
           padding=padding,
       )
 
+  @override
   def _pad_value(self, dtype):
     return _min_pool_init_value(dtype)
 
+  @override
   def _reduce(self, gathered, axis):
     return mx.min(gathered, axis=axis)
 
   @classmethod
   def from_config(cls, config):
+    """Creates a MinPooling1D instance from config."""
     return cls(config)
 
 
@@ -538,7 +543,7 @@ class AveragePooling1D(
       pool_size: int | None = None,
       strides: int = 1,
       dilation_rate: int = 1,
-      padding: str = 'valid',
+      padding: types.PaddingModeString = 'valid',
       masked_average: bool = False,
   ):
     if config is not None:
@@ -568,25 +573,29 @@ class AveragePooling1D(
           masked_average=masked_average,
       )
 
+  @override
   def _pad_value(self, dtype):
+    """Returns the pad value for the given dtype."""
     if mx.issubdtype(dtype, mx.integer):
       return 0
-    elif dtype == mx.bool_:
+    if dtype == mx.bool_:
       return False
-    else:
-      return 0.0
+    return 0.0
 
+  @override
   def _reduce(self, gathered, axis):
+    """Reduces gathered windows along the specified axis."""
     if mx.issubdtype(gathered.dtype, mx.integer):
       return mx.sum(gathered, axis=axis) // gathered.shape[axis]
-    else:
-      return mx.mean(gathered, axis=axis)
+    return mx.mean(gathered, axis=axis)
 
   @override
   @types.check_layer
-  def layer(self, x, *, training: bool = False, constants=None):
+  def layer(  # pyrefly: ignore[missing-override-decorator]
+      self, x, *, training: bool = False, constants=None
+  ):
     if not self._masked_average:
-      return _Pooling1D.layer.__wrapped__(
+      return _Pooling1D.layer.__wrapped__(  # pylint: disable=no-member  # pyrefly: ignore[missing-attribute]
           self, x, training=training, constants=constants
       )
 
@@ -632,9 +641,11 @@ class AveragePooling1D(
 
   @override
   @types.check_step
-  def step(self, x, state, *, training: bool = False, constants=None):
+  def step(  # pyrefly: ignore[missing-override-decorator]
+      self, x, state, *, training: bool = False, constants=None
+  ):
     if not self._masked_average:
-      return _Pooling1D.step.__wrapped__(
+      return _Pooling1D.step.__wrapped__(  # pylint: disable=no-member  # pyrefly: ignore[missing-attribute]
           self, x, state, training=training, constants=constants
       )
 
@@ -681,4 +692,5 @@ class AveragePooling1D(
 
   @classmethod
   def from_config(cls, config):
+    """Creates an AveragePooling1D instance from config."""
     return cls(config)

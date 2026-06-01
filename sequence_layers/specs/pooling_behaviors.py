@@ -18,9 +18,6 @@ Backend-specific test files should inherit from these tests.
 
 # pylint: disable=abstract-method
 # pyrefly: disable=bad-instantiation
-
-import itertools
-from typing import Any
 from absl.testing import parameterized
 import numpy as np
 
@@ -168,21 +165,27 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
         masked_average=masked_average,
     ).make()
 
-    x_values = np.array([
-        [1, 2, 3, 4, 5, 6],
-        [3, 4, 5, 6, 7, 8],
-        [5, 6, 7, 8, 9, 0],
-        [2, 3, 0, 6, 2, 1],
-        [0, 6, 2, 1, 7, 8],
-    ], dtype=np.float32)
+    x_values = np.array(
+        [
+            [1, 2, 3, 4, 5, 6],
+            [3, 4, 5, 6, 7, 8],
+            [5, 6, 7, 8, 9, 0],
+            [2, 3, 0, 6, 2, 1],
+            [0, 6, 2, 1, 7, 8],
+        ],
+        dtype=np.float32,
+    )
 
-    x_mask = np.array([
-        [False, False, False, False, False, False],
-        [True, True, True, False, False, False],
-        [True, True, True, True, False, False],
-        [True, True, True, True, True, False],
-        [True, True, True, True, True, True],
-    ], dtype=bool)
+    x_mask = np.array(
+        [
+            [False, False, False, False, False, False],
+            [True, True, True, False, False, False],
+            [True, True, True, True, False, False],
+            [True, True, True, True, True, False],
+            [True, True, True, True, True, True],
+        ],
+        dtype=bool,
+    )
 
     x = self.sl.types.Sequence(
         self.xp.array(x_values),
@@ -192,29 +195,38 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
     y = l.layer(x, training=False)
 
     if masked_average:
-      expected_y_values = np.array([
-          [0.0, 0.0],
-          [(3 + 4 + 5) / 3.0, 0],
-          [(5 + 6 + 7) / 3.0, 8],
-          [(2 + 3 + 0) / 3.0, (6 + 2) / 2.0],
-          [(0 + 6 + 2) / 3.0, (1 + 7 + 8) / 3.0],
-      ], dtype=np.float32)
+      expected_y_values = np.array(
+          [
+              [0.0, 0.0],
+              [(3 + 4 + 5) / 3.0, 0],
+              [(5 + 6 + 7) / 3.0, 8],
+              [(2 + 3 + 0) / 3.0, (6 + 2) / 2.0],
+              [(0 + 6 + 2) / 3.0, (1 + 7 + 8) / 3.0],
+          ],
+          dtype=np.float32,
+      )
     else:
-      expected_y_values = np.array([
-          [0.0, 0.0],
-          [(3 + 4 + 5) / 3.0, 0],
-          [(5 + 6 + 7) / 3.0, 8 / 3.0],
-          [(2 + 3 + 0) / 3.0, (6 + 2) / 3.0],
-          [(0 + 6 + 2) / 3.0, (1 + 7 + 8) / 3.0],
-      ], dtype=np.float32)
+      expected_y_values = np.array(
+          [
+              [0.0, 0.0],
+              [(3 + 4 + 5) / 3.0, 0],
+              [(5 + 6 + 7) / 3.0, 8 / 3.0],
+              [(2 + 3 + 0) / 3.0, (6 + 2) / 3.0],
+              [(0 + 6 + 2) / 3.0, (1 + 7 + 8) / 3.0],
+          ],
+          dtype=np.float32,
+      )
 
-    expected_y_mask = np.array([
-        [False, False],
-        [True, False],
-        [True, True],
-        [True, True],
-        [True, True],
-    ], dtype=bool)
+    expected_y_mask = np.array(
+        [
+            [False, False],
+            [True, False],
+            [True, True],
+            [True, True],
+            [True, True],
+        ],
+        dtype=bool,
+    )
 
     expected_y = self.sl.types.Sequence(
         self.xp.array(expected_y_values),
@@ -292,19 +304,11 @@ class Pooling1DTest(test_utils.SequenceLayerTest):
 
     # Check contract compatibility on various sequence lengths.
     # JAX does not support reduce_window gradients with dilation_rate > 1.
-    test_gradients = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
-    test_receptive_field = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
+    test_gradients = dilation_rate == 1 and self.xp.float32 == dtype
+    test_receptive_field = dilation_rate == 1 and self.xp.float32 == dtype
 
     for time in range(20 * l.block_size - 1, 20 * l.block_size + 2):
-      x = self.random_sequence(
-          batch_size, time, *channel_shape, dtype=dtype
-      )
+      x = self.random_sequence(batch_size, time, *channel_shape, dtype=dtype)
       self.verify_contract(
           l,
           x,
@@ -460,21 +464,27 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
         masked_average=masked_average,
     ).make()
 
-    x_values = np.array([
-        [[1, 2], [2, 3], [5, 6], [7, 8], [9, 3], [4, 2]],
-        [[2, 3], [5, 6], [7, 8], [9, 3], [3, 1], [2, 7]],
-        [[5, 2], [7, 3], [0, 3], [3, 1], [2, 6], [1, 2]],
-        [[7, 3], [0, 3], [3, 1], [2, 6], [1, 2], [3, 4]],
-        [[0, 3], [3, 1], [2, 6], [1, 2], [3, 4], [5, 7]],
-    ], dtype=np.float32)
+    x_values = np.array(
+        [
+            [[1, 2], [2, 3], [5, 6], [7, 8], [9, 3], [4, 2]],
+            [[2, 3], [5, 6], [7, 8], [9, 3], [3, 1], [2, 7]],
+            [[5, 2], [7, 3], [0, 3], [3, 1], [2, 6], [1, 2]],
+            [[7, 3], [0, 3], [3, 1], [2, 6], [1, 2], [3, 4]],
+            [[0, 3], [3, 1], [2, 6], [1, 2], [3, 4], [5, 7]],
+        ],
+        dtype=np.float32,
+    )
 
-    x_mask = np.array([
-        [False, False, False, False, False, False],
-        [True, True, True, False, False, False],
-        [True, True, True, True, False, False],
-        [True, True, True, True, True, False],
-        [True, True, True, True, True, True],
-    ], dtype=bool)
+    x_mask = np.array(
+        [
+            [False, False, False, False, False, False],
+            [True, True, True, False, False, False],
+            [True, True, True, True, False, False],
+            [True, True, True, True, True, False],
+            [True, True, True, True, True, True],
+        ],
+        dtype=bool,
+    )
 
     x = self.sl.types.Sequence(
         self.xp.array(x_values),
@@ -484,29 +494,44 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
     y = l.layer(x, training=False)
 
     if masked_average:
-      expected_y_values = np.array([
-          [[0.0], [0.0]],
-          [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
-          [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 2.0]],
-          [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 4.0]],
-          [[(0 + 3 + 2 + 3 + 1 + 6) / 6.0], [(1 + 3 + 5 + 2 + 4 + 7) / 6.0]],
-      ], dtype=np.float32)
+      expected_y_values = np.array(
+          [
+              [[0.0], [0.0]],
+              [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
+              [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 2.0]],
+              [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 4.0]],
+              [
+                  [(0 + 3 + 2 + 3 + 1 + 6) / 6.0],
+                  [(1 + 3 + 5 + 2 + 4 + 7) / 6.0],
+              ],
+          ],
+          dtype=np.float32,
+      )
     else:
-      expected_y_values = np.array([
-          [[0.0], [0.0]],
-          [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
-          [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 6.0]],
-          [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 6.0]],
-          [[(0 + 3 + 2 + 3 + 1 + 6) / 6.0], [(1 + 3 + 5 + 2 + 4 + 7) / 6.0]],
-      ], dtype=np.float32)
+      expected_y_values = np.array(
+          [
+              [[0.0], [0.0]],
+              [[(2 + 5 + 7 + 3 + 6 + 8) / 6.0], [0]],
+              [[(5 + 7 + 0 + 2 + 3 + 3) / 6.0], [(3 + 1) / 6.0]],
+              [[(7 + 0 + 3 + 3 + 3 + 1) / 6.0], [(2 + 1 + 6 + 2) / 6.0]],
+              [
+                  [(0 + 3 + 2 + 3 + 1 + 6) / 6.0],
+                  [(1 + 3 + 5 + 2 + 4 + 7) / 6.0],
+              ],
+          ],
+          dtype=np.float32,
+      )
 
-    expected_y_mask = np.array([
-        [False, False],
-        [True, False],
-        [True, True],
-        [True, True],
-        [True, True],
-    ], dtype=bool)
+    expected_y_mask = np.array(
+        [
+            [False, False],
+            [True, False],
+            [True, True],
+            [True, True],
+            [True, True],
+        ],
+        dtype=bool,
+    )
 
     expected_y = self.sl.types.Sequence(
         self.xp.array(expected_y_values),
@@ -592,19 +617,11 @@ class Pooling2DTest(test_utils.SequenceLayerTest):
     self.assertEqual(output_spec.dtype, dtype)
 
     # Verify verification contract
-    test_gradients = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
-    test_receptive_field = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
+    test_gradients = dilation_rate == 1 and self.xp.float32 == dtype
+    test_receptive_field = dilation_rate == 1 and self.xp.float32 == dtype
 
     for time in range(20 * l.block_size - 1, 20 * l.block_size + 2):
-      x = self.random_sequence(
-          batch_size, time, *channel_shape, dtype=dtype
-      )
+      x = self.random_sequence(batch_size, time, *channel_shape, dtype=dtype)
       self.verify_contract(
           l,
           x,
@@ -820,19 +837,11 @@ class Pooling3DTest(test_utils.SequenceLayerTest):
     self.assertEqual(output_spec.dtype, dtype)
 
     # Verify verification contract
-    test_gradients = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
-    test_receptive_field = (
-        dilation_rate == 1
-        and self.xp.float32 == dtype
-    )
+    test_gradients = dilation_rate == 1 and self.xp.float32 == dtype
+    test_receptive_field = dilation_rate == 1 and self.xp.float32 == dtype
 
     for time in range(20 * l.block_size - 1, 20 * l.block_size + 2):
-      x = self.random_sequence(
-          batch_size, time, *channel_shape, dtype=dtype
-      )
+      x = self.random_sequence(batch_size, time, *channel_shape, dtype=dtype)
       self.verify_contract(
           l,
           x,
