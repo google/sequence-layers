@@ -123,8 +123,8 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
           'reverse_causal',
           'same',
           'valid',
-          'semicausal_full',
           'explicit_semicausal',
+          'semicausal_full',
       ),
   )
   def test_frame_exhaustive(
@@ -166,8 +166,6 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
         expected_input_latency = 0
       case 'reverse_causal_valid' | 'reverse_causal':
         expected_input_latency = frame_length - 1
-      case 'semicausal_full':
-        expected_input_latency = frame_step - 1
       case 'explicit_semicausal':
         # If frame_length >= frame_step, the below expression simplifies to
         # frame_step - 1. If frame_length < frame_step, the expression
@@ -176,6 +174,8 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
         expected_input_latency = (frame_length - 1) - max(
             0, frame_length - frame_step
         )
+      case 'semicausal_full':
+        expected_input_latency = frame_step - 1
       case _:
         # Unsupported defaults to zero.
         expected_input_latency = 0
