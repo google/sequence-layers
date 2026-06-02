@@ -894,25 +894,43 @@ class DotProductSelfAttention(
   ):
     """Convert attention projection layers to quantized versions."""
     del mode  # Unused in MLX quantize
-    if (
-        getattr(self, 'q_proj', None) is None
-        or self.q_proj.shape[0] % group_size != 0
-    ):
+
+    # Determine in_features from whichever projection layout was initialized.
+    in_features = None
+    if getattr(self, 'qkv_proj', None) is not None:
+      in_features = self.qkv_proj.shape[0]
+    elif getattr(self, 'q_proj', None) is not None:
+      in_features = self.q_proj.shape[0]
+
+    if in_features is None or in_features % group_size != 0:
       return self
 
     self._quant_group_size = group_size
     self._quant_bits = bits
 
-    w_q = self.q_proj.T
-    # kv_proj is already combined [in, 2*kv_dim].
-    w_kv = self.kv_proj.T
-    w_qkv = mx.concatenate([w_q, w_kv], axis=0)
+    # Build the combined QKV weight matrix from whichever layout exists.
+    if getattr(self, 'qkv_proj', None) is not None:
+      w_qkv = self.qkv_proj.T
+    else:
+      w_q = self.q_proj.T
+      # kv_proj is already combined [in, 2*kv_dim].
+      w_kv = self.kv_proj.T
+      w_qkv = mx.concatenate([w_q, w_kv], axis=0)
+
     self.qkv_proj_qw, self.qkv_proj_qs, self.qkv_proj_qb = mx.quantize(
         w_qkv, group_size=group_size, bits=bits
     )
 
+    # Clear all original projection weights.
+    self.qkv_proj = cast(Any, None)
     self.q_proj = cast(Any, None)
     self.kv_proj = cast(Any, None)
+
+    # Split combined bias into q_bias / kv_bias for the quantized path.
+    if self.use_bias and getattr(self, 'qkv_bias', None) is not None:
+      d_q = self.num_heads * self.units_per_head
+      self.q_bias, self.kv_bias = mx.split(self.qkv_bias, [d_q], axis=-1)
+      self.qkv_bias = cast(Any, None)
 
     def _project_qkv(self, x):
       b, t = x.shape[0], x.shape[1]
