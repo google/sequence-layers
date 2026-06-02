@@ -15,7 +15,7 @@ from sequence_layers.mlx.types import \
     SequenceLayerConfig as _SequenceLayerConfig
 from sequence_layers.specs import convolution as spec
 
-from . import types as bt
+from sequence_layers.mlx import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence

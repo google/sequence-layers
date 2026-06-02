@@ -24,7 +24,7 @@ from sequence_layers.mlx import types
 from sequence_layers.mlx.init_mapping import _to_mx_dtype
 from sequence_layers.specs import position as position_spec
 
-from . import types as bt
+from sequence_layers.mlx import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence

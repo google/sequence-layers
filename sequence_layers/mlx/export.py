@@ -2,7 +2,7 @@
 
 import mlx.core as mx
 
-from . import types as bt
+from sequence_layers.mlx import types as bt
 
 Sequence = bt.Sequence
 

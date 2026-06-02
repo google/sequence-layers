@@ -13,7 +13,7 @@ from sequence_layers.mlx import convolution as conv_utils
 from sequence_layers.mlx import types
 from sequence_layers.specs import dsp as spec
 
-from . import types as bt
+from sequence_layers.mlx import types as bt
 
 Sequence = bt.Sequence
 MaskedSequence = bt.MaskedSequence

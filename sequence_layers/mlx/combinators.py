@@ -14,7 +14,7 @@ from sequence_layers.mlx import types
 from sequence_layers.mlx import utils as mlx_utils
 from sequence_layers.specs import combinators as spec
 
-from . import types as bt
+from sequence_layers.mlx import types as bt
 
 Sequence = bt.Sequence
 CombinationMode = spec.CombinationMode
