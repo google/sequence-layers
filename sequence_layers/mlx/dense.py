@@ -262,6 +262,60 @@ class EinsumDense(
       return x.apply_values(einsum_fn)
     return x.apply_values_masked(einsum_fn)
 
+  def to_quantized(self, group_size: int = 64, bits: int = 4, mode: str = 'affine'):
+    """Weight-only quantize the head-combining projection kernel.
+
+    Only the '...nh,dnh->...d' equation (the attention output projection) is
+    supported; other equations are returned unchanged. The [d, n, h] kernel is
+    flattened to [d, n*h] and quantized; the layer is rebound to flatten the
+    [..., n, h] input to [..., n*h] and use mx.quantized_matmul.
+    """
+    if (
+        self.kernel is None
+        or self.config.equation != '...nh,dnh->...d'
+        or (self.kernel.shape[-1] * self.kernel.shape[-2]) % group_size != 0
+    ):
+      return self
+
+    _d, _n, _h = self.kernel.shape
+    kernel_2d = self.kernel.reshape(_d, _n * _h)
+    self.q_weight, self.q_scales, self.q_biases = mx.quantize(
+        kernel_2d, group_size=group_size, bits=bits
+    )
+    self._q_group_size = group_size
+    self._q_bits = bits
+    self.kernel = None
+
+    activation = self.activation
+
+    def _quantized_layer(self, x, *, training: bool, constants=None):
+      compute_dtype = self.get_output_dtype(x.dtype)
+
+      def quantized_einsum_fn(v):
+        v_2d = v.reshape(*v.shape[:-2], _n * _h).astype(compute_dtype)
+        y = mx.quantized_matmul(
+            v_2d,
+            self.q_weight,
+            scales=self.q_scales,
+            biases=self.q_biases,
+            transpose=True,
+            group_size=self._q_group_size,
+            bits=self._q_bits,
+        )
+        if self.bias is not None:
+          y = y + self.bias
+        if activation is not None:
+          y = activation(y)
+        return y
+
+      if self.bias is not None or activation is not None:
+        return x.apply_values(quantized_einsum_fn)
+      return x.apply_values_masked(quantized_einsum_fn)
+
+    import types as _pytypes
+    self.layer = _pytypes.MethodType(_quantized_layer, self)
+    return self
+
 
 def _parse_equation(equation):
   """Parse einsum equation of form '...ab,bc->...ac'."""
