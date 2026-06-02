@@ -71,30 +71,44 @@ def _make_variance_scaling_init(mode, distribution):
   return init_fn
 
 
+# Canonical numpy dtype name -> MLX dtype. Keyed by the exact name returned by
+# np.dtype(...).name, so no ordering or substring concerns apply.
+# Every dtype maps to its exact MLX equivalent -- we never downcast on the
+# user's behalf, since that would silently change precision and hide bugs.
+# (Some, e.g. float64, exist but are unsupported on the Metal GPU; let MLX
+# raise at the op so the mismatch is visible rather than masked.)
+_MX_DTYPE_BY_NAME = {
+    'bfloat16': mx.bfloat16,
+    'float32': mx.float32,
+    'float16': mx.float16,
+    'float64': mx.float64,
+    'int32': mx.int32,
+    'int64': mx.int64,
+    'int16': mx.int16,
+    'int8': mx.int8,
+    'uint8': mx.uint8,
+    'uint16': mx.uint16,
+    'uint32': mx.uint32,
+    'uint64': mx.uint64,
+    'bool': mx.bool_,
+    'complex64': mx.complex64,
+}
+
+
 def _to_mx_dtype(dtype):
   """Convert any dtype (JAX, numpy, MLX) to an MLX dtype."""
   if isinstance(dtype, mx.Dtype):
     return dtype
-  name = getattr(dtype, '__name__', '') or str(dtype)
-  mapping = {
-      'float32': mx.float32,
-      'float16': mx.float16,
-      'bfloat16': mx.bfloat16,
-      'float64': mx.float32,  # MLX lacks float64.
-      'int32': mx.int32,
-      'int64': mx.int32,  # MLX lacks int64.
-      'int16': mx.int16,
-      'int8': mx.int8,
-      'uint8': mx.uint8,
-      'uint32': mx.uint32,
-      'bool': mx.bool_,
-      'bool_': mx.bool_,
-      'complex64': mx.complex64,
-  }
-  for key, val in mapping.items():
-    if key in name:
-      return val
-  return mx.float32
+  if dtype is None:
+    # np.dtype(None) silently yields float64; require callers to resolve their
+    # own default rather than coerce here.
+    raise ValueError('_to_mx_dtype received None; expected a concrete dtype.')
+  # numpy understands JAX, ml_dtypes (bfloat16), string, and Python-type
+  # inputs, canonicalizing each to an exact name we can look up directly.
+  name = np.dtype(dtype).name
+  if name not in _MX_DTYPE_BY_NAME:
+    raise ValueError(f'No MLX dtype mapping for {dtype!r} (numpy name {name!r}).')
+  return _MX_DTYPE_BY_NAME[name]
 
 
 def _zeros_init(key, shape, dtype=mx.float32):
