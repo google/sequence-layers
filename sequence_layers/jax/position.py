@@ -76,7 +76,7 @@ class AddTimingSignal(
       self.scale = None
 
   @nn.nowrap
-  def _check_inputs(self, input_spec: types.ShapeDType):
+  def _check_inputs(self, input_spec: types.ChannelSpec):
     if input_spec.dtype not in (
         jnp.float16,
         jnp.bfloat16,
@@ -97,7 +97,7 @@ class AddTimingSignal(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,
@@ -234,7 +234,7 @@ class ApplyRotaryPositionalEncoding(
       return {0: (0, 0)}
 
   @nn.nowrap
-  def _check_inputs(self, input_spec: types.ShapeDType):
+  def _check_inputs(self, input_spec: types.ChannelSpec):
     if input_spec.dtype not in (
         jnp.float16,
         jnp.bfloat16,
@@ -265,7 +265,7 @@ class ApplyRotaryPositionalEncoding(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,

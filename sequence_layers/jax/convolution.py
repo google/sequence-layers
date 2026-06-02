@@ -270,7 +270,7 @@ def compute_conv_mask(
 
 def compute_conv_initial_state(
     batch_size: int,
-    input_spec: types.ShapeDType,
+    input_spec: types.ChannelSpec,
     buffer_width: int,
     padding: types.PaddingModeString,
     pad_value: complex | None = None,
@@ -632,7 +632,7 @@ class BaseConv(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,

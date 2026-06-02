@@ -1098,13 +1098,13 @@ class Lambda(
     # If get_output_shape or get_output_dtype are called, the input_spec to use
     # for type or shape information (respectively). Prefer to use
     # get_output_spec to avoid having to specify this.
-    expected_input_spec: types.ShapeDType | None = None
+    expected_input_spec: types.ChannelSpec | None = None
     # An optional name for the layer.
     name: str | None = None
 
     @override
     def make(self) -> 'Lambda':
-      return Lambda(config=self, name=self.name)
+      return Lambda(self, name=self.name)
 
   config: Config
 
@@ -1113,7 +1113,7 @@ class Lambda(
   def supports_step(self) -> bool:
     return True
 
-  def _validate_input_spec(self, input_spec: types.ShapeDType) -> None:
+  def _validate_input_spec(self, input_spec: types.ChannelSpec) -> None:
     del input_spec
     # TODO(rryan): Re-enable when SoundStream works as expected with this
     # (including the test).
@@ -1130,10 +1130,10 @@ class Lambda(
   @override
   def get_output_spec(
       self,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       constants: types.Constants | None = None,
-  ) -> types.ShapeDType:
+  ) -> types.ChannelSpec:
     self._validate_input_spec(input_spec)
     if self.config.sequence_input:
       # pyrefly: ignore[bad-assignment]
@@ -3219,7 +3219,7 @@ class Logging(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,
