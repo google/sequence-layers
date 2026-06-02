@@ -10,6 +10,7 @@ from mlx import nn
 import mlx.core as mx
 import numpy as np
 
+from sequence_layers.mlx import init_mapping
 from sequence_layers.mlx import types
 from sequence_layers.specs import simple as spec
 
@@ -22,24 +23,7 @@ def _to_mx_dtype(dtype: Any) -> mx.Dtype | None:
   """Converts various dtype representations to MLX DType."""
   if dtype is None:
     return None
-  if isinstance(dtype, str):
-    if dtype == 'float32':
-      return mx.float32
-    if dtype == 'float16':
-      return mx.float16
-    if dtype == 'int32':
-      return mx.int32
-    if dtype == 'bool':
-      return mx.bool_
-  if dtype == np.float32:
-    return mx.float32
-  if dtype == np.float16:
-    return mx.float16
-  if dtype == np.int32:
-    return mx.int32
-  if dtype in (np.bool_, bool):
-    return mx.bool_
-  return dtype
+  return init_mapping._to_mx_dtype(dtype)
 
 
 # ---------------------------------------------------------------------------

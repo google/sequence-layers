@@ -8,6 +8,7 @@ from mlx import nn
 import mlx.core as mx
 import numpy as np
 
+from sequence_layers.mlx import init_mapping
 from sequence_layers.specs import combinators as spec_combinators
 from sequence_layers.specs import types as specs_types
 
@@ -84,29 +85,7 @@ def _to_mx_dtype(dtype: Any) -> Any:
   """Converts various dtype representations to MLX DType."""
   if dtype is None:
     return None
-  if isinstance(dtype, str):
-    if dtype == 'float32':
-      return mx.float32
-    if dtype == 'float16':
-      return mx.float16
-    if dtype == 'int32':
-      return mx.int32
-    if dtype == 'bool':
-      return mx.bool_
-  # Handle JAX/Numpy dtypes
-  try:
-    np_dtype = np.dtype(dtype)
-    if np_dtype == np.float32:
-      return mx.float32
-    if np_dtype == np.float16:
-      return mx.float16
-    if np_dtype == np.int32:
-      return mx.int32
-    if np_dtype == np.bool_:
-      return mx.bool_
-  except (TypeError, ValueError):
-    pass
-  return dtype
+  return init_mapping._to_mx_dtype(dtype)
 
 
 def _map_activation(act: Any) -> Any:
