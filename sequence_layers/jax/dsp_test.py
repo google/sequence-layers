@@ -124,6 +124,7 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
           'same',
           'valid',
           'semicausal_full',
+          'explicit_semicausal',
       ),
   )
   def test_frame_exhaustive(
@@ -132,11 +133,17 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
     key = jax.random.PRNGKey(1234)
     batch_size = 2
     frame_length, frame_step = frame_length_frame_step
+    if padding == 'explicit_semicausal':
+      total_pad = frame_length - 1
+      overlap = max(0, frame_length - frame_step)
+      explicit_padding = (overlap, total_pad - overlap)
+    else:
+      explicit_padding = padding
     x = test_utils.random_sequence(batch_size, 1, *channel_shape)
     l = dsp.Frame.Config(
         frame_length=frame_length,
         frame_step=frame_step,
-        padding=padding,
+        padding=explicit_padding,
         name='frame',
     ).make()
     l = self.init_and_bind_layer(key, l, x)
@@ -149,6 +156,7 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
             'reverse_causal_valid',
             'causal',
             'reverse_causal',
+            'explicit_semicausal',
         ),
     )
     self.assertEqual(l.block_size, frame_step)
@@ -160,6 +168,14 @@ class FrameTest(test_utils.SequenceLayerTest, spec.FrameTest):
         expected_input_latency = frame_length - 1
       case 'semicausal_full':
         expected_input_latency = frame_step - 1
+      case 'explicit_semicausal':
+        # If frame_length >= frame_step, the below expression simplifies to
+        # frame_step - 1. If frame_length < frame_step, the expression
+        # simplifies to frame_length - 1. In both cases, the output latency will
+        # be zero both expressions are less than frame_step.
+        expected_input_latency = (frame_length - 1) - max(
+            0, frame_length - frame_step
+        )
       case _:
         # Unsupported defaults to zero.
         expected_input_latency = 0

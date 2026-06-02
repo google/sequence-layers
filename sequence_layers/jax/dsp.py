@@ -709,7 +709,7 @@ class FFTBase(types.Stateless, metaclass=abc.ABCMeta):
     return fft_fn(x, axis=axis)
 
 
-class FFT(types.PreservesType, FFTBase, spec.FFT):
+class FFT(FFTBase, spec.FFT):
   """A layer that applies an FFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
@@ -737,6 +737,21 @@ class FFT(types.PreservesType, FFTBase, spec.FFT):
   def _padding(self) -> str:
     return self.config.padding
 
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    match input_dtype:
+      case jnp.bfloat16 | jnp.float16 | jnp.float32 | jnp.complex64:
+        return jnp.complex64
+      case jnp.float64 | jnp.complex128:
+        return jnp.complex128
+      case _:
+        raise ValueError(f'Unsupported input dtype: {input_dtype}')
+
   def _get_output_length(self, input_size: int) -> int:
     return self.config.fft_length or input_size
 
@@ -751,7 +766,7 @@ class FFT(types.PreservesType, FFTBase, spec.FFT):
     return fft_fn
 
 
-class IFFT(types.PreservesType, FFTBase, spec.IFFT):
+class IFFT(FFTBase, spec.IFFT):
   """A layer that applies an IFFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
@@ -779,6 +794,21 @@ class IFFT(types.PreservesType, FFTBase, spec.IFFT):
   @property
   def _padding(self) -> str:
     return self.config.padding
+
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    match input_dtype:
+      case jnp.bfloat16 | jnp.float16 | jnp.float32 | jnp.complex64:
+        return jnp.complex64
+      case jnp.float64 | jnp.complex128:
+        return jnp.complex128
+      case _:
+        raise ValueError(f'Unsupported input dtype: {input_dtype}')
 
   def _get_output_length(self, input_size: int) -> int:
     return self.config.frame_length or input_size
@@ -901,9 +931,9 @@ class IRFFT(FFTBase, spec.IRFFT):
       constants: types.Constants | None = None,
   ) -> types.DType:
     match input_dtype:
-      case jnp.complex64:
+      case jnp.complex64 | jnp.bfloat16 | jnp.float16 | jnp.float32:
         return jnp.float32
-      case jnp.complex128:
+      case jnp.complex128 | jnp.float64:
         return jnp.float64
       case _:
         raise ValueError(f'Unsupported input dtype: {input_dtype}')
