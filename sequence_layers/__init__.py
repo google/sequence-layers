@@ -13,4 +13,4 @@
 # limitations under the License.
 """Package directory file for Sequence Layers."""
 
-__version__ = '0.3.0rc1'
+__version__ = '0.3a1'
