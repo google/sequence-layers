@@ -4,7 +4,7 @@
 name = "sequence_layers"
 description = "Sequence Layers neural network layer library from Google."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = {file = "LICENSE"}
 authors = [
     {name = "RJ Skerry-Ryan", email="rjryan@google.com"},

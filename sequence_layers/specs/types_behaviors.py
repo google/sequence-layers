@@ -780,7 +780,7 @@ class StatelessPointwiseFunctorTest(SequenceLayerTest):
 
   def create_layer(
       self, is_mask_required: bool
-  ) -> types_spec.SequenceLayer[Any]:
+  ) -> types_spec.SequenceLayer[Any, Any, Any]:
     """Creates a stateless pointwise functor layer."""
 
     backend_sl = self.sl

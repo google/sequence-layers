@@ -88,14 +88,14 @@ Constants = MutableMapping[str, jt.PyTree[Array]]
 Emits = jt.PyTree[Array]
 
 
-ValuesT = TypeVar('ValuesT', bound=Array, default=Array)
-MaskT = TypeVar('MaskT', bound=Array, default=Array)
-ChannelSpecT = TypeVar('ChannelSpecT', bound=ChannelSpec, default=ChannelSpec)
+ValuesT = TypeVar('ValuesT', bound=Array)
+MaskT = TypeVar('MaskT', bound=Array)
+ChannelSpecT = TypeVar('ChannelSpecT', bound=ChannelSpec)
 
-LengthsT = TypeVar('LengthsT', bound=Array, default=Array)
+LengthsT = TypeVar('LengthsT', bound=Array)
 
-InputT = TypeVar('InputT', bound='Sequence', default='Sequence')
-OutputT = TypeVar('OutputT', bound='Sequence', default='Sequence')
+InputT = TypeVar('InputT', bound='Sequence')
+OutputT = TypeVar('OutputT', bound='Sequence')
 
 # A "self" type alias to allow Sequence and subclasses to return their own
 # Sequence subtype. (Self cannot be parameterized.)
@@ -218,7 +218,7 @@ PaddingModeString = Literal[
 ]
 
 
-class Sequence[ValuesT = Array, MaskT = Array](metaclass=abc.ABCMeta):
+class Sequence[ValuesT, MaskT](metaclass=abc.ABCMeta):
   """A generic sequence container that preserves masking information.
 
   Note: This class can hold non-backend-specific arrays (like `np.ndarray`) to

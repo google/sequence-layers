@@ -11,8 +11,8 @@ from sequence_layers.specs import types as types_spec
 
 
 class Dense[
-    SequenceT: types_spec.Sequence = types_spec.Sequence,
-    ShapeDTypeT: types_spec.ChannelSpec = types_spec.ChannelSpec,
+    SequenceT: types_spec.Sequence,
+    ShapeDTypeT: types_spec.ChannelSpec,
 ](
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
@@ -36,8 +36,8 @@ class Dense[
 
 
 class EinsumDense[
-    SequenceT: types_spec.Sequence = types_spec.Sequence,
-    ShapeDTypeT: types_spec.ChannelSpec = types_spec.ChannelSpec,
+    SequenceT: types_spec.Sequence,
+    ShapeDTypeT: types_spec.ChannelSpec,
 ](
     types_spec.Stateless[SequenceT, SequenceT, ShapeDTypeT],
     metaclass=abc.ABCMeta,
