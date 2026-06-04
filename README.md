@@ -1,11 +1,12 @@
-# Sequence Layers
+# SequenceLayers
 
-A neural network API and library (in Jax, MLX, and TensorFlow 2) for easy
-creation of sequence models that can be executed both layer-by-layer (e.g.
-teacher forced training) and step-by-step (e.g. autoregressive sampling). It
-mitigates many common bugs arising in both streaming and parallel sequence
-processing around padding, resampling, and causality while giving a composable,
-declarative syntax.
+A neural network API and library (in JAX, MLX, TF2) to easily create sequence models that execute both layer-by-layer (e.g.
+teacher-forced training) and step-by-step (e.g. autoregressive sampling). It
+mitigates many common bugs that arise in streaming and parallel sequence
+processing around padding, resampling, and causality, while giving a composable,
+declarative syntax with consistency guarantees.
+
+SequenceLayers is used in various performance-critical settings at Google, particularly in real-time models like [Magenta RealTime 2](https://github.com/magenta/magenta-realtime#magenta-realtime-2) for both JAX and MLX (Apple silicon).
 
 You can read more about the design and features of SequenceLayers in our
 [technical report](https://arxiv.org/abs/2507.23292), or quickly get started
@@ -63,6 +64,3 @@ a citation of our technical report:
   year         = {2025}
 }
 ```
-
-
-# Test push comment
