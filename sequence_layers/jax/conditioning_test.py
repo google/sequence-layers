@@ -19,10 +19,11 @@ import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import conditioning
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import types
-
+from sequence_layers.specs import conditioning_behaviors
 
 IDENTITY = conditioning.Conditioning.Projection.IDENTITY
 LINEAR = conditioning.Conditioning.Projection.LINEAR
@@ -40,7 +41,10 @@ def _float_tensor(values):
   return jnp.asarray(values, dtype=jnp.float32)
 
 
-class ConditioningTest(test_utils.SequenceLayerTest):
+class ConditioningTest(
+    conditioning_behaviors.ConditioningTest,
+    test_utils.SequenceLayerTest,
+):
 
   @parameterized.parameters(
       (IDENTITY, ADD, tuple(), tuple(), tuple()),

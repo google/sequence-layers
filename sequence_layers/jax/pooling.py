@@ -27,6 +27,8 @@ from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 from typing_extensions import override
+from sequence_layers.specs import pooling as spec
+
 
 __all__ = (
     # go/keep-sorted start
@@ -101,7 +103,10 @@ def _reduce_window(
 
 
 class BasePooling(
-    types.PreservesType, types.SequenceLayer, metaclass=abc.ABCMeta
+    types.PreservesType,
+    types.SequenceLayer,
+    spec.BasePooling[types.Sequence, types.ShapeDType],
+    metaclass=abc.ABCMeta,
 ):
   """Shared base logic for pooling layers."""
 
@@ -235,7 +240,7 @@ class BasePooling(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,
@@ -522,11 +527,15 @@ class Pooling3DMixin:
     return (self.config.time_padding, *self.config.spatial_padding)
 
 
-class MinPooling1D(Pooling1DMixin, BaseMinPooling):
+class MinPooling1D(
+    Pooling1DMixin,
+    BaseMinPooling,
+    spec.MinPooling1D[types.Sequence, types.ShapeDType],
+):
   """A 1D min pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MinPooling1D.Config):
     """Config for MinPooling1D."""
 
     pool_size: int
@@ -544,11 +553,15 @@ class MinPooling1D(Pooling1DMixin, BaseMinPooling):
   config: Config
 
 
-class MaxPooling1D(Pooling1DMixin, BaseMaxPooling):
+class MaxPooling1D(
+    Pooling1DMixin,
+    BaseMaxPooling,
+    spec.MaxPooling1D[types.Sequence, types.ShapeDType],
+):
   """A 1D max pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MaxPooling1D.Config):
     """Config for MaxPooling1D."""
 
     pool_size: int
@@ -566,11 +579,15 @@ class MaxPooling1D(Pooling1DMixin, BaseMaxPooling):
   config: Config
 
 
-class AveragePooling1D(Pooling1DMixin, BaseAveragePooling):
+class AveragePooling1D(
+    Pooling1DMixin,
+    BaseAveragePooling,
+    spec.AveragePooling1D[types.Sequence, types.ShapeDType],
+):
   """A 1D average pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.AveragePooling1D.Config):
     """Config for AveragePooling1D."""
 
     pool_size: int
@@ -591,11 +608,15 @@ class AveragePooling1D(Pooling1DMixin, BaseAveragePooling):
   config: Config
 
 
-class MinPooling2D(Pooling2DMixin, BaseMinPooling):
+class MinPooling2D(
+    Pooling2DMixin,
+    BaseMinPooling,
+    spec.MinPooling2D[types.Sequence, types.ShapeDType],
+):
   """A 2D min pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MinPooling2D.Config):
     """Config for MinPooling2D."""
 
     pool_size: int | TypingSequence[int]
@@ -644,11 +665,15 @@ class MinPooling2D(Pooling2DMixin, BaseMinPooling):
   config: Config
 
 
-class MaxPooling2D(Pooling2DMixin, BaseMaxPooling):
+class MaxPooling2D(
+    Pooling2DMixin,
+    BaseMaxPooling,
+    spec.MaxPooling2D[types.Sequence, types.ShapeDType],
+):
   """A 2D max pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MaxPooling2D.Config):
     """Config for MaxPooling2D."""
 
     pool_size: int | TypingSequence[int]
@@ -697,11 +722,15 @@ class MaxPooling2D(Pooling2DMixin, BaseMaxPooling):
   config: Config
 
 
-class AveragePooling2D(Pooling2DMixin, BaseAveragePooling):
+class AveragePooling2D(
+    Pooling2DMixin,
+    BaseAveragePooling,
+    spec.AveragePooling2D[types.Sequence, types.ShapeDType],
+):
   """A 2D average pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.AveragePooling2D.Config):
     """Config for AveragePooling2D."""
 
     pool_size: int | TypingSequence[int]
@@ -754,11 +783,15 @@ class AveragePooling2D(Pooling2DMixin, BaseAveragePooling):
   config: Config
 
 
-class MinPooling3D(Pooling3DMixin, BaseMinPooling):
+class MinPooling3D(
+    Pooling3DMixin,
+    BaseMinPooling,
+    spec.MinPooling3D[types.Sequence, types.ShapeDType],
+):
   """A 3D min pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MinPooling3D.Config):
     """Config for MinPooling3D."""
 
     pool_size: int | TypingSequence[int]
@@ -809,11 +842,15 @@ class MinPooling3D(Pooling3DMixin, BaseMinPooling):
   config: Config
 
 
-class MaxPooling3D(Pooling3DMixin, BaseMaxPooling):
+class MaxPooling3D(
+    Pooling3DMixin,
+    BaseMaxPooling,
+    spec.MaxPooling3D[types.Sequence, types.ShapeDType],
+):
   """A 3D max pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.MaxPooling3D.Config):
     """Config for MaxPooling3D."""
 
     pool_size: int | TypingSequence[int]
@@ -864,11 +901,15 @@ class MaxPooling3D(Pooling3DMixin, BaseMaxPooling):
   config: Config
 
 
-class AveragePooling3D(Pooling3DMixin, BaseAveragePooling):
+class AveragePooling3D(
+    Pooling3DMixin,
+    BaseAveragePooling,
+    spec.AveragePooling3D[types.Sequence, types.ShapeDType],
+):
   """A 3D average pooling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.AveragePooling3D.Config):
     """Config for AveragePooling3D."""
 
     pool_size: int | TypingSequence[int]

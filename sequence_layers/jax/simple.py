@@ -20,7 +20,8 @@ import fractions
 import functools
 import math
 import typing
-from typing import Any, Callable, Sequence as TypingSequence
+from typing import Any, Callable, override
+from typing import Sequence as TypingSequence
 
 from absl import logging
 import einops
@@ -30,10 +31,14 @@ import jax.ad_checkpoint
 import jax.numpy as jnp
 import numpy as np
 from sequence_layers.jax import meta
+
 from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import types
+from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
-from typing_extensions import override
+from sequence_layers.jax.types import MaskT
+from sequence_layers.jax.types import ValuesT
+from sequence_layers.specs import simple as spec
 
 try:
   # JAX v0.10.0 or newer
@@ -111,15 +116,13 @@ __all__ = (
 
 
 def _to_tuple(x: complex | list[Any]) -> complex | tuple[Any, ...]:
-  """Replaces lists in a pytree of complex with tuples."""
   if isinstance(x, list):
-    return tuple(_to_tuple(i) for i in x)
-  else:
-    return x
+    return tuple(_to_tuple(item) for item in x)
+  return x
 
 
 @dataclasses.dataclass(frozen=True)
-class HashableArray:
+class HashableArray(spec.HashableArray):
   """Hashable multidimensional array of tuples."""
 
   data: complex | tuple[Any, ...]
@@ -130,6 +133,7 @@ class HashableArray:
     x = np.asarray(x)
     return HashableArray(_to_tuple(x.tolist()), x.dtype)
 
+  @override
   def to_array(self) -> np.ndarray:
     return np.asarray(self.data, dtype=self.dtype)
 
@@ -160,6 +164,7 @@ class StatelessPointwiseBroadcasting(
           f' with the input  channel shape ({input_shape=}).'
       )
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -173,11 +178,13 @@ class StatelessPointwiseBroadcasting(
     return jnp.broadcast_shapes(input_shape, parameter.shape)
 
 
-class Scale(StatelessPointwiseBroadcasting):
+class Scale(
+    StatelessPointwiseBroadcasting, spec.Scale[types.Sequence, types.ShapeDType]
+):
   """Scales the input by a provided constant or array."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Scale.Config):
     """Config for Scale."""
 
     # The value to scale the input by. May be a numpy array, but must be
@@ -188,18 +195,26 @@ class Scale(StatelessPointwiseBroadcasting):
     name: str | None = None
 
     def __post_init__(self):
-      object.__setattr__(self, 'scale', HashableArray.from_array(self.scale))
+      object.__setattr__(
+          self,
+          'scale',
+          HashableArray.from_array(typing.cast(typing.Any, self.scale)),
+      )
 
+    @override
     def make(self) -> 'Scale':
       return Scale(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def _broadcast_parameter(self) -> np.ndarray:
     return _to_array(self.config.scale)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -237,9 +252,11 @@ class Affine(types.PreservesType, types.Stateless):
           self, 'shape', [] if self.shape is None else self.shape
       )
 
+    @override
     def make(self) -> 'Affine':
       return Affine(self, name=self.name)
 
+  @override
   def setup(self):
     cfg = self.config
     if cfg.use_scale:
@@ -259,6 +276,7 @@ class Affine(types.PreservesType, types.Stateless):
 
   config: Config
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -267,6 +285,7 @@ class Affine(types.PreservesType, types.Stateless):
       constants: types.Constants | None = None,
   ) -> types.Shape:
     del constants
+    assert self.config.shape is not None
 
     # Check that the parameters do not have batch or time dimension.
     if len(input_shape) < len(self.config.shape):
@@ -278,7 +297,9 @@ class Affine(types.PreservesType, types.Stateless):
     # This function throws a value error if the shapes are not broadcastable.
     return jnp.broadcast_shapes(input_shape, self.config.shape)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -298,11 +319,13 @@ class Affine(types.PreservesType, types.Stateless):
     return x
 
 
-class Add(StatelessPointwiseBroadcasting):
+class Add(
+    StatelessPointwiseBroadcasting, spec.Add[types.Sequence, types.ShapeDType]
+):
   """Adds the provided constant or array to the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Add.Config):
     """Config for Add."""
 
     # The value to add to the input. May be a numpy array, but must be
@@ -313,18 +336,26 @@ class Add(StatelessPointwiseBroadcasting):
     name: str | None = None
 
     def __post_init__(self):
-      object.__setattr__(self, 'shift', HashableArray.from_array(self.shift))
+      object.__setattr__(
+          self,
+          'shift',
+          HashableArray.from_array(typing.cast(typing.Any, self.shift)),
+      )
 
+    @override
     def make(self) -> 'Add':
       return Add(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def _broadcast_parameter(self) -> np.ndarray:
     return _to_array(self.config.shift)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -355,19 +386,25 @@ class Maximum(StatelessPointwiseBroadcasting):
 
     def __post_init__(self):
       object.__setattr__(
-          self, 'maximum', HashableArray.from_array(self.maximum)
+          self,
+          'maximum',
+          HashableArray.from_array(typing.cast(typing.Any, self.maximum)),
       )
 
+    @override
     def make(self) -> 'Maximum':
       return Maximum(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def _broadcast_parameter(self) -> np.ndarray:
     return _to_array(self.config.maximum)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -398,19 +435,25 @@ class Mod(StatelessPointwiseBroadcasting):
 
     def __post_init__(self):
       object.__setattr__(
-          self, 'divisor', HashableArray.from_array(self.divisor)
+          self,
+          'divisor',
+          HashableArray.from_array(typing.cast(typing.Any, self.divisor)),
       )
 
+    @override
     def make(self) -> 'Mod':
       return Mod(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def _broadcast_parameter(self) -> np.ndarray:
     return _to_array(self.config.divisor)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -443,19 +486,25 @@ class Minimum(StatelessPointwiseBroadcasting):
 
     def __post_init__(self):
       object.__setattr__(
-          self, 'minimum', HashableArray.from_array(self.minimum)
+          self,
+          'minimum',
+          HashableArray.from_array(typing.cast(typing.Any, self.minimum)),
       )
 
+    @override
     def make(self) -> 'Minimum':
       return Minimum(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def _broadcast_parameter(self) -> np.ndarray:
     return _to_array(self.config.minimum)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -493,6 +542,7 @@ class _ReduceChannels(
       else:
         object.__setattr__(self, 'axis', tuple(self.axis))
 
+    @override
     def make(self) -> '_ReduceChannels':
       raise NotImplementedError()
 
@@ -504,6 +554,7 @@ class _ReduceChannels(
     ...
 
   @property
+  @override
   def supports_step(self) -> bool:
     return True
 
@@ -513,6 +564,7 @@ class _ReduceChannels(
     rank = len(input_shape) + 2
     axis = self.config.axis
     if axis is not None:
+      # pyrefly: ignore[not-iterable]
       axis = [a + rank if a < 0 else a for a in axis]
     else:
       axis = list(range(2, rank))
@@ -524,6 +576,7 @@ class _ReduceChannels(
         )
     return tuple(axis)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -538,7 +591,9 @@ class _ReduceChannels(
     else:
       return tuple(d for i, d in enumerate(input_shape) if i + 2 not in axis)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -560,10 +615,12 @@ class Mean(_ReduceChannels):
   class Config(_ReduceChannels.Config):
     """Config for Mean."""
 
+    @override
     def make(self) -> 'Mean':
       return Mean(self, name=self.name)
 
   @property
+  @override
   def _reduce_fn(self) -> Callable[..., jax.Array]:
     return jnp.mean
 
@@ -575,10 +632,12 @@ class Min(_ReduceChannels):
   class Config(_ReduceChannels.Config):
     """Config for Min."""
 
+    @override
     def make(self) -> 'Min':
       return Min(self, name=self.name)
 
   @property
+  @override
   def _reduce_fn(self) -> Callable[..., jax.Array]:
     return jnp.min
 
@@ -590,10 +649,12 @@ class Max(_ReduceChannels):
   class Config(_ReduceChannels.Config):
     """Config for Max."""
 
+    @override
     def make(self) -> 'Max':
       return Max(self, name=self.name)
 
   @property
+  @override
   def _reduce_fn(self) -> Callable[..., jax.Array]:
     return jnp.max
 
@@ -605,38 +666,50 @@ class Sum(_ReduceChannels):
   class Config(_ReduceChannels.Config):
     """Config for Sum."""
 
+    @override
     def make(self) -> 'Sum':
       return Sum(self, name=self.name)
 
   @property
+  @override
   def _reduce_fn(self) -> Callable[..., jax.Array]:
     return jnp.sum
 
 
-class Abs(types.StatelessPointwiseFunctor):
+class Abs(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Abs[types.Sequence, types.ShapeDType],
+):
   """Absolute value layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Abs.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Abs':
       return Abs(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[ValuesT: jt.ArrayT, MaskT: jt.ArrayT](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+
+    # pyrefly: ignore[bad-argument-type]
     return jnp.abs(values), mask
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -654,31 +727,42 @@ class Abs(types.StatelessPointwiseFunctor):
         return input_dtype
 
 
-class Cast(types.StatelessPointwiseFunctor):
+class Cast(
+    types.StatelessPointwiseFunctor,
+    spec.Cast[types.Sequence, types.ShapeDType],
+):
   """Cast input values to the specified type."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Cast.Config):
     dtype: types.DType
     name: str | None = None
 
+    @override
     def make(self) -> 'Cast':
       return Cast(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[missing-attribute]
     return values.astype(self.config.dtype), mask
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -689,21 +773,30 @@ class Cast(types.StatelessPointwiseFunctor):
     return self.config.dtype
 
 
-class GatedUnit(types.PreservesType, types.Stateless):
+class GatedUnit(
+    types.PreservesType,
+    types.Stateless,
+    spec.GatedUnit[types.Sequence, types.ShapeDType],
+):
   """Computes a generalized Gated Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
-    feature_activation: Callable[[types.ValuesT], types.ValuesT] | None
-    gate_activation: Callable[[types.ValuesT], types.ValuesT] | None
+  class Config(spec.GatedUnit.Config):
+    feature_activation: Callable[[types.ArrayLike], types.ArrayLike] | None = (
+        None
+    )
+    gate_activation: Callable[[types.ArrayLike], types.ArrayLike] | None = None
     name: str | None = None
 
+    @override
     def make(self) -> 'GatedUnit':
       return GatedUnit(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -716,9 +809,11 @@ class GatedUnit(types.PreservesType, types.Stateless):
       feature = self.config.feature_activation(feature)
     if self.config.gate_activation:
       gate = self.config.gate_activation(gate)
+    # pyrefly: ignore[unsupported-operation]
     values = feature * gate
     return types.Sequence(values, x.mask)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -735,29 +830,53 @@ class GatedUnit(types.PreservesType, types.Stateless):
     return tuple(input_shape[:-1]) + (channels // 2,)
 
 
-class GatedLinearUnit(GatedUnit):
+class GatedLinearUnit(
+    GatedUnit, spec.GatedLinearUnit[types.Sequence, types.ShapeDType]
+):
   """Computes a Gated Linear Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.GatedLinearUnit.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'GatedLinearUnit':
       return GatedLinearUnit(
-          GatedUnit.Config(None, jax.nn.sigmoid, name=self.name), name=self.name
+          GatedUnit.Config(
+              None,
+              typing.cast(
+                  typing.Callable[[types.ArrayLike], types.ArrayLike],
+                  jax.nn.sigmoid,
+              ),
+              name=self.name,
+          ),
+          name=self.name,
       )
 
 
-class GatedTanhUnit(GatedUnit):
+class GatedTanhUnit(
+    GatedUnit, spec.GatedTanhUnit[types.Sequence, types.ShapeDType]
+):
   """Computes a Gated Tanh Unit, reducing the input channels by 2x."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.GatedTanhUnit.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'GatedTanhUnit':
       return GatedTanhUnit(
-          GatedUnit.Config(jax.nn.tanh, jax.nn.sigmoid, name=self.name),
+          GatedUnit.Config(
+              typing.cast(
+                  typing.Callable[[types.ArrayLike], types.ArrayLike],
+                  jax.nn.tanh,
+              ),
+              typing.cast(
+                  typing.Callable[[types.ArrayLike], types.ArrayLike],
+                  jax.nn.sigmoid,
+              ),
+              name=self.name,
+          ),
           name=self.name,
       )
 
@@ -770,13 +889,16 @@ class GradientClipping(types.PreservesType, types.StatelessPointwise):
     clip_value: float
     name: str | None = None
 
+    @override
     def make(self) -> 'GradientClipping':
       assert self.clip_value > 0
       return GradientClipping(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -839,17 +961,24 @@ class StopGradient(types.PreservesType, types.StatelessPointwiseFunctor):
     return jax.lax.stop_gradient(values), mask
 
 
-class Identity(types.PreservesType, types.StatelessPointwise):
+class Identity(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.Identity[types.Sequence, types.ShapeDType],
+):
   """Identity pass-through of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Identity.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Identity':
       return Identity(name=self.name)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -870,12 +999,15 @@ class ApplySharding(types.PreservesType, types.StatelessPointwise):
     mask_sharding: types.Sharding | None = None
     name: str | None = None
 
+    @override
     def make(self) -> 'ApplySharding':
       return ApplySharding(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -908,12 +1040,15 @@ class OptimizationBarrier(types.PreservesType, types.StatelessPointwise):
     apply_to_mask: bool = False
     name: str | None = None
 
+    @override
     def make(self) -> 'OptimizationBarrier':
       return OptimizationBarrier(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -932,7 +1067,10 @@ class OptimizationBarrier(types.PreservesType, types.StatelessPointwise):
     return x.apply_masked(shard_values_mask)
 
 
-class Lambda(types.Stateless):
+class Lambda(
+    types.Stateless,
+    spec.Lambda[types.Sequence, types.ShapeDType],
+):
   """A SequenceLayer that wraps a Python lambda function.
 
   The wrapped lambda is assumed to be stateless. The receptive field of the
@@ -941,7 +1079,7 @@ class Lambda(types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Lambda.Config):
     """Configuration for a Lambda layer."""
 
     # If sequence_input is True, a callable that takes an sl.Sequence and
@@ -960,20 +1098,22 @@ class Lambda(types.Stateless):
     # If get_output_shape or get_output_dtype are called, the input_spec to use
     # for type or shape information (respectively). Prefer to use
     # get_output_spec to avoid having to specify this.
-    expected_input_spec: types.ShapeDType | None = None
+    expected_input_spec: types.ChannelSpec | None = None
     # An optional name for the layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'Lambda':
       return Lambda(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def supports_step(self) -> bool:
     return True
 
-  def _validate_input_spec(self, input_spec: types.ShapeDType) -> None:
+  def _validate_input_spec(self, input_spec: types.ChannelSpec) -> None:
     del input_spec
     # TODO(rryan): Re-enable when SoundStream works as expected with this
     # (including the test).
@@ -987,6 +1127,7 @@ class Lambda(types.Stateless):
     #         f' input spec {expected_input_spec=}'
     #     )
 
+  @override
   def get_output_spec(
       self,
       input_spec: types.ChannelSpec,
@@ -995,6 +1136,7 @@ class Lambda(types.Stateless):
   ) -> types.ChannelSpec:
     self._validate_input_spec(input_spec)
     if self.config.sequence_input:
+      # pyrefly: ignore[bad-assignment]
       input_spec = types.Sequence(
           types.ShapeDType(
               (1, 1) + tuple(input_spec.shape),
@@ -1010,6 +1152,7 @@ class Lambda(types.Stateless):
     output_spec = jax.eval_shape(self.config.fn, input_spec)
     return jax.ShapeDtypeStruct(output_spec.shape[2:], output_spec.dtype)
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -1028,6 +1171,7 @@ class Lambda(types.Stateless):
         )
     ).dtype
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -1046,7 +1190,9 @@ class Lambda(types.Stateless):
         )
     ).shape
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1076,36 +1222,48 @@ class Lambda(types.Stateless):
             f' {values.shape=}'
         )
       if self.config.mask_required:
+        # pyrefly: ignore[bad-specialization]
         y = types.Sequence(values, x.mask)
       else:
+        # pyrefly: ignore[bad-specialization]
         y = type(x)(values, x.mask)
 
     return y
 
 
-class CheckpointName(types.PreservesType, types.StatelessPointwiseFunctor):
+class CheckpointName(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.CheckpointName[types.Sequence, types.ShapeDType],
+):
   """Applies a checkpoint name to the sequence values."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.CheckpointName.Config):
     checkpoint_name: str
     name: str | None = None
 
+    @override
     def make(self) -> 'CheckpointName':
       return CheckpointName(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
     values = jax.ad_checkpoint.checkpoint_name(
         values, self.config.checkpoint_name
     )
@@ -1130,21 +1288,27 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
     param_dtype: types.DType = jnp.float32
     name: str | None = None
 
+    @override
     def make(self) -> 'Snake':
       return Snake(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.compact
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
     channel_shape = values.shape[2:]
     alpha_log = self.param(
         'alpha_log',
@@ -1164,81 +1328,117 @@ class Snake(types.PreservesType, types.StatelessPointwiseFunctor):
     else:
       beta = alpha
 
+    # pyrefly: ignore[unsupported-operation]
     values += jnp.square(jnp.sin(values * alpha)) / (beta + 1e-12)
     return values, mask
 
 
-class Tanh(types.PreservesType, types.StatelessPointwiseFunctor):
+class Tanh(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Tanh[types.Sequence, types.ShapeDType],
+):
   """A tanh layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Tanh.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Tanh':
       return Tanh(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.tanh(values), mask
 
 
-class Relu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Relu(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Relu[types.Sequence, types.ShapeDType],
+):
   """A Relu layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Relu.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Relu':
-      return Relu(name=self.name)
+      return Relu(self, name=self.name)
+
+  config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.relu(values), mask
 
 
-class LeakyRelu(types.PreservesType, types.StatelessPointwiseFunctor):
+class LeakyRelu(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.LeakyRelu[types.Sequence, types.ShapeDType],
+):
   """A Leaky Relu layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.LeakyRelu.Config):
     negative_slope: complex = 0.01
     name: str | None = None
 
+    @override
     def make(self) -> 'LeakyRelu':
       return LeakyRelu(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.leaky_relu(values, self.config.negative_slope), mask
 
 
@@ -1251,11 +1451,13 @@ class PRelu(types.PreservesType, types.StatelessPointwiseFunctor):
     param_dtype: types.DType = jnp.float32
     name: str | None = None
 
+    @override
     def make(self) -> 'PRelu':
       return PRelu(self, name=self.name)
 
   config: Config
 
+  @override
   def setup(self):
     self.negative_slope = self.param(
         'negative_slope',
@@ -1265,87 +1467,129 @@ class PRelu(types.PreservesType, types.StatelessPointwiseFunctor):
     )
 
   @property
+  @override
   def mask_required(self) -> bool:
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
 
     return (
         jnp.where(
+            # pyrefly: ignore[unsupported-operation]
             values >= 0,
             values,
+            # pyrefly: ignore[unsupported-operation]
             self.negative_slope.astype(values.dtype) * values,
         ),
         mask,
     )
 
 
-class Elu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Elu(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Elu[types.Sequence, types.ShapeDType],
+):
   """An elu activation layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Elu.Config):
     alpha: complex = 1.0
     name: str | None = None
 
+    @override
     def make(self) -> 'Elu':
       return Elu(self, name=self.name)
 
   config: Config
 
+  @property
+  @override
+  def mask_required(self):
+    return False
+
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.elu(values, self.config.alpha), mask
 
 
-class Exp(types.PreservesType, types.StatelessPointwiseFunctor):
+class Exp(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Exp[types.Sequence, types.ShapeDType],
+):
   """An exp layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Exp.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Exp':
       return Exp(self, name=self.name)
 
   config: Config
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jnp.exp(values), mask
 
 
-class Log(types.PreservesType, types.StatelessPointwiseFunctor):
+class Log(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Log[types.Sequence, types.ShapeDType],
+):
   """A log layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Log.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Log':
       return Log(self, name=self.name)
 
   config: Config
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jnp.log(values), mask
 
 
@@ -1357,140 +1601,199 @@ class Power(types.PreservesType, types.StatelessPointwiseFunctor):
     power: float = 1.0
     name: str | None = None
 
+    @override
     def make(self) -> 'Power':
       return Power(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jnp.power(values, self.config.power), mask
 
 
-class Sigmoid(types.PreservesType, types.StatelessPointwiseFunctor):
+class Sigmoid(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Sigmoid[types.Sequence, types.ShapeDType],
+):
   """A sigmoid layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Sigmoid.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Sigmoid':
       return Sigmoid(self, name=self.name)
 
   config: Config
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.sigmoid(values), mask
 
 
-class Softplus(types.PreservesType, types.StatelessPointwiseFunctor):
+class Softplus(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Softplus[types.Sequence, types.ShapeDType],
+):
   """A softplus layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Softplus.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Softplus':
       return Softplus(self, name=self.name)
 
   config: Config
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.softplus(values), mask
 
 
-class Softmax(types.PreservesType, types.StatelessPointwiseFunctor):
+class Softmax(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Softmax[types.Sequence, types.ShapeDType],
+):
   """A softmax layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Softmax.Config):
     axis: int = -1
     name: str | None = None
 
+    @override
     def make(self) -> 'Softmax':
       return Softmax(self, name=self.name)
 
   config: Config
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
     axis = self.config.axis
     if (axis if axis >= 0 else values.ndim + axis) < 2:
       raise ValueError(
           'The softmax cannot be applied on the batch or time dimension (got'
           f' {axis=} for shape={values.shape})'
       )
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.softmax(values, axis=axis), mask
 
 
-class Swish(types.PreservesType, types.StatelessPointwiseFunctor):
+class Swish(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Swish[types.Sequence, types.ShapeDType],
+):
   """A Swish layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Swish.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'Swish':
       return Swish(name=self.name)
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.swish(values), mask
 
 
-class Gelu(types.PreservesType, types.StatelessPointwiseFunctor):
+class Gelu(
+    types.PreservesType,
+    types.StatelessPointwiseFunctor,
+    spec.Gelu[types.Sequence, types.ShapeDType],
+):
   """A Gaussian Error Linear Unit (GELU) layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Gelu.Config):
     approximate: bool = True
     name: str | None = None
 
+    @override
     def make(self) -> 'Gelu':
       return Gelu(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def mask_required(self):
     return False
 
+  @override
   @nn.nowrap
-  def fn(
+  def fn[
+      ValuesT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+      MaskT: (jax.Array, np.ndarray, jax.ShapeDtypeStruct),
+  ](
       self,
-      values: types.ValuesT,
-      mask: types.MaskT,
-  ) -> tuple[types.ValuesT, types.MaskT]:
+      values: ValuesT,
+      mask: MaskT,
+  ) -> tuple[ValuesT, MaskT]:
+    # pyrefly: ignore[bad-argument-type]
     return jax.nn.gelu(values, approximate=self.config.approximate), mask
 
 
@@ -1518,11 +1821,12 @@ class Slice(types.PreservesType, types.Stateless):
       # Use hashable types for sequences.
       object.__setattr__(self, 'slices', tuple(self.slices))
 
-    def as_slices(self) -> tuple[slice | int | None]:
+    def as_slices(self) -> tuple[slice | int | None, ...]:
       return tuple(
           slice(*s) if isinstance(s, tuple) else s for s in self.slices
       )
 
+    @override
     def make(self) -> 'Slice':
       return Slice(self, name=self.name)
 
@@ -1537,6 +1841,7 @@ class Slice(types.PreservesType, types.Stateless):
           % (input_shape, self.config.slices)
       )
 
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -1547,10 +1852,6 @@ class Slice(types.PreservesType, types.Stateless):
     output_dims = []
     input_index = 0
 
-    # Compute the output shape:
-    # - int: Remove the current input dimension.
-    # - slice: Compute the output dimension size using slice.indices.
-    # - None (tf.newaxis): Add a dimension.
     for slice_i in self.config.slices:
       if isinstance(slice_i, tuple):
         slice_i = slice(*slice_i)
@@ -1572,7 +1873,9 @@ class Slice(types.PreservesType, types.Stateless):
         )
     return tuple(output_dims)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1580,7 +1883,6 @@ class Slice(types.PreservesType, types.Stateless):
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.Sequence:
-    # Slice the batch and time dimensions with [:, :].
     full_slice = (
         slice(None, None, None),
         slice(None, None, None),
@@ -1590,7 +1892,11 @@ class Slice(types.PreservesType, types.Stateless):
     return x.apply_values_masked(lambda v: v.__getitem__(full_slice))
 
 
-class Flatten(types.PreservesType, types.Stateless):
+class Flatten(
+    types.PreservesType,
+    types.Stateless,
+    spec.Flatten[types.Sequence, types.ShapeDType],
+):
   """Flattens the channel dimensions of the input sequence.
 
   An input sequence with shape [batch_size, time, ...] is reshaped to
@@ -1601,9 +1907,11 @@ class Flatten(types.PreservesType, types.Stateless):
   class Config(types.SequenceLayerConfig):
     name: str | None = None
 
+    @override
     def make(self) -> 'Flatten':
       return Flatten(name=self.name)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -1612,9 +1920,11 @@ class Flatten(types.PreservesType, types.Stateless):
       constants: types.Constants | None = None,
   ) -> types.Shape:
     del constants
-    return (np.prod(input_shape),)
+    return (int(np.prod(input_shape)),)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1628,15 +1938,16 @@ class Flatten(types.PreservesType, types.Stateless):
     return x.apply_values_masked(jnp.reshape, [batch_size, time, num_elements])
 
 
-class OneHot(types.Stateless):
+class OneHot(types.Stateless, spec.OneHot[types.Sequence, types.ShapeDType]):
   """Computes one-hot vector of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.OneHot.Config):
     depth: int
     compute_dtype: types.DType = jnp.float32
     name: str | None = None
 
+    @override
     def make(self) -> 'OneHot':
       return OneHot(self, name=self.name)
 
@@ -1650,6 +1961,7 @@ class OneHot(types.Stateless):
           f' {dtype}'
       )
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -1659,6 +1971,7 @@ class OneHot(types.Stateless):
   ) -> types.Shape:
     return tuple(input_shape) + (self.config.depth,)
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -1669,7 +1982,9 @@ class OneHot(types.Stateless):
     self._validate(input_dtype)
     return self.config.compute_dtype
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1688,11 +2003,13 @@ class OneHot(types.Stateless):
     )
 
 
-class Embedding(types.Stateless):
+class Embedding(
+    types.Stateless, spec.Embedding[types.Sequence, types.ShapeDType]
+):
   """Computes embeddings of integer input codes."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Embedding.Config):
     """Config for Embedding."""
 
     # Dimensionality of the embedded values.
@@ -1712,11 +2029,13 @@ class Embedding(types.Stateless):
     name: str | None = None
     embedding_param_name: str = 'embedding'
 
+    @override
     def make(self) -> 'Embedding':
       return Embedding(self, name=self.name)
 
   config: Config
 
+  @override
   def setup(self):
     self.embedding = self.param(
         self.config.embedding_param_name,
@@ -1737,6 +2056,7 @@ class Embedding(types.Stateless):
           f' {dtype}'
       )
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -1744,8 +2064,10 @@ class Embedding(types.Stateless):
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
+    del constants
     return tuple(input_shape) + (self.config.dimension,)
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -1758,7 +2080,9 @@ class Embedding(types.Stateless):
       return self.config.param_dtype
     return self.config.compute_dtype
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1858,6 +2182,7 @@ class EmbeddingTranspose(types.Stateless):
       *,
       constants: types.Constants | None = None,
   ) -> types.DType:
+    assert self.embedding.config is not None
     return utils.get_promoted_dtype(
         input_dtype,
         self.config.param_dtype or self.embedding.config.param_dtype,
@@ -1872,6 +2197,8 @@ class EmbeddingTranspose(types.Stateless):
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
+    del constants
+    assert self.config.embedding.config is not None
     if (
         not input_shape
         or input_shape[-1] != self.config.embedding.config.dimension
@@ -1885,14 +2212,16 @@ class EmbeddingTranspose(types.Stateless):
   @override
   @types.check_layer
   @nn.compact
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
+      *,
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.Sequence:
     del training, constants
-
+    assert self.embedding.config is not None
     if self.config.use_bias:
       bias_init = utils.shard_initializer(
           self.config.bias_init, self.config.bias_sharding
@@ -1917,11 +2246,15 @@ class EmbeddingTranspose(types.Stateless):
     return ret
 
 
-class ExpandDims(types.PreservesType, types.Stateless):
+class ExpandDims(
+    types.PreservesType,
+    types.Stateless,
+    spec.ExpandDims[types.Sequence, types.ShapeDType],
+):
   """Applies jnp.expand_dims to the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.ExpandDims.Config):
     """Configuration for ExpandDims."""
 
     # The axis or axes in the channel shape to expand dims on.
@@ -1935,6 +2268,7 @@ class ExpandDims(types.PreservesType, types.Stateless):
       if not isinstance(self.axis, int):
         object.__setattr__(self, 'axis', tuple(self.axis))
 
+    @override
     def make(self) -> 'ExpandDims':
       return ExpandDims(self, name=self.name)
 
@@ -1961,6 +2295,7 @@ class ExpandDims(types.PreservesType, types.Stateless):
     return dims
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -1975,6 +2310,8 @@ class ExpandDims(types.PreservesType, types.Stateless):
     return tuple(output_shape)
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -1987,11 +2324,15 @@ class ExpandDims(types.PreservesType, types.Stateless):
     return x.apply_values_masked(jnp.expand_dims, dims)
 
 
-class Reshape(types.PreservesType, types.Stateless):
+class Reshape(
+    types.PreservesType,
+    types.Stateless,
+    spec.Reshape[types.Sequence, types.ShapeDType],
+):
   """Reshapes the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Reshape.Config):
     """Configuration for Reshape."""
 
     # The new shape of the channels dimension. Can't contain -1, and must have
@@ -2004,6 +2345,7 @@ class Reshape(types.PreservesType, types.Stateless):
       # Use hashable types for sequences.
       object.__setattr__(self, 'output_shape', tuple(self.output_shape))
 
+    @override
     def make(self) -> 'Reshape':
       return Reshape(self, name=self.name)
 
@@ -2019,6 +2361,7 @@ class Reshape(types.PreservesType, types.Stateless):
       )
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -2030,6 +2373,8 @@ class Reshape(types.PreservesType, types.Stateless):
     return tuple(self.config.output_shape)
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2077,6 +2422,7 @@ class GlobalReshape(types.PreservesType, types.Stateless):
       # Use hashable types for sequences.
       object.__setattr__(self, 'output_shape', tuple(self.output_shape))
 
+    @override
     def make(self) -> 'GlobalReshape':
       return GlobalReshape(self, name=self.name)
 
@@ -2092,6 +2438,7 @@ class GlobalReshape(types.PreservesType, types.Stateless):
       )
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -2102,14 +2449,18 @@ class GlobalReshape(types.PreservesType, types.Stateless):
     return tuple(self.config.output_shape[1:])
 
   @property
+  @override
   def supports_step(self) -> bool:
     return False
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     return {0: (-np.inf, np.inf)}
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2137,11 +2488,15 @@ class GlobalReshape(types.PreservesType, types.Stateless):
     return types.Sequence(out, mask=mask)
 
 
-class Transpose(types.PreservesType, types.Stateless):
+class Transpose(
+    types.PreservesType,
+    types.Stateless,
+    spec.Transpose[types.Sequence, types.ShapeDType],
+):
   """Transposes (i.e., permutes) the channels dimension of the input."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Transpose.Config):
     """Configuration for Transpose.
 
     The usage is the same as that of jax.numpy.transpose.
@@ -2167,6 +2522,7 @@ class Transpose(types.PreservesType, types.Stateless):
       if self.axes is not None:
         object.__setattr__(self, 'axes', tuple(self.axes))
 
+    @override
     def make(self) -> 'Transpose':
 
       if self.axes is not None and (0 in self.axes or 1 in self.axes):
@@ -2192,6 +2548,7 @@ class Transpose(types.PreservesType, types.Stateless):
 
     return tuple(axes)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -2203,7 +2560,9 @@ class Transpose(types.PreservesType, types.Stateless):
     axes = self._validate_axes(input_shape)
     return tuple(input_shape[a - 2] for a in axes)
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2219,23 +2578,28 @@ class SwapAxes(Transpose):
   """Swap two channel axes."""
 
   @dataclasses.dataclass(frozen=True)
+  # pyrefly: ignore[bad-override]
   class Config(types.SequenceLayerConfig):
     axis1: int
     axis2: int
     name: str | None = None
 
+    @override
     def make(self) -> 'SwapAxes':
 
       axes = [self.axis1, self.axis2]
       if 0 in axes or 1 in axes:
         raise ValueError("Can't swap batch or time dimension.")
 
+      # pyrefly: ignore[missing-argument]
       return SwapAxes(
-          Transpose.Config(axes=axes, name=self.name), name=self.name
+          typing.cast(typing.Any, Transpose.Config(axes=axes, name=self.name)),
+          name=self.name,
       )
 
   @override
   def _validate_axes(self, input_shape: types.ShapeLike) -> tuple[int, ...]:
+    assert self.config.axes is not None
     ndim = 2 + len(input_shape)  # ndim including batch and time.
     axes = [a if a >= 0 else ndim + a for a in self.config.axes]
     if 0 in axes or 1 in axes:
@@ -2254,7 +2618,7 @@ class MoveAxis(Transpose):
   """Moves one or several channel axes to new locations."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig):  # pyrefly: ignore[bad-override]
     """Config of MoveAxis layer."""
 
     source: int | TypingSequence[int]
@@ -2266,24 +2630,22 @@ class MoveAxis(Transpose):
       object.__setattr__(self, 'source', to_tuple(self.source))
       object.__setattr__(self, 'destination', to_tuple(self.destination))
 
+    @override
     def make(self) -> 'MoveAxis':
-
-      if (
-          0 in self.source
-          or 1 in self.source
-          or 0 in self.destination
-          or 1 in self.destination
-      ):
+      source = typing.cast(TypingSequence[int], self.source)
+      destination = typing.cast(TypingSequence[int], self.destination)
+      if 0 in source or 1 in source or 0 in destination or 1 in destination:
         raise ValueError("Can't move batch or time dimension.")
 
-      if len(self.source) != len(self.destination):
+      if len(source) != len(destination):
         raise ValueError(
-            f'Inconsistent number of elements: {len(self.source)} vs'
-            f' {len(self.destination)}'
+            f'Inconsistent number of elements: {len(source)} vs'
+            f' {len(destination)}'
         )
 
       return MoveAxis(self, name=self.name)
 
+  # pyrefly: ignore[bad-override]
   config: Config
 
   @override
@@ -2311,12 +2673,15 @@ class Emit(types.PreservesType, types.PreservesShape, types.StatelessEmitting):
   class Config(types.SequenceLayerConfig):
     name: str | None = None
 
+    @override
     def make(self) -> 'Emit':
       return Emit(self, name=self.name)
 
   config: Config
 
   @types.check_layer_with_emits
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer_with_emits(
       self,
       x: types.Sequence,
@@ -2337,12 +2702,15 @@ class NamedEmit(
     emit_name: str
     name: str | None = None
 
+    @override
     def make(self) -> 'NamedEmit':
       return NamedEmit(self, name=self.name)
 
   config: Config
 
   @types.check_layer_with_emits
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer_with_emits(
       self,
       x: types.Sequence,
@@ -2351,24 +2719,32 @@ class NamedEmit(
       constants: types.Constants | None = None,
   ) -> tuple[types.Sequence, types.Emits]:
     return x, {self.config.emit_name: x}
+    return x, {self.config.emit_name: x}
 
 
-class Dropout(types.PreservesType, types.StatelessPointwise):
+class Dropout(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.Dropout[types.Sequence, types.ShapeDType],
+):
   """Computes dropout using Flax RNGs."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Dropout.Config):
     rate: float = 0.0
     broadcast_dims: TypingSequence[int] = ()
     rng_collection: str = 'dropout'
     name: str | None = None
 
+    @override
     def make(self) -> 'Dropout':
       return Dropout(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_step
+  # pyrefly: ignore[missing-override-decorator]
   def step(
       self,
       x: types.Sequence,
@@ -2434,7 +2810,9 @@ class Dropout(types.PreservesType, types.StatelessPointwise):
     return x
 
   @nn.compact
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2534,34 +2912,54 @@ class AddNoise(types.PreservesType, types.StatelessPointwise):
     return x.apply_values(lambda v: v + noise)
 
 
-class Downsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
+class Downsample1D(
+    types.PreservesType,
+    types.Stateless,
+    spec.Downsample1D[types.Sequence, types.ShapeDType],
+):
   """A 1D downsampling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Downsample1D.Config):
     """Configuration for Downsample1D."""
 
     rate: int
     name: str | None = None
 
+    @override
     def make(self) -> 'Downsample1D':
       return Downsample1D(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def block_size(self) -> int:
     return self.config.rate
 
   @property
+  @override
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(1, self.config.rate)
 
   @property
+  @override
   def input_latency(self) -> int:
     return self.config.rate - 1
 
+  @override
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    return tuple(input_shape)
+
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2576,30 +2974,49 @@ class Downsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
     )
 
 
-class Upsample1D(types.PreservesType, types.PreservesShape, types.Stateless):
+class Upsample1D(
+    types.PreservesType,
+    types.Stateless,
+    spec.Upsample1D[types.Sequence, types.ShapeDType],
+):
   """A 1D upsampling layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Upsample1D.Config):
     """Configuration for Upsample1D."""
 
     rate: int
     name: str | None = None
 
+    @override
     def make(self) -> 'Upsample1D':
       return Upsample1D(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def output_ratio(self) -> fractions.Fraction:
     return fractions.Fraction(self.config.rate)
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
     return {s: (0, 0) for s in range(self.config.rate)}
 
+  @override
+  @nn.nowrap
+  def get_output_shape(
+      self,
+      input_shape: types.ShapeLike,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.Shape:
+    return tuple(input_shape)
+
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2628,26 +3045,33 @@ class Upsample2D(types.PreservesType, types.Stateless):
     def __post_init__(self):
       object.__setattr__(self, 'rate', utils.normalize_2tuple(self.rate))
 
+    @override
     def make(self) -> 'Upsample2D':
       return Upsample2D(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def output_ratio(self) -> fractions.Fraction:
-    return fractions.Fraction(self.config.rate[0])
+    rate = typing.cast(TypingSequence[int], self.config.rate)
+    return fractions.Fraction(rate[0])
 
   @property
+  @override
   def receptive_field_per_step(self) -> dict[int, types.ReceptiveField]:
-    return {s: (0, 0) for s in range(self.config.rate[0])}
+    rate = typing.cast(TypingSequence[int], self.config.rate)
+    return {s: (0, 0) for s in range(rate[0])}
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
       *,
       constants: types.Constants | None = None,
   ) -> types.Shape:
+    rate = typing.cast(TypingSequence[int], self.config.rate)
     if len(input_shape) != 2:
       raise ValueError(
           'Upsample2D requires rank 4 input got:'
@@ -2655,11 +3079,13 @@ class Upsample2D(types.PreservesType, types.Stateless):
       )
 
     return (
-        input_shape[0] * self.config.rate[1],
+        input_shape[0] * rate[1],
         input_shape[1],
     )
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2667,28 +3093,36 @@ class Upsample2D(types.PreservesType, types.Stateless):
       training: bool,
       constants: types.Constants | None = None,
   ) -> types.Sequence:
-    values = jnp.repeat(x.values, self.config.rate[0], axis=1)
-    values = jnp.repeat(values, self.config.rate[1], axis=2)
-    mask = jnp.repeat(x.mask, self.config.rate[0], axis=1)
+    rate = typing.cast(TypingSequence[int], self.config.rate)
+    values = jnp.repeat(x.values, rate[0], axis=1)
+    values = jnp.repeat(values, rate[1], axis=2)
+    mask = jnp.repeat(x.mask, rate[0], axis=1)
 
     # Upsampling does not change the masked state, so use the type of x to
     # repack the upsampled values and mask.
     return type(x)(values, mask)
 
 
-class MaskInvalid(types.PreservesType, types.StatelessPointwise):
+class MaskInvalid(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.MaskInvalid[types.Sequence, types.ShapeDType],
+):
   """Masks the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.MaskInvalid.Config):
     name: str | None = None
 
+    @override
     def make(self) -> 'MaskInvalid':
       return MaskInvalid(self, name=self.name)
 
   config: Config
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2700,11 +3134,15 @@ class MaskInvalid(types.PreservesType, types.StatelessPointwise):
     return x.mask_invalid()
 
 
-class Logging(types.PreservesType, types.StatelessPointwise):
+class Logging(
+    types.PreservesType,
+    types.StatelessPointwise,
+    spec.Logging[types.Sequence, types.ShapeDType],
+):
   """Layer that logs input arguments to get_initial_state, step, and layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Logging.Config):
     """Configuration for the Logging layer."""
 
     prefix: str = ''
@@ -2725,6 +3163,7 @@ class Logging(types.PreservesType, types.StatelessPointwise):
         '\ttraining={training}\n\tconstants={constants}'
     )
 
+    @override
     def make(self) -> 'Logging':
       return Logging(self)
 
@@ -2758,7 +3197,9 @@ class Logging(types.PreservesType, types.StatelessPointwise):
       kwargs = jax.tree.map(arrays_to_specs, kwargs)
       logging.info(format_str.format(prefix=self.config.prefix, **kwargs))
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2774,6 +3215,7 @@ class Logging(types.PreservesType, types.StatelessPointwise):
     )
     return x
 
+  @override
   def get_initial_state(
       self,
       batch_size: int,
@@ -2794,6 +3236,8 @@ class Logging(types.PreservesType, types.StatelessPointwise):
     )
 
   @types.check_step
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def step(
       self,
       x: types.Sequence,
@@ -2819,12 +3263,15 @@ class Argmax(types.Stateless):
   class Config(types.SequenceLayerConfig):
     name: str | None = None
 
+    @override
     def make(self) -> 'Argmax':
       return Argmax(self, name=self.name)
 
   config: Config
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2834,6 +3281,7 @@ class Argmax(types.Stateless):
   ) -> types.Sequence:
     return x.apply_values(jnp.argmax, axis=-1)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -2843,6 +3291,7 @@ class Argmax(types.Stateless):
   ) -> types.Shape:
     return tuple(input_shape[:-1])
 
+  @override
   @nn.nowrap
   def get_output_dtype(
       self,
@@ -2880,12 +3329,14 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
             f'`batch` and `time` are reserved axes labels (got {self.pattern}).'
         )
 
+    @override
     def make(self) -> 'EinopsRearrange':
       return EinopsRearrange(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def supports_step(self) -> bool:
     return True
 
@@ -2896,6 +3347,8 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
     return functools.partial(einops.rearrange, pattern=pattern, **axes_lengths)
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -2908,6 +3361,7 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
     return x.apply_values(rearrange_fn)
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -2916,7 +3370,9 @@ class EinopsRearrange(types.PreservesType, types.Stateless):
   ) -> types.Shape:
     del constants
     rearrange_fn = self._get_rearrange_fn()
-    output = jax.eval_shape(rearrange_fn, jnp.zeros((1, 1) + input_shape))
+    output = jax.eval_shape(
+        rearrange_fn, jnp.zeros((1, 1) + tuple(input_shape))
+    )
     return tuple(output.shape[2:])
 
 
@@ -2951,18 +3407,21 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
             f'`batch` is a reserved axes labels (got {self.pattern}).'
         )
 
+    @override
     def make(self) -> 'GlobalEinopsRearrange':
       return GlobalEinopsRearrange(self, name=self.name)
 
   config: Config
 
   @property
+  @override
   def supports_step(self) -> bool:
     return False
 
   @property
-  def receptive_field(self) -> tuple[int | None, int | None]:
-    return (-np.inf, np.inf)
+  @override
+  def receptive_field(self) -> types.ReceptiveField:
+    return typing.cast(types.ReceptiveField, (-np.inf, np.inf))
 
   def _get_rearrange_fn(self) -> Callable[[jax.Array], jax.Array]:
     before, after = self.config.pattern.split('->')
@@ -2971,6 +3430,8 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
     return functools.partial(einops.rearrange, pattern=pattern, **axes_lengths)
 
   @types.check_layer
+  @override
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,
@@ -3000,6 +3461,7 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
     return types.Sequence(values, mask)
 
   @nn.nowrap
+  @override
   def get_output_shape(
       self,
       input_shape: types.ShapeLike,
@@ -3013,12 +3475,16 @@ class GlobalEinopsRearrange(types.PreservesType, types.Stateless):
     else:
       time_dim = 1
     output = jax.eval_shape(
-        rearrange_fn, jnp.zeros((1, time_dim) + input_shape)
+        rearrange_fn, jnp.zeros((1, time_dim) + tuple(input_shape))
     )
     return tuple(output.shape[2:])
 
 
-class Squeeze(types.PreservesType, types.Stateless):
+class Squeeze(
+    types.PreservesType,
+    types.Stateless,
+    spec.Squeeze[types.Sequence, types.ShapeDType],
+):
   """This layer squeezes all the depth dimensions of the input.
 
   I.e. [batch_size, time, *depth_dims -> [batch_size, time] (where all the
@@ -3026,13 +3492,14 @@ class Squeeze(types.PreservesType, types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(spec.Squeeze.Config):
     """Config of Squeeze."""
 
     axis: int | TypingSequence[int] | None = None
 
     name: str | None = None
 
+    @override
     def make(self) -> 'Squeeze':
 
       axis = self.axis
@@ -3057,6 +3524,7 @@ class Squeeze(types.PreservesType, types.Stateless):
 
     return tuple(axis)
 
+  @override
   @nn.nowrap
   def get_output_shape(
       self,
@@ -3071,7 +3539,9 @@ class Squeeze(types.PreservesType, types.Stateless):
         types.ShapeDType((0, 1) + tuple(input_shape), jnp.float32),
     ).shape[2:]
 
+  @override
   @types.check_layer
+  # pyrefly: ignore[missing-override-decorator]
   def layer(
       self,
       x: types.Sequence,

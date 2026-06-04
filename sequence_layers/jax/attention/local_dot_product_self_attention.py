@@ -22,13 +22,20 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
+from sequence_layers.specs import attention as attention_spec
 
 
-class LocalDotProductSelfAttention(types.Emitting):
+class LocalDotProductSelfAttention(
+    types.Emitting,
+    attention_spec.LocalDotProductSelfAttention[types.Sequence, types.ChannelSpec],
+):
   """A multi-headed dot-product self attention layer."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.LocalDotProductSelfAttention.Config,
+  ):
     """Configuration for LocalDotProductSelfAttention."""
 
     # The number of attention heads.

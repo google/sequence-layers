@@ -21,9 +21,13 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
+from sequence_layers.specs import attention as attention_spec
 
 
-class StreamingDotProductAttention(types.Emitting):
+class StreamingDotProductAttention(
+    types.Emitting,
+    attention_spec.StreamingDotProductAttention[types.Sequence, types.ChannelSpec],
+):
   """A multi-headed streaming dot-product attention layer.
 
   Unlike most SequenceLayers, this cross-attention layer assumes that when using
@@ -34,7 +38,10 @@ class StreamingDotProductAttention(types.Emitting):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.StreamingDotProductAttention.Config,
+  ):
     """Configuration for StreamingDotProductAttention."""
 
     # The key to lookup source sequence from constants dictionary.
@@ -137,6 +144,8 @@ class StreamingDotProductAttention(types.Emitting):
     # accumulate the logits in float32 instead of simply upcasting the output of
     # the logits einsum to float32.
     experimental_accumulate_logits_in_float32: bool = False
+    # Whether to emit attention weights.
+    emit_attention_weights: bool = False
     # An optional name for the layer.
     name: str | None = None
 

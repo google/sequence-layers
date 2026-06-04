@@ -14,6 +14,7 @@
 """Dot product attention."""
 
 import dataclasses
+from collections.abc import Sequence as TypingSequence
 from flax import linen as nn
 import jax.numpy as jnp
 import jaxtyping
@@ -22,13 +23,20 @@ from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
 from sequence_layers.jax.attention import common
+from sequence_layers.specs import attention as attention_spec
 
 
-class DotProductAttention(types.Emitting):
+class DotProductAttention(
+    types.Emitting,
+    attention_spec.DotProductAttention[types.Sequence, types.ChannelSpec],
+):
   """Dot product attention."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(
+      types.SequenceLayerConfig,
+      attention_spec.DotProductAttention.Config,
+  ):
     """Configuration for DotProductAttention."""
 
     # The key to lookup source sequence from constants dictionary.
@@ -122,6 +130,8 @@ class DotProductAttention(types.Emitting):
     # the encoder is bidirectional and therefore needs to be re-computed after
     # each block.
     recompute_kv_per_step: bool = False
+    # Whether to emit attention weights.
+    emit_attention_weights: bool = False
     # An optional name for the layer.
     name: str | None = None
 

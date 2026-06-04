@@ -18,6 +18,8 @@ import dataclasses
 import functools
 from typing import Any, Callable, Mapping, Protocol
 
+from sequence_layers.specs import attention as attention_spec
+
 from flax import linen as nn
 from flax import struct
 import jax
@@ -31,6 +33,7 @@ from sequence_layers.jax import simple
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
+
 
 
 # A negative enough value such that it underflows to a hard zero in softmax.
@@ -157,8 +160,7 @@ def get_source(
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryKeyValueProjectionConfig:
-  """Configuration for QueryKeyValueProjection."""
+class QueryKeyValueProjectionConfig(attention_spec.QueryKeyValueProjectionConfig):
 
   # Optional callable that returns a jnp.einsum-compatible function to use
   # instead of jnp.einsum for the query, key and value projections.
@@ -290,7 +292,10 @@ class CombinedQueryKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class CombinedQueryKeyValueProjection(QueryKeyValueProjectionConfig):
+class CombinedQueryKeyValueProjection(
+    attention_spec.CombinedQueryKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use a single projection matrix for query/key/value projection.
 
   * Incompatible with Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -432,7 +437,10 @@ class SeparateQueryKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class SeparateQueryKeyValueProjection(QueryKeyValueProjectionConfig):
+class SeparateQueryKeyValueProjection(
+    attention_spec.SeparateQueryKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate projection matrices for query/key/value projection.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -563,7 +571,10 @@ class QueryAndKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryAndKeyValueProjection(QueryKeyValueProjectionConfig):
+class QueryAndKeyValueProjection(
+    attention_spec.QueryAndKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate query and key/value projection matrices.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -695,7 +706,10 @@ class QueryAndSharedKeyValueProjectionModule(InputProjectionModule):
 
 
 @dataclasses.dataclass(frozen=True)
-class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
+class QueryAndSharedKeyValueProjection(
+    attention_spec.QueryAndSharedKeyValueProjection,
+    QueryKeyValueProjectionConfig,
+):
   """Use separate query and shared key/value projection matrices.
 
   * Supports Grouped Query Attention (num_query_heads != num_kv_heads).
@@ -749,6 +763,8 @@ class QueryAndSharedKeyValueProjection(QueryKeyValueProjectionConfig):
         allow_combined_qkv=allow_combined_qkv,
         name=name,
     )
+
+
 
 
 class SelfAttentionEmits(struct.PyTreeNode):

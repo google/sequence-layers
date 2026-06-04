@@ -17,15 +17,17 @@ import abc
 import dataclasses
 import fractions
 import math
-from typing import Callable, Literal
+from typing import Callable, Literal, override
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import convolution
 from sequence_layers.jax import signal
 from sequence_layers.jax import types
+from sequence_layers.specs import dsp as spec
 
 __all__ = (
     # go/keep-sorted start
@@ -49,11 +51,11 @@ _DEFAULT_FFT_PADDING = 'right'
 FFTPaddingString = Literal['center', 'right']
 
 
-class Frame(types.PreservesType, types.SequenceLayer):
+class Frame(types.PreservesType, types.SequenceLayer, spec.Frame):
   """Produce a sequence of overlapping frames of the input sequence."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Frame.Config):
     """Config for Frame layer."""
 
     # The length of frames to generate.
@@ -84,6 +86,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
             f'{self.padding=} must sum to {self.frame_length - 1=}'
         )
 
+    @override
     def make(self) -> 'Frame':
       return Frame(self, name=self.name)
 
@@ -340,7 +343,7 @@ class Frame(types.PreservesType, types.SequenceLayer):
     return result_type(values, mask)
 
 
-class OverlapAdd(types.PreservesType, types.SequenceLayer):
+class OverlapAdd(types.PreservesType, types.SequenceLayer, spec.OverlapAdd):
   """Overlap adds windows of [b, t, frame_length, ...].
 
   For a [b, ti, frame_length, ...] input signal, the resulting sequence has
@@ -353,7 +356,7 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.OverlapAdd.Config):
     """Config for OverlapAdd layer."""
 
     # The length of frames to overlap-add.
@@ -381,6 +384,7 @@ class OverlapAdd(types.PreservesType, types.SequenceLayer):
       ):
         raise ValueError(f'Unsupported padding mode: {self.padding}')
 
+    @override
     def make(self) -> 'OverlapAdd':
       return OverlapAdd(self, name=self.name)
 
@@ -705,16 +709,17 @@ class FFTBase(types.Stateless, metaclass=abc.ABCMeta):
     return fft_fn(x, axis=axis)
 
 
-class FFT(types.PreservesType, FFTBase):
+class FFT(FFTBase, spec.FFT):
   """A layer that applies an FFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.FFT.Config):
     fft_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
 
+    @override
     def make(self) -> 'FFT':
       return FFT(self, name=self.name)
 
@@ -732,6 +737,21 @@ class FFT(types.PreservesType, FFTBase):
   def _padding(self) -> str:
     return self.config.padding
 
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    match input_dtype:
+      case jnp.bfloat16 | jnp.float16 | jnp.float32 | jnp.complex64:
+        return jnp.complex64
+      case jnp.float64 | jnp.complex128:
+        return jnp.complex128
+      case _:
+        raise ValueError(f'Unsupported input dtype: {input_dtype}')
+
   def _get_output_length(self, input_size: int) -> int:
     return self.config.fft_length or input_size
 
@@ -746,17 +766,18 @@ class FFT(types.PreservesType, FFTBase):
     return fft_fn
 
 
-class IFFT(types.PreservesType, FFTBase):
+class IFFT(FFTBase, spec.IFFT):
   """A layer that applies an IFFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.IFFT.Config):
     fft_length: int | None = None
     frame_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
 
+    @override
     def make(self) -> 'IFFT':
       return IFFT(self, name=self.name)
 
@@ -774,6 +795,21 @@ class IFFT(types.PreservesType, FFTBase):
   def _padding(self) -> str:
     return self.config.padding
 
+  @nn.nowrap
+  def get_output_dtype(
+      self,
+      input_dtype: types.DType,
+      *,
+      constants: types.Constants | None = None,
+  ) -> types.DType:
+    match input_dtype:
+      case jnp.bfloat16 | jnp.float16 | jnp.float32 | jnp.complex64:
+        return jnp.complex64
+      case jnp.float64 | jnp.complex128:
+        return jnp.complex128
+      case _:
+        raise ValueError(f'Unsupported input dtype: {input_dtype}')
+
   def _get_output_length(self, input_size: int) -> int:
     return self.config.frame_length or input_size
 
@@ -788,16 +824,17 @@ class IFFT(types.PreservesType, FFTBase):
     return ifft_fn
 
 
-class RFFT(FFTBase):
+class RFFT(FFTBase, spec.RFFT):
   """A layer that applies an RFFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.RFFT.Config):
     fft_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
 
+    @override
     def make(self) -> 'RFFT':
       return RFFT(self, name=self.name)
 
@@ -854,17 +891,18 @@ class RFFT(FFTBase):
         raise ValueError(f'Unsupported input dtype: {input_dtype}')
 
 
-class IRFFT(FFTBase):
+class IRFFT(FFTBase, spec.IRFFT):
   """A layer that applies an IRFFT to the channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.IRFFT.Config):
     fft_length: int | None = None
     frame_length: int | None = None
     axis: int = -1
     padding: FFTPaddingString = _DEFAULT_FFT_PADDING
     name: str | None = None
 
+    @override
     def make(self) -> 'IRFFT':
       return IRFFT(self, name=self.name)
 
@@ -893,9 +931,9 @@ class IRFFT(FFTBase):
       constants: types.Constants | None = None,
   ) -> types.DType:
     match input_dtype:
-      case jnp.complex64:
+      case jnp.complex64 | jnp.bfloat16 | jnp.float16 | jnp.float32:
         return jnp.float32
-      case jnp.complex128:
+      case jnp.complex128 | jnp.float64:
         return jnp.float64
       case _:
         raise ValueError(f'Unsupported input dtype: {input_dtype}')
@@ -921,7 +959,7 @@ class IRFFT(FFTBase):
     return irfft_fn
 
 
-class STFT(types.SequenceLayer):
+class STFT(types.SequenceLayer, spec.STFT):
   """Computes the Short-time Fourier Transform of input signals.
 
   When used with 'right' FFT padding, equivalent to tf.signal.stft.
@@ -933,7 +971,7 @@ class STFT(types.SequenceLayer):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.STFT.Config):
     """Config for STFT layer."""
 
     # The frame length of the STFT.
@@ -965,6 +1003,7 @@ class STFT(types.SequenceLayer):
           self, 'time_padding', types.validate_padding(self.time_padding)
       )
 
+    @override
     def make(self) -> 'STFT':
       return STFT(self, name=self.name)
 
@@ -1128,7 +1167,7 @@ class STFT(types.SequenceLayer):
     return dft
 
 
-class InverseSTFT(types.SequenceLayer):
+class InverseSTFT(types.SequenceLayer, spec.InverseSTFT):
   """Computes the inverse Short-time Fourier Transform of input signals.
 
   When used with 'right' FFT padding, equivalent to tf.signal.inverse_stft.
@@ -1140,7 +1179,7 @@ class InverseSTFT(types.SequenceLayer):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.InverseSTFT.Config):
     """Config for the InverseSTFT layer."""
 
     # The frame length of the inverse STFT.
@@ -1169,6 +1208,7 @@ class InverseSTFT(types.SequenceLayer):
           self, 'time_padding', types.validate_padding(self.time_padding)
       )
 
+    @override
     def make(self) -> 'InverseSTFT':
       return InverseSTFT(self, name=self.name)
 
@@ -1388,7 +1428,9 @@ class InverseSTFT(types.SequenceLayer):
     return ola
 
 
-class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
+class LinearToMelSpectrogram(
+    types.PreservesType, types.Stateless, spec.LinearToMelSpectrogram
+):
   """Converts linear-scale spectrogram to a mel-scale spectrogram.
 
   The spectrogram magnitudes should be uncompressed, *not* log compressed.
@@ -1397,7 +1439,7 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.LinearToMelSpectrogram.Config):
     """Config for LinearToMelSpectrogram layer."""
 
     # The number of mel bins to compute.
@@ -1412,6 +1454,7 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
     # An optional name for the layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'LinearToMelSpectrogram':
       return LinearToMelSpectrogram(self, name=self.name)
 
@@ -1423,7 +1466,7 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
       input_shape: types.ShapeLike,
       *,
       constants: types.Constants | None = None,
-  ) -> types.ShapeLike:
+  ) -> types.Shape:
     if not input_shape:
       raise ValueError(
           f'{self} requires input with at least rank 1, got: {input_shape}'
@@ -1459,7 +1502,9 @@ class LinearToMelSpectrogram(types.PreservesType, types.Stateless):
     )
 
 
-class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
+class Delay(
+    types.PreservesShape, types.PreservesType, types.SequenceLayer, spec.Delay
+):
   """A layer that delays its input by `length` timesteps.
 
   In contrast to sl.Lookahead, which drops `length` timesteps from the start of
@@ -1468,7 +1513,7 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Delay.Config):
     """Config for Delay layer."""
 
     # The non-negative length of the delay to apply. A length of zero is a
@@ -1484,6 +1529,7 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     # An optional name for the layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'Delay':
       return Delay(self, name=self.name)
 
@@ -1569,7 +1615,12 @@ class Delay(types.PreservesShape, types.PreservesType, types.SequenceLayer):
       return x
 
 
-class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
+class Lookahead(
+    types.PreservesShape,
+    types.PreservesType,
+    types.SequenceLayer,
+    spec.Lookahead,
+):
   """A layer that drops the first `length` timesteps from its input.
 
   In contrast to sl.Delay, which inserts `length` invalid timesteps at the start
@@ -1578,7 +1629,7 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Lookahead.Config):
     """Config for Lookahead layer."""
 
     # The non-negative length of the lookahead to apply. A length of zero is a
@@ -1590,6 +1641,7 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
     # An optional name for the layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'Lookahead':
       return Lookahead(self, name=self.name)
 
@@ -1664,11 +1716,13 @@ class Lookahead(types.PreservesShape, types.PreservesType, types.SequenceLayer):
       return x
 
 
-class Window(types.PreservesShape, types.PreservesType, types.Stateless):
+class Window(
+    types.PreservesShape, types.PreservesType, types.Stateless, spec.Window
+):
   """Applies a window function as in the STFT/InverseSTFT."""
 
   @dataclasses.dataclass(frozen=True, slots=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(types.SequenceLayerConfig, spec.Window.Config):
     """Config of this layer."""
 
     # The axis onto which the window is applied.
@@ -1678,6 +1732,7 @@ class Window(types.PreservesShape, types.PreservesType, types.Stateless):
     # Optional name for this layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'Window':
       return Window(self, name=self.name)
 
@@ -1701,6 +1756,7 @@ class Window(types.PreservesShape, types.PreservesType, types.Stateless):
     return axis
 
   @types.check_layer
+  @override
   def layer(
       self,
       x: types.Sequence,

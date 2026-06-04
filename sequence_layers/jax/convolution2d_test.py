@@ -20,10 +20,12 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import convolution
 from sequence_layers.jax import normalization
 from sequence_layers.jax import test_utils
 from sequence_layers.jax import utils
+from sequence_layers.specs import convolution_behaviors as spec
 
 
 class IdentityArrayConstraint(nn.Module):
@@ -51,7 +53,7 @@ class IdentityArrayFactory:
   output_factory = MakeableIdentityArrayConstraint()
 
 
-class Conv2DTest(test_utils.SequenceLayerTest):
+class Conv2DTest(spec.Conv2DTest, test_utils.SequenceLayerTest):
 
   @parameterized.product(
       kernel_size_strides_dilation_rate=(
@@ -320,7 +322,9 @@ class Conv2DTest(test_utils.SequenceLayerTest):
     self.verify_contract(l, x, training=False, grad_rtol=1e-5, grad_atol=1e-5)
 
 
-class Conv2DTransposeTest(test_utils.SequenceLayerTest):
+class Conv2DTransposeTest(
+    spec.Conv2DTransposeTest, test_utils.SequenceLayerTest
+):
 
   @parameterized.product(
       params=[

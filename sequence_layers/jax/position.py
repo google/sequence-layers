@@ -14,13 +14,16 @@
 """Position embeddings and timing signals."""
 
 import dataclasses
+from typing import override
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from sequence_layers.jax import types
 from sequence_layers.jax import utils
+from sequence_layers.specs import position as position_spec
 
 __all__ = (
     # go/keep-sorted start
@@ -31,26 +34,28 @@ __all__ = (
 
 
 class AddTimingSignal(
-    types.PreservesType, types.PreservesShape, types.SequenceLayer
+    types.PreservesType,
+    types.PreservesShape,
+    types.SequenceLayer,
+    position_spec.AddTimingSignal[types.Sequence, types.ChannelSpec],
 ):
   """Adds sinusoids at varying frequencies to the input channels dimension."""
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(position_spec.AddTimingSignal.Config):
     """Config for AddTimingSignal."""
 
+    # Stated explicitly for JAX documentation and IDE support
     min_timescale: float = 1.0
     max_timescale: float = 1.0e4
     trainable_scale: bool = False
-    # Channel axes over which the timing signal's entries should vary.
     axes: int | tuple[int, ...] | None = None
     sharding: types.Sharding | None = None
     param_dtype: types.DType = jnp.float32
-    # If true, only advances position counter for valid timesteps. If false, the
-    # position is determined by the physical length of the inputs.
     only_advance_position_for_valid_timesteps: bool = True
     name: str | None = None
 
+    @override
     def make(self) -> 'AddTimingSignal':
       return AddTimingSignal(self, name=self.name)
 
@@ -71,7 +76,7 @@ class AddTimingSignal(
       self.scale = None
 
   @nn.nowrap
-  def _check_inputs(self, input_spec: types.ShapeDType):
+  def _check_inputs(self, input_spec: types.ChannelSpec):
     if input_spec.dtype not in (
         jnp.float16,
         jnp.bfloat16,
@@ -92,7 +97,7 @@ class AddTimingSignal(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,
@@ -180,7 +185,12 @@ class AddTimingSignal(
 
 
 class ApplyRotaryPositionalEncoding(
-    types.PreservesType, types.PreservesShape, types.SequenceLayer
+    types.PreservesType,
+    types.PreservesShape,
+    types.SequenceLayer,
+    position_spec.ApplyRotaryPositionalEncoding[
+        types.Sequence, types.ChannelSpec
+    ],
 ):
   """Applies Rotary Positional Encodings (RoPE) to the sequence.
 
@@ -189,25 +199,18 @@ class ApplyRotaryPositionalEncoding(
   """
 
   @dataclasses.dataclass(frozen=True)
-  class Config(types.SequenceLayerConfig):
+  class Config(position_spec.ApplyRotaryPositionalEncoding.Config):
     """Config for ApplyRotaryPositionalEncoding."""
 
+    # Stated explicitly for JAX documentation and IDE support
     max_wavelength: float
     axis: int = -1
-    # If true, only advances position counter for valid timesteps. If false, the
-    # position is determined by the physical length of the inputs.
     only_advance_position_for_valid_timesteps: bool = True
-    # Whether RoPE should be applied with positions in at least float32. This
-    # option is for backwards compatibility. True is the recommended value.
     positions_in_at_least_fp32: bool = True
-    # If specified, the [batch_size, time] jnp.int32 position used for computing
-    # RoPE will be read from the constants dictionary with this name. Otherwise,
-    # the physical position in the array is used. If specified,
-    # only_advance_position_for_valid_timesteps has no effect.
     positions_name: str | None = None
-    # An optional name for the layer.
     name: str | None = None
 
+    @override
     def make(self) -> 'ApplyRotaryPositionalEncoding':
       return ApplyRotaryPositionalEncoding(self, name=self.name)
 
@@ -231,7 +234,7 @@ class ApplyRotaryPositionalEncoding(
       return {0: (0, 0)}
 
   @nn.nowrap
-  def _check_inputs(self, input_spec: types.ShapeDType):
+  def _check_inputs(self, input_spec: types.ChannelSpec):
     if input_spec.dtype not in (
         jnp.float16,
         jnp.bfloat16,
@@ -262,7 +265,7 @@ class ApplyRotaryPositionalEncoding(
   def get_initial_state(
       self,
       batch_size: int,
-      input_spec: types.ShapeDType,
+      input_spec: types.ChannelSpec,
       *,
       training: bool,
       constants: types.Constants | None = None,
