@@ -98,8 +98,20 @@ class SerialCombinatorMixin:
 
   @property
   def layers(self) -> list[types.SequenceLayer]:
-    """Returns the list of layers in the serial combinator."""
-    raise NotImplementedError()
+    """Returns the list of layers in the serial combinator.
+
+    MLX nn.Module requires submodules to be stored in public attributes (without
+    a leading underscore) to be tracked for parameter collection. However,
+    because 'layers' is defined as a read-only property in the spec, we cannot
+    assign to 'self.layers' directly in __init__.
+
+    To satisfy both constraints, subclasses must store their child layers in the
+    public attribute 'self.mlx_layers' (which MLX will track), and this property
+    will return it.
+    """
+    if not hasattr(self, 'mlx_layers'):
+      raise AttributeError("self.mlx_layers backing attribute not initialized")
+    return self.mlx_layers
 
   @property
   def supports_step(self):
@@ -213,12 +225,8 @@ class SerialModules(
 
   def __init__(self, layers: _Sequence[types.SequenceLayer]):
     super().__init__()
-    self._layers = list(layers)
-
-  @property
-  @override
-  def layers(self) -> list[types.SequenceLayer]:
-    return self._layers
+    # Store in mlx_layers to enable MLX parameter tracking
+    self.mlx_layers = list(layers)
 
 
 class Serial(
@@ -257,13 +265,10 @@ class Serial(
         if isinstance(name_opt, str):
           name = name_opt
       self._layer_names.append(name)
-      setattr(self, name, l)
-      setattr(self, f'layers_{i}', l)
+    # Store in mlx_layers to enable MLX parameter tracking
+    self.mlx_layers = layers
 
-  @property
-  @override
-  def layers(self) -> list[types.SequenceLayer]:
-    return [getattr(self, name) for name in self._layer_names]
+
 
   @classmethod
   def from_config(cls, config, backend='mlx'):

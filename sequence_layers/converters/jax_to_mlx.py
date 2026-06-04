@@ -243,7 +243,7 @@ def _load_serial(mlx_serial, linen_params, config, batch_stats=None):
     child_bs = batch_stats.get(key, {}) if batch_stats else None
 
     _load_config(
-        getattr(mlx_serial, name),
+        mlx_serial.layers[i],
         child_params,
         layer_config,
         batch_stats=child_bs,
@@ -326,7 +326,7 @@ def _load_residual(mlx_residual, linen_params, config, batch_stats=None):
     child_bs = batch_stats.get(key, {}) if batch_stats else None
 
     _load_config(
-        getattr(body, name),
+        body.layers[i],
         child_params,
         layer_config,
         batch_stats=child_bs,
