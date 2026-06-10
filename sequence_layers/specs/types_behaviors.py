@@ -438,6 +438,43 @@ class SteppableTest(SequenceLayerTest):
     class DefaultSteppable(DefaultTestLayer, backend_sl.types.Steppable):
       """Mock layer for testing."""
 
+      @property
+      @override
+      def block_size(self) -> int:
+        return backend_sl.types.Steppable.block_size.fget(self)
+
+      @property
+      @override
+      def output_ratio(self) -> fractions.Fraction:
+        return backend_sl.types.Steppable.output_ratio.fget(self)
+
+      @property
+      @override
+      def supports_step(self) -> bool:
+        return backend_sl.types.Steppable.supports_step.fget(self)
+
+      @property
+      @override
+      def input_latency(self) -> int:
+        return backend_sl.types.Steppable.input_latency.fget(self)
+
+      @property
+      @override
+      def output_latency(self) -> int:
+        return backend_sl.types.Steppable.output_latency.fget(self)
+
+      @override
+      def get_accumulated_input_latency(self, input_latency: int) -> int:
+        return backend_sl.types.Steppable.get_accumulated_input_latency(
+            self, input_latency
+        )
+
+      @override
+      def get_accumulated_output_latency(self, output_latency: int) -> int:
+        return backend_sl.types.Steppable.get_accumulated_output_latency(
+            self, output_latency
+        )
+
       @override
       def layer_with_emits(self, *args, **kwargs):
         return backend_sl.types.Steppable.layer_with_emits(

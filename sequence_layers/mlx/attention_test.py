@@ -270,7 +270,7 @@ class LocalDotProductSelfAttentionTest(
         mlx_layer,
         attention.LocalDotProductSelfAttention,
     )
-    self.assertEqual(mlx_layer.block_size, 2)
+    self.assertEqual(mlx_layer.block_size, 1)
 
     x = test_utils.random_sequence(1, 8, 8)
     y = mlx_layer.layer(x, training=False)

@@ -613,6 +613,7 @@ class LocalDotProductSelfAttentionTest(test_utils.SequenceLayerTest):
     x = self.random_sequence(batch_size, time, channels)
     layer = self.init_layer(layer, x)
 
+    self.assertEqual(layer.block_size, 1)
     self.assertEqual(layer.output_ratio, 1)
     self.assertEqual(layer.name, 'local_dot_product_self_attention')
     self.assertEqual(

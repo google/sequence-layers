@@ -2398,12 +2398,6 @@ class LocalDotProductSelfAttention(
         kernel_init=kernel_init,
         bias_init=bias_init,
     )
-    self._block_size_config = config.block_size
-
-  @property
-  @override
-  def block_size(self):
-    return self._block_size_config
 
   @classmethod
   @override
