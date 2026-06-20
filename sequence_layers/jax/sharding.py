@@ -36,7 +36,7 @@ def shard(x: jax.Array, s: Sharding) -> jax.Array:
   """
   abstract_mesh = jax.sharding.get_abstract_mesh()
 
-  if s is None or abstract_mesh is None:
+  if s is None or abstract_mesh is None or not abstract_mesh.axis_names:
     return x
 
   x = jax.lax.with_sharding_constraint(

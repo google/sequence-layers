@@ -36,6 +36,7 @@ from sequence_layers.jax import sharding as sharding_lib
 from sequence_layers.jax import types
 from sequence_layers.jax import typing as jt
 from sequence_layers.jax import utils
+from sequence_layers.jax.types import HashableArray
 from sequence_layers.jax.types import MaskT
 from sequence_layers.jax.types import ValuesT
 from sequence_layers.specs import simple as spec
@@ -113,30 +114,6 @@ __all__ = (
     'Upsample2D',
     # go/keep-sorted end
 )
-
-
-def _to_tuple(x: complex | list[Any]) -> complex | tuple[Any, ...]:
-  if isinstance(x, list):
-    return tuple(_to_tuple(item) for item in x)
-  return x
-
-
-@dataclasses.dataclass(frozen=True)
-class HashableArray(spec.HashableArray):
-  """Hashable multidimensional array of tuples."""
-
-  data: complex | tuple[Any, ...]
-  dtype: np.dtype
-
-  @classmethod
-  def from_array(cls, x: np.ndarray) -> 'HashableArray':
-    x = np.asarray(x)
-    return HashableArray(_to_tuple(x.tolist()), x.dtype)
-
-  @override
-  def to_array(self) -> np.ndarray:
-    return np.asarray(self.data, dtype=self.dtype)
-
 
 def _to_array(x: complex | np.ndarray | HashableArray) -> np.ndarray:
   if isinstance(x, HashableArray):

@@ -60,6 +60,7 @@ __all__ = (
     'Emits',
     'Emitting',
     'ExpandedMaskT',
+    'HashableArray',
     'MASK_DTYPE',
     'MaskT',
     'MaskedSequence',
@@ -204,6 +205,29 @@ ARRAY_LIKE_TYPES = (
     np.ndarray,
     jax.core.ShapedArray,
 )
+
+def _to_tuple(x: complex | list[Any]) -> complex | tuple[Any, ...]:
+  if isinstance(x, list):
+    return tuple(_to_tuple(item) for item in x)
+  return x
+
+
+@dataclasses.dataclass(frozen=True)
+class HashableArray(spec.HashableArray):
+  """Hashable multidimensional array of tuples."""
+
+  data: complex | tuple[Any, ...]
+  dtype: np.dtype
+
+  @classmethod
+  def from_array(cls, x: np.ndarray) -> 'HashableArray':
+    x = np.asarray(x)
+    return HashableArray(_to_tuple(x.tolist()), x.dtype)
+
+  @override
+  def to_array(self) -> np.ndarray:
+    return np.asarray(self.data, dtype=self.dtype)
+
 
 PaddingMode = spec.PaddingMode
 PaddingModeString = spec.PaddingModeString
