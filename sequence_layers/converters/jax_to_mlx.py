@@ -143,14 +143,14 @@ def collect_all_params(module):
   def _recurse(obj, path):
     if isinstance(obj, mx.array):
       params[path] = obj
+    elif isinstance(obj, mlx_nn.Module):
+      _recurse(obj.parameters(), path)
     elif isinstance(obj, dict):
       for k, v in obj.items():
         _recurse(v, path + (k,))
     elif isinstance(obj, list):
       for i, v in enumerate(obj):
         _recurse(v, path + (str(i),))
-    elif isinstance(obj, mlx_nn.Module):
-      _recurse(obj.parameters(), path)
 
   _recurse(module, ())
   return params
