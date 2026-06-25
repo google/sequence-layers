@@ -567,7 +567,10 @@ class Scale(
       self, x, *, training: bool, constants=None
   ):
     """Scales the input sequence by a learned or fixed scale."""
-    return x.apply_values_masked(lambda v: v * self._scale)
+    s = self._scale
+    if isinstance(s, mx.array):
+      s = s.astype(x.dtype)
+    return x.apply_values_masked(lambda v: v * s)
 
 
 class Add(

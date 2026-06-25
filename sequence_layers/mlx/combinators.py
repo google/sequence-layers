@@ -96,22 +96,6 @@ class SerialCombinatorMixin:
   define a ``layers`` attribute containing a sequence of SequenceLayers.
   """
 
-  @property
-  def layers(self) -> list[types.SequenceLayer]:
-    """Returns the list of layers in the serial combinator.
-
-    MLX nn.Module requires submodules to be stored in public attributes (without
-    a leading underscore) to be tracked for parameter collection. However,
-    because 'layers' is defined as a read-only property in the spec, we cannot
-    assign to 'self.layers' directly in __init__.
-
-    To satisfy both constraints, subclasses must store their child layers in the
-    public attribute 'self.mlx_layers' (which MLX will track), and this property
-    will return it.
-    """
-    if not hasattr(self, 'mlx_layers'):
-      raise AttributeError("self.mlx_layers backing attribute not initialized")
-    return self.mlx_layers
 
   @property
   def supports_step(self):
@@ -172,8 +156,7 @@ class SerialCombinatorMixin:
     states = []
     for l in self.layers:
       states.append(
-          mlx_utils.call_get_initial_state(
-              l,
+          l.get_initial_state(
               batch_size,
               curr_spec,
               training=training,
@@ -190,8 +173,8 @@ class SerialCombinatorMixin:
     """Process layer-wise through all child layers, accumulating emits."""
     emits = {}
     for i, l in enumerate(self.layers):
-      x, e = mlx_utils.call_layer_with_emits(
-          l, x, training=training, constants=constants, **kwargs
+      x, e = l.layer_with_emits(
+          x, training=training, constants=constants, **kwargs
       )
       emits[f'layer_{i}'] = e
     return x, emits
@@ -203,8 +186,8 @@ class SerialCombinatorMixin:
     new_state = []
     emits = {}
     for i, (l, s) in enumerate(zip(self.layers, state)):
-      x, s, e = mlx_utils.call_step_with_emits(
-          l, x, s, training=training, constants=constants, **kwargs
+      x, s, e = l.step_with_emits(
+          x, s, training=training, constants=constants, **kwargs
       )
       new_state.append(s)
       emits[f'layer_{i}'] = e
@@ -225,8 +208,7 @@ class SerialModules(
 
   def __init__(self, layers: _Sequence[types.SequenceLayer]):
     super().__init__()
-    # Store in mlx_layers to enable MLX parameter tracking
-    self.mlx_layers = list(layers)
+    self.layers = list(layers)
 
 
 class Serial(
@@ -265,8 +247,7 @@ class Serial(
         if isinstance(name_opt, str):
           name = name_opt
       self._layer_names.append(name)
-    # Store in mlx_layers to enable MLX parameter tracking
-    self.mlx_layers = layers
+    self.layers = layers
 
 
 
@@ -354,16 +335,14 @@ class Residual(types.Emitting, spec.Residual[types.Sequence, types.ShapeDType]):
       constants=None,
       **kwargs,
   ):
-    body_state = mlx_utils.call_get_initial_state(
-        self.body,
+    body_state = self.body.get_initial_state(
         batch_size,
         input_spec,
         training=training,
         constants=constants,
         **kwargs,
     )
-    shortcut_state = mlx_utils.call_get_initial_state(
-        self.shortcut,
+    shortcut_state = self.shortcut.get_initial_state(
         batch_size,
         input_spec,
         training=training,
@@ -382,11 +361,11 @@ class Residual(types.Emitting, spec.Residual[types.Sequence, types.ShapeDType]):
   def layer_with_emits(
       self, x, *, training: bool = False, constants=None, **kwargs
   ):
-    y_body, body_emits = mlx_utils.call_layer_with_emits(
-        self.body, x, training=training, constants=constants, **kwargs
+    y_body, body_emits = self.body.layer_with_emits(
+        x, training=training, constants=constants, **kwargs
     )
-    y_shortcut, shortcut_emits = mlx_utils.call_layer_with_emits(
-        self.shortcut, x, training=training, constants=constants, **kwargs
+    y_shortcut, shortcut_emits = self.shortcut.layer_with_emits(
+        x, training=training, constants=constants, **kwargs
     )
     y = self._residual_fn(y_body, y_shortcut)
     return y, (body_emits, shortcut_emits)
@@ -396,16 +375,14 @@ class Residual(types.Emitting, spec.Residual[types.Sequence, types.ShapeDType]):
       self, x, state: Any, *, training: bool = False, constants=None, **kwargs
   ):
     body_state, shortcut_state = state
-    y_body, body_state, body_emits = mlx_utils.call_step_with_emits(
-        self.body,
+    y_body, body_state, body_emits = self.body.step_with_emits(
         x,
         body_state,
         training=training,
         constants=constants,
         **kwargs,
     )
-    y_shortcut, shortcut_state, shortcut_emits = mlx_utils.call_step_with_emits(
-        self.shortcut,
+    y_shortcut, shortcut_state, shortcut_emits = self.shortcut.step_with_emits(
         x,
         shortcut_state,
         training=training,
@@ -523,8 +500,7 @@ class Repeat(types.Emitting, spec.Repeat[types.Sequence, types.ShapeDType]):
     curr_spec = input_spec
     for l in self.layers:
       states.append(
-          mlx_utils.call_get_initial_state(
-              l,
+          l.get_initial_state(
               batch_size,
               curr_spec,
               training=training,
@@ -540,8 +516,8 @@ class Repeat(types.Emitting, spec.Repeat[types.Sequence, types.ShapeDType]):
   ):
     emits = {}
     for i, l in enumerate(self.layers):
-      x, e = mlx_utils.call_layer_with_emits(
-          l, x, training=training, constants=constants, **kwargs
+      x, e = l.layer_with_emits(
+          x, training=training, constants=constants, **kwargs
       )
       emits[f'repeat_{i}'] = e
     return x, emits
@@ -553,8 +529,8 @@ class Repeat(types.Emitting, spec.Repeat[types.Sequence, types.ShapeDType]):
     new_state = []
     emits = {}
     for i, (l, s) in enumerate(zip(self.layers, state)):
-      x, s, e = mlx_utils.call_step_with_emits(
-          l, x, s, training=training, constants=constants, **kwargs
+      x, s, e = l.step_with_emits(
+          x, s, training=training, constants=constants, **kwargs
       )
       new_state.append(s)
       emits[f'repeat_{i}'] = e
@@ -664,8 +640,7 @@ class Parallel(types.Emitting, spec.Parallel[types.Sequence, types.ShapeDType]):
     states = []
     for l in self.layers:
       states.append(
-          mlx_utils.call_get_initial_state(
-              l,
+          l.get_initial_state(
               batch_size,
               input_spec,
               training=training,
@@ -682,8 +657,8 @@ class Parallel(types.Emitting, spec.Parallel[types.Sequence, types.ShapeDType]):
     outputs = []
     emits = {}
     for i, l in enumerate(self.layers):
-      y, e = mlx_utils.call_layer_with_emits(
-          l, x, training=training, constants=constants, **kwargs
+      y, e = l.layer_with_emits(
+          x, training=training, constants=constants, **kwargs
       )
       outputs.append(y)
       emits[f'parallel_{i}'] = e
@@ -698,8 +673,8 @@ class Parallel(types.Emitting, spec.Parallel[types.Sequence, types.ShapeDType]):
     new_state = []
     emits = {}
     for i, (l, s) in enumerate(zip(self.layers, state)):
-      y, s, e = mlx_utils.call_step_with_emits(
-          l, x, s, training=training, constants=constants, **kwargs
+      y, s, e = l.step_with_emits(
+          x, s, training=training, constants=constants, **kwargs
       )
       outputs.append(y)
       new_state.append(s)

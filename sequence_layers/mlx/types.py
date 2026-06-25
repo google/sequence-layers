@@ -168,8 +168,8 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
   mask: MaskT
 
   def __init__(self, values: ValuesT, mask: MaskT):
-    self.values = mx.array(values) if not isinstance(values, mx.array) else values
-    self.mask = mx.array(mask) if not isinstance(mask, mx.array) else mask
+    self.values = values if type(values) is mx.array else mx.array(values)
+    self.mask = mask if type(mask) is mx.array else mx.array(mask)
 
   @property
   @override
@@ -270,10 +270,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
       **kwargs,
   ) -> 'Sequence[NewValuesT, MaskT]':
     """Transforms values, preserving masked state."""
-    return cast(
-        'Sequence[NewValuesT, MaskT]',
-        type(self)(values_fn(self.values, *args, **kwargs), self.mask),
-    )
+    return type(self)(values_fn(self.values, *args, **kwargs), self.mask)
 
   @override
   def apply(
@@ -295,7 +292,7 @@ class Sequence[ValuesT: mx.array, MaskT: mx.array](
   ) -> 'Sequence[NewValuesT, NewMaskT]':
     """Transforms values/mask, preserving masked state."""
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
-    return cast('Sequence[NewValuesT, NewMaskT]', type(self)(values, mask))
+    return type(self)(values, mask)
 
   @override
   def astype(self: SequenceSelf, dtype: DType | None) -> SequenceSelf:
@@ -379,10 +376,7 @@ class MaskedSequence[ValuesT: mx.array, MaskT: mx.array](
       *args,
       **kwargs,
   ) -> 'MaskedSequence[NewValuesT, MaskT]':
-    return cast(
-        'MaskedSequence[NewValuesT, MaskT]',
-        type(self)(values_fn(self.values, *args, **kwargs), self.mask),
-    )
+    return type(self)(values_fn(self.values, *args, **kwargs), self.mask)
 
   @override
   def apply_masked(
@@ -392,9 +386,7 @@ class MaskedSequence[ValuesT: mx.array, MaskT: mx.array](
       **kwargs,
   ) -> 'MaskedSequence[NewValuesT, NewMaskT]':
     values, mask = apply_fn(self.values, self.mask, *args, **kwargs)
-    return cast(
-        'MaskedSequence[NewValuesT, NewMaskT]', type(self)(values, mask)
-    )
+    return type(self)(values, mask)
 
   @override
   def mask_invalid(self, mask_value: complex | None = None) -> Sequence:
@@ -424,7 +416,7 @@ def mask_invalid(
     )
     result_type: type[Sequence[mx.array, mx.array]] = Sequence
   masked_values = mx.where(expanded_mask, self.values, masked_values)
-  return cast(Sequence[ValuesT, MaskT], result_type(masked_values, self.mask))
+  return result_type(masked_values, self.mask)
 
 
 # Defined outside of Sequence so mask_invalid can return MaskedSequence.

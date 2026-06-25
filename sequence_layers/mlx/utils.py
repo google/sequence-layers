@@ -224,49 +224,22 @@ def make_layer(config, backend='mlx') -> Any:
 def call_layer_with_emits(
     layer, x, *, training=False, constants=None, **kwargs
 ):
-  """Calls layer_with_emits safely, handling signature mismatches in non-abstractified layers."""
-  sig = inspect.signature(layer.layer_with_emits)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.layer_with_emits(x, **call_kwargs)
+  """Calls layer_with_emits, forwarding training and constants."""
+  return layer.layer_with_emits(x, training=training, constants=constants, **kwargs)
 
 
 def call_step_with_emits(
     layer, x, state, *, training=False, constants=None, **kwargs
 ):
-  """Calls step_with_emits safely, handling signature mismatches in non-abstractified layers."""
-  sig = inspect.signature(layer.step_with_emits)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.step_with_emits(x, state, **call_kwargs)
+  """Calls step_with_emits, forwarding training and constants."""
+  return layer.step_with_emits(x, state, training=training, constants=constants, **kwargs)
 
 
 def call_get_initial_state(
     layer, batch_size, input_spec, *, training=False, constants=None, **kwargs
 ):
-  """Calls get_initial_state safely, handling signature mismatches in non-abstractified layers."""
-  sig = inspect.signature(layer.get_initial_state)
-  call_kwargs = {}
-  if 'training' in sig.parameters:
-    call_kwargs['training'] = training
-  if 'constants' in sig.parameters:
-    call_kwargs['constants'] = constants
-  for k, v in kwargs.items():
-    if k in sig.parameters:
-      call_kwargs[k] = v
-  return layer.get_initial_state(batch_size, input_spec, **call_kwargs)
+  """Calls get_initial_state, forwarding training and constants."""
+  return layer.get_initial_state(batch_size, input_spec, training=training, constants=constants, **kwargs)
 
 
 def _patch_spec_configs():

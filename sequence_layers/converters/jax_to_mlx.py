@@ -175,7 +175,19 @@ def register_converter(config_cls, mapping_or_fn):
 
 
 def _load_config(mlx_module, linen_params, config, batch_stats=None):
-  """Recursively load params guided by config type."""
+  """Recursively load params guided by config type.
+
+  Contract: the config tree must be identical across JAX and MLX — i.e.,
+  the same config produced both models, with only the backend import
+  swapped (``sequence_layers.jax`` → ``sequence_layers.mlx``). Under this
+  contract, both name-based and positional matching in ``_load_serial`` /
+  ``_load_residual`` are correct.
+
+  If your model has structural divergence between JAX and MLX (e.g., a layer
+  that exists on one side but not the other), register a custom converter
+  via ``register_converter`` that remaps JAX param keys before delegating
+  to ``load_linen_params``.
+  """
   inner = mlx_module
   inner = _get_inner(inner)
 
@@ -221,11 +233,6 @@ def _load_config(mlx_module, linen_params, config, batch_stats=None):
 
 def _load_serial(mlx_serial, linen_params, config, batch_stats=None):
   """Load Serial: try name first, fallback to layers_{i}."""
-  print(
-      f"\n[LOAD_SERIAL] mlx_module={mlx_serial.__class__.__name__}"
-      f" (name={config.name})"
-  )
-  print(f"  linen_params keys: {list(linen_params.keys())}")
   for i, layer_config in enumerate(config.layers):
     name = mlx_serial._layer_names[i]
 
@@ -235,10 +242,6 @@ def _load_serial(mlx_serial, linen_params, config, batch_stats=None):
     else:
       key = f"layers_{i}"
 
-    print(
-        f"  -> Index {i}: mlx_name={name} -> JAX key={key} (JAX params exist:"
-        f" {key in linen_params})"
-    )
     child_params = linen_params.get(key, {})
     child_bs = batch_stats.get(key, {}) if batch_stats else None
 
@@ -252,22 +255,12 @@ def _load_serial(mlx_serial, linen_params, config, batch_stats=None):
 
 def _load_parallel(mlx_parallel, linen_params, config, batch_stats=None):
   """Load Parallel: walk layer names or fallback to layers_{i}."""
-  print(
-      f"\n[LOAD_PARALLEL] mlx_module={mlx_parallel.__class__.__name__}"
-      f" (name={config.name})"
-  )
-  print(f"  linen_params keys: {list(linen_params.keys())}")
   for i, layer_config in enumerate(config.layers):
     name = getattr(layer_config, "name", None)
     if name and name in linen_params:
       key = name
     else:
       key = f"layers_{i}"
-    print(
-        f"  -> Index {i}: Parallel branch"
-        f" config={layer_config.__class__.__name__} config_name={name} -> JAX"
-        f" key={key} (JAX params exist: {key in linen_params})"
-    )
     child_params = linen_params.get(key, {})
     child_bs = batch_stats.get(key, {}) if batch_stats else None
     _load_config(
